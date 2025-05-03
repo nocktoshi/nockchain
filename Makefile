@@ -2,7 +2,7 @@
 export RUST_BACKTRACE := full
 export RUST_LOG := info,nockchain=debug,nockchain_libp2p_io=info,libp2p=info,libp2p_quic=info
 export MINIMAL_LOG_FORMAT := true
-
+export MINING_PUBKEY := EHmKL2U3vXfS5GYAY5aVnGdukfDWwvkQPCZXnjvZVShsSQi3UAuA4tQQpVwGJMzc9FfpTY8pLDkqhBGfWutiF4prrCktUH9oAWJxkXQBzAavKDc95NR3DjmYwnnw8GuugnK
 
 ## Build everything
 .PHONY: build
@@ -52,6 +52,18 @@ build-hoon-all: ensure-dirs build-trivial-new $(HOON_TARGETS)
 .PHONY: build-hoon
 build-hoon: ensure-dirs $(HOON_TARGETS)
 	$(call show_env_vars)
+
+.PHONY: run-nockchain-leader
+run-nockchain-leader:  # Run nockchain mode in leader mode
+	$(call show_env_vars)
+	mkdir -p test-leader && cd test-leader && RUST_BACKTRACE=1 cargo run --release --bin nockchain -- --fakenet --genesis-leader --npc-socket nockchain.sock --mining-pubkey $(MINING_PUBKEY) --bind /ip4/0.0.0.0/udp/3005/quic-v1 --peer /ip4/127.0.0.1/udp/3006/quic-v1 --new-peer-id --no-default-peers
+
+.PHONY: run-nockchain-follower
+run-nockchain-follower:  # Run nockchain mode in follower mode
+	$(call show_env_vars)
+	mkdir -p test-follower && cd test-follower && RUST_BACKTRACE=1 cargo run --release --bin nockchain -- --fakenet --genesis-watcher --npc-socket nockchain.sock --mining-pubkey $(MINING_PUBKEY) --bind /ip4/0.0.0.0/udp/3006/quic-v1 --peer /ip4/127.0.0.1/udp/3005/quic-v1 --new-peer-id --no-default-peers
+
+
 
 HOON_SRCS := $(find hoon -type file -name '*.hoon')
 

@@ -26,6 +26,20 @@ make build-hoon-all
 make build
 ```
 
+To run a Nockchain node that publishes the genesis block:
+
+```
+make run-nockchain-leader
+```
+
+
+To run a Nockchain node that waits for the genesis block:
+
+```
+make run-nockchain-follower
+```
+
+
 To run the test suite:
 
 ```
