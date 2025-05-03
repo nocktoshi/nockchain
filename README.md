@@ -22,7 +22,7 @@ make install-choo
 To build Nockchain:
 
 ```
-make hoon-all
+make build-hoon-all
 make build
 ```
 
