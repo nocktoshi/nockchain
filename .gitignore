@@ -1,0 +1,6 @@
+.data.*
+test-*
+.nockchain-identity
+.nockchain-identity.peerid
+target
+assets/*.jam
