@@ -55,11 +55,11 @@ ensure-dirs:
 	mkdir -p hoon
 	mkdir -p assets
 
-.PHONY: build-trivial-new
-build-trivial-new: ensure-dirs
+.PHONY: build-trivial
+build-trivial: ensure-dirs
 	$(call show_env_vars)
 	echo '%trivial' > hoon/trivial.hoon
-	hoonc --new --arbitrary hoon/trivial.hoon
+	hoonc --arbitrary hoon/trivial.hoon
 
 HOON_TARGETS=assets/dumb.jam assets/wal.jam
 
@@ -73,7 +73,7 @@ nuke-assets:
 	rm -f assets/*.jam
 
 .PHONY: build-hoon-all
-build-hoon-all: nuke-assets update-hoonc ensure-dirs build-trivial-new $(HOON_TARGETS)
+build-hoon-all: nuke-assets update-hoonc ensure-dirs build-trivial $(HOON_TARGETS)
 	$(call show_env_vars)
 
 .PHONY: build-hoon
