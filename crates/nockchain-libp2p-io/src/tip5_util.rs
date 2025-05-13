@@ -1,7 +1,7 @@
 use bs58;
-use crown::nockapp::NockAppError;
 use ibig::{ubig, UBig};
-use sword::noun::Noun;
+use nockapp::NockAppError;
+use nockvm::noun::Noun;
 //TODO all this stuff would be useful as jets, which mostly just requires
 //using the Atom::as_ubig with the NockStack instead of ibig's heap version
 // which we use to avoid having a NockStack sitting around.
@@ -70,15 +70,15 @@ pub fn extract_5_tuple(tuple_cell: Noun) -> Result<Vec<Noun>, NockAppError> {
 
 #[cfg(test)]
 mod tests {
-    use crown::noun::slab::NounSlab;
-    use sword::noun::{D, T};
+    use nockapp::noun::slab::NounSlab;
+    use nockvm::noun::{D, T};
 
     use super::*;
 
     #[test]
     #[cfg_attr(miri, ignore)] // ibig has a memory leak so miri fails this test
     fn test_tip5_hash_to_base58() {
-        use sword::noun::Atom;
+        use nockvm::noun::Atom;
         // Create a NounSlab to use as an allocator
         let mut slab = NounSlab::new();
 

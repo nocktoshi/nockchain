@@ -53,8 +53,13 @@
     ::  has not been ~m2, so leave timestamp alone
     m
   =.  timestamp.candidate-block.m  (time-in-secs:page:t now)
-  ::~&  >
-  ::  "candidate block timestamp updated: {(scow %$ timestamp.candidate-block.m)}"
+  =/  print-var
+    %-  trip
+    ^-  @t
+    %^  cat  3
+      'candidate block timestamp updated: '
+    (scot %$ timestamp.candidate-block.m)
+  ~>  %slog.[0 [%leaf print-var]]
   m
 ::
 ::  +heard-new-tx: potentially changes candidate block in reaction to a raw-tx
@@ -122,21 +127,21 @@
   ?~  heaviest-block.c
     ::  genesis block has its own codepath, which is why this conditional does not attempt
     ::  to generate the genesis block
-    ::~&  >>>
-    ::  "attempted to generate new candidate block when we have no genesis block"
+    ~>  %slog.[0 leaf+"attempted to generate new candidate block when we have no genesis block"]
     m
   ?:  =(u.heaviest-block.c parent.candidate-block.m)
-    ::~&  >
-    ::  "heaviest block unchanged, do not generate new candidate block"
+    ~>  %slog.[0 leaf+"heaviest block unchanged, do not generate new candidate block"]
     m
   ?:  =(*(z-set lock:t) pubkeys.m)
-    ::  ~&  >  "no pubkey(s) set so no new candidate block will be generated"
+    ~>  %slog.[0 leaf+"no pubkey(s) set so no new candidate block will be generated"]
     m
-  ::~&  >
-  ::  """
-  ::  generating new candidate block with parent
-  ::  {(trip (to-b58:hash:t u.heaviest-block.c))}
-  ::  """
+  =/  print-var
+    %-  trip
+    ^-  @t
+    %^  cat  3
+      'generating new candidate block with parent: '
+    (to-b58:hash:t u.heaviest-block.c)
+  ~>  %slog.[0 [%leaf print-var]]
   =.  candidate-block.m
     %-  new:page:t
     :*  (to-page:local-page:t (~(got z-by blocks.c) u.heaviest-block.c))

@@ -6,12 +6,12 @@ version.workspace = true
 edition.workspace = true
 
 [dependencies]
-choo.workspace = true
-crown.workspace = true
+hoonc.workspace = true
+nockapp.workspace = true
 kernels = { workspace = true, features = ["dumb"] }
 nockchain-bitcoin-sync.workspace = true
-sword.workspace = true
-sword_macros.workspace = true
+nockvm.workspace = true
+nockvm_macros.workspace = true
 
 bitcoincore-rpc.workspace = true
 bs58.workspace = true

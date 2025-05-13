@@ -5,44 +5,64 @@
 
 We believe the future of blockchains is lightweight trustless settlement of heavyweight verifiable computation. The only way to get there is by replacing verifiability-via-public-replication with verifiability-via-private-proving. Proving happens off-chain; verification is on-chain.
 
+*Nockchain is entirely experimental and many parts are unaudited. We make no representations or guarantees as to the behavior of this software.*
+
 
 ## Setup
 
 Install `rustup` by following their instructions at: [https://rustup.rs/](https://rustup.rs/)
 
-Install `choo`, the Hoon compiler:
+Install `hoonc`, the Hoon compiler:
 
 ```
-make install-choo
+make install-hoonc
 ```
 
-
-## Build
-
-To build Nockchain:
+To build the Nockchain and the wallet binaries and their required assets:
 
 ```
-make build-hoon-all
 make build
 ```
 
-To run a Nockchain node that publishes the genesis block:
+## Install Wallet
+
+After you've run the setup and build commands, install the wallet:
+
+```
+make install-nockchain-wallet
+```
+
+To run the wallet, see the nockchain-wallet [README](./crates/nockchain-wallet/README.md).
+
+
+## Install Nockchain
+
+After you've run the setup and build commands, install the wallet:
+
+```
+make install-nockchain
+```
+
+
+## Testing Nodes
+
+To run a test Nockchain node that publishes the genesis block:
 
 ```
 make run-nockchain-leader
 ```
 
 
-To run a Nockchain node that waits for the genesis block:
+To run a test Nockchain node that waits for the genesis block:
 
 ```
 make run-nockchain-follower
 ```
 
-To run the wallet, see the wallet [README](./crates/wallet/README.md).
 
+## Testing utilities
 
-To run the test suite:
+To run the unit test suite:
 
 ```
 make test

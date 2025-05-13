@@ -32,12 +32,10 @@
   ::
   ::TODO make referentially transparent by requiring event number in the scry path
   ++  peek
-    |=  arg=*
+    |=  arg=path
     ^-  (unit (unit *))
-    =/  pax  ((soft path) arg)
-    ?~  pax  ~|(invalid-peek+pax !!)
-    =/  =(pole)  u.pax
-    ?+  pole  ~|(invalid-peek+pax !!)
+    =/  =(pole)  arg
+    ?+  pole  ~
     ::
         [%blocks ~]
       ^-  (unit (unit (z-map block-id:t page:t)))
@@ -142,11 +140,10 @@
     =/  cause  ((soft cause:dk) dat)
     ?~  cause
       ~>  %slog.[0 [%leaf "error: badly formatted cause, should never occur"]]
-      ~&  ;;(@t -.dat)
-      ~&  ;;(@t -.+.dat)
+      ~&  ;;([thing=@t ver=@ type=@t] [-.dat +<.dat +>-.dat])
       `k
     =/  cause  u.cause
-    ~&  "inner dumbnet cause: {<[-.cause -.+.cause]>}"
+    ::~&  "inner dumbnet cause: {<[-.cause -.+.cause]>}"
     =^  effs  k
       ?+    wir  ~|("unsupported wire: {<wir>}" !!)
           [%poke src=?(%nc %timer %sys %miner %npc) ver=@ *]
@@ -174,13 +171,13 @@
       ?~  btc-data.c.k
         ~>  %slog.[0 leaf+"btc-data not set, crashing"]
         !!
-      ?.  (genesis-test:page:t pag genesis-target:t u.btc-data.c.k genesis-seal.c.k)
+      ?.  (check-genesis pag u.btc-data.c.k genesis-seal.c.k)
         ::  is not a genesis block, throw it out and inform the king. note this
         ::  must be a %liar effect since genesis blocks have no powork and are
         ::  thus cheap to make, so we cannot trust their block-id.
         [[(liar-effect wir %not-a-genesis-block)]~ k]
       ::  heard valid genesis block
-      ~>  %slog.[0 leaf+"heard valid genesis block!"]
+      ~>  %slog.[0 leaf+"validated genesis block!"]
       (new-block now pag *tx-acc:t)
     ::
     ++  heard-block
@@ -261,11 +258,10 @@
         %+  snoc  block-effs
         [%liar-block-id digest.pag +.check-page-without-txs]
       ::
-      =/  pow-check=(reason:dk ~)  (check-pow pag)
-      ?:  ?=(%.n -.pow-check)
+      ?.  (check-pow pag)
         :_  k
         %+  snoc  block-effs
-        [%liar-block-id digest.pag +.pow-check]
+        [%liar-block-id digest.pag %failed-pow-check]
       ::
       ::  tell driver we have seen this block so don't send it back to the kernel again
       =.  block-effs
@@ -290,7 +286,7 @@
         ?:  %+  compare-heaviness:page:t  pag
             (~(got z-by blocks.c.k) (need heaviest-block.c.k))
           ~>  %slog.[0 %leaf^"gossip new heaviest block, have not validated txs yet"]
-          :-  [%gossip %heard-block pag]
+          :-  [%gossip %0 %heard-block pag]
           block-effs
         block-effs
       ::
@@ -354,46 +350,77 @@
       :_  k
       [%request %block %by-height +(page-number.u.latest-known)]~
     ::
-    ++  check-pow
-      |=  pag=page:t
-      ^-  (reason:dk ~)
-      ?.  check-pow-flag:t
-        ::  this case only happens during testing
-        [%.y ~]
-      ?~  pow.pag
-        [%.n %pow-empty]
-      ::
-      ::  validate that powork puzzle in the proof is correct.
-      =/  check-pow-puzzle  (check-pow-puzzle u.pow.pag pag)
-      ?.  -.check-pow-puzzle
-        check-pow-puzzle
-      ::
-      ::  validate the powork. this is done separately since the
-      ::  other checks are much cheaper.
-      =/  pow-res=?  (verify:nv u.pow.pag ~ eny)
-      ?.  pow-res
-        [%.n %pow-failed-to-verify]
-      [%.y ~]
-    ::
     ++  check-duplicate-block
       |=  digest=block-id:t
       ?|  (~(has z-by blocks.c.k) digest)
           (~(has z-by pending-blocks.p.k) digest)
       ==
     ::
+    ++  check-genesis
+     |=  [pag=page:t =btc-hash:t =genesis-seal:t]
+     ^-  ?
+     =/  check-pow-hash=?
+      ?.  check-pow-flag:t
+         ::  this case only happens during testing
+         ::~&  "skipping pow hash check for {(trip (to-b58:hash:t digest.pag))}"
+         %.y
+       %-  check-target:mine
+       :_  target.pag
+       (digest-to-atom:tip5:zeke (hash-proof:zeke (need pow.pag)))
+     =/  check-pow-valid=?  (check-pow pag)
+     =/  check-txs=?  =(tx-ids.pag *(z-set tx-id:t))
+     =/  check-epoch=?  =(epoch-counter.pag *@)
+     =/  check-target=?  =(target.pag genesis-target:t)
+     =/  check-work=?  =(accumulated-work.pag (compute-work:page:t genesis-target:t))
+     =/  check-coinbase=?  =(coinbase.pag *(z-map lock:t @))
+     =/  check-height=?  =(height.pag *page-number:t)
+     =/  check-btc-hash=?
+       =(parent.pag (hash:btc-hash:t btc-hash))
+     ::
+     ::  check that the message matches what's in the seal
+     =/  check-msg=?
+       ?~  genesis-seal  %.y
+       =((hash:page-msg:t msg.pag) msg-hash.u.genesis-seal)
+     ?&  check-pow-hash
+         check-pow-valid
+         check-txs
+         check-epoch
+         check-target
+         check-work
+         check-coinbase
+         check-height
+         check-msg
+         check-btc-hash
+     ==
+    ++  check-pow
+      |=  pag=page:t
+      ^-  ?
+      ?.  check-pow-flag:t
+        ~>  %slog.[0 leaf+"WARNING: check-pow-flag is off, skipping pow check"]
+        ::  this case only happens during testing
+        %.y
+      ?~  pow.pag
+        %.n
+      ::
+      ::  validate that powork puzzle in the proof is correct.
+      ?&  (check-pow-puzzle u.pow.pag pag)
+          ::
+          ::  validate the powork. this is done separately since the
+          ::  other checks are much cheaper.
+          (verify:nv u.pow.pag ~ eny)
+      ==
+    ::
     ++  check-pow-puzzle
       |=  [pow=proof:sp pag=page:t]
-      ^-  (reason:dk ~)
+      ^-  ?
       ?:  =((lent objects.pow) 0)
-        [%.n %pow-objects-empty]
+        %.n
       =/  puzzle  (snag 0 objects.pow)
       ?.  ?=(%puzzle -.puzzle)
-        [%.n %pow-puzzle-missing]
-      ?.  =((block-commitment:page:t pag) commitment.puzzle)
-        [%.n %pow-commitment-invalid]
-      ?.  =(pow-len:t len.puzzle)
-        [%.n %pow-length-invalid]
-      [%.y ~]
+        %.n
+      ?&  =((block-commitment:page:t pag) commitment.puzzle)
+          =(pow-len.zeke len.puzzle)
+      ==
     ::
     ++  heard-tx
       |=  [wir=wire now=@da raw=raw-tx:t]
@@ -555,11 +582,11 @@
       =.  c.k  (update-heaviest:con pag)
       ::  if block is the new heaviest block, gossip it to peers
       =?  effs  !=(old-heavy heaviest-block.c.k)
-        ~>  %slog.[0 %leaf^"new heaviest block!"]
+        ~>  %slog.[0 %leaf^"dumbnet: new heaviest block!"]
         =/  span=span-effect:dk
           :+  %span  %new-heaviest-chain
           ~['block_height'^n+height.pag 'heaviest_block_digest'^s+(to-b58:hash:t digest.pag)]
-        :*  [%gossip %heard-block pag]
+        :*  [%gossip %0 %heard-block pag]
             span
             effs
         ==
@@ -613,7 +640,7 @@
       ^-  [(list effect:dk) kernel-state:dk]
       ::  ~&  "handling command: {<-.command>}"
       ?:  &(?=(init-command:dk -.command) !init.a.k)
-        ::  kernel no longer in init phase, can't do command
+        ::  kernel no longer in init phase, can't do init command
         ~>  %slog.[0 leaf+"kernel no longer in init phase, can't do init command"]
         `k
       ?:  &(?=(non-init-command:dk -.command) init.a.k)
@@ -786,7 +813,7 @@
         effs^k
       ::
       ++  do-genesis
-        ::  generates and emits a genesis block
+        ::  generate genesis block and sets it as candidate block
         ^-  [(list effect:dk) kernel-state:dk]
         ?>  ?=([%genesis *] command)
         ::  creating genesis block with template
@@ -795,8 +822,9 @@
           (new:genesis-template:t p.command)
         =/  genesis-page=page:t
           (new-genesis:page:t genesis-template now)
+        =.  candidate-block.m.k  genesis-page
         =.  c.k  (add-btc-data:con btc-hash.p.command)
-        (heard-block /poke/miner now genesis-page eny)
+        `k
       ::
       ++  do-btc-data
         ^-  [(list effect:dk) kernel-state:dk]
@@ -812,16 +840,16 @@
       ?:  init.a.k
         ::  kernel in init phase, fact ignored
         `k
-      ?-    -.fact
+      ?-    -.data.fact
           %heard-block
-        (heard-block wir now p.fact eny)
+        (heard-block wir now p.data.fact eny)
       ::
           %heard-tx
-        (heard-tx wir now p.fact)
+        (heard-tx wir now p.data.fact)
       ::
           %heard-elders
-        (heard-elders wir now p.fact)
+        (heard-elders wir now p.data.fact)
       ==
-    --::  +poke
-  --::  +kernel
+  --::  +poke
+--::  +kernel
 --

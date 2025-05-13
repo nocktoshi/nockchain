@@ -171,7 +171,9 @@
       [%sign-tx dat=draft index=(unit @ud) entropy=@]
       [%list-pubkeys ~]
       [%list-notes ~]
-      [%show-balance block=@ux]
+      [%show-seedphrase ~]
+      [%show-master-pubkey ~]
+      [%show-master-privkey ~]
       [%show =path]
       [%gen-master-privkey seedphrase=@t]
       [%gen-master-pubkey master-privkey=keyc:slip10]
@@ -366,7 +368,7 @@
   |*  meg=tape
   |*  *
   ?.  bug  +<
-  ~>  %slog.[0 (crip "wallet: {meg}")]
+  ~>  %slog.[2 (crip "wallet: {meg}")]
   +<
 ::
 ++  moat  (keep state)
@@ -1027,8 +1029,10 @@
       %gen-master-pubkey     (do-gen-master-pubkey cause)
       %make-tx               (do-make-tx cause)
       %list-pubkeys          (do-list-pubkeys cause)
-      %show-balance          (do-show-balance cause)
       %sync-run              (do-sync-run cause)
+      %show-seedphrase       (do-show-seedphrase cause)
+      %show-master-pubkey    (do-show-master-pubkey cause)
+      %show-master-privkey   (do-show-master-privkey cause)
     ::
       %advanced-spend
     ?-  +<.cause
@@ -1307,7 +1311,7 @@
     =/  raw=raw-tx:transact  (new:raw-tx:transact p.dat.cause)
     =/  tx-id  id.raw
     =/  nock-cause=$>(%fact cause:dumb)
-      [%fact %heard-tx raw]
+      [%fact %0 %heard-tx raw]
     %-  (debug "make-tx: new-tx {<tx-id>}")
     :_  state
     :~
@@ -1329,15 +1333,60 @@
     :-  [%exit 0]~
     state
   ::
-  ++  do-show-balance
+  ++  do-show-seedphrase
     |=  =cause
-    ?>  ?=(%show-balance -.cause)
-    %-  (debug "show-balance: {<block.cause>}")
-    =/  =path  /balance/[(scot %ux block.cause)]
-    =/  =effect  [%npc 0 %peek path]
-    :-  ~[effect]
-    state
+    ?>  ?=(%show-seedphrase -.cause)
+    %-  (debug "show-seedphrase")
+    =/  =meta  seed:get:v
+    =/  seedphrase=@t
+      ?:  ?=(%seed -.meta)
+        +.meta
+      %-  crip
+      "no seedphrase found"
+    :_  state
+    :~  :-  %markdown
+        %-  crip
+        """
+        ## seedphrase
+
+        {<seedphrase>}
+        """
+        [%exit 0]
+    ==
   ::
+  ++  do-show-master-pubkey
+    |=  =cause
+    ?>  ?=(%show-master-pubkey -.cause)
+    %-  (debug "show-master-pubkey")
+    =/  =meta  ~(master get:v %pub)
+    ?>  ?=(%coil -.meta)
+    :_  state
+    :~  :-  %markdown
+        %-  crip
+        """
+        ## master public key
+
+        {(en:base58:wrap p.key.meta)}
+        """
+        [%exit 0]
+    ==
+  ::
+  ++  do-show-master-privkey
+    |=  =cause
+    ?>  ?=(%show-master-privkey -.cause)
+    %-  (debug "show-master-privkey")
+    =/  =meta  ~(master get:v %prv)
+    ?>  ?=(%coil -.meta)
+    :_  state
+    :~  :-  %markdown
+        %-  crip
+        """
+        ## master private key
+
+        {(en:base58:wrap p.key.meta)}
+        """
+        [%exit 0]
+    ==
   ++  do-scan
     |=  =cause
     ?>  ?=(%scan -.cause)
@@ -1605,8 +1654,20 @@
     =.  keys.state  (key:put:v master-public-coil ~ pub-label)
     =.  keys.state  (key:put:v master-private-coil ~ prv-label)
     =.  keys.state  (seed:put:v seed-phrase)
-    :-  [%exit 0]~
-    state
+    :_  state
+    :~  :-  %markdown
+        %-  crip
+        """
+        ## Keygen
+
+        ### New Public Key
+        {<(en:base58:wrap public-key:cor)>}
+
+        ### New Private Key
+        {<(en:base58:wrap private-key:cor)>}
+        """
+        [%exit 0]
+    ==
   ::
   ::  derives child %pub or %prv key of current master key
   ::  at index `i`. this will overwrite existing paths.

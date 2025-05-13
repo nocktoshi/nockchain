@@ -2,17 +2,17 @@
 members = [
     "crates/equix-latency",
     "crates/kernels",
-    "crates/nockapp/apps/choo",
-    "crates/nockapp/crown",
+    "crates/hoonc",
+    "crates/nockapp",
     "crates/nockchain-bitcoin-sync",
     "crates/nockchain-libp2p-io",
     "crates/nockchain",
-    "crates/sword/rust/assert_no_alloc",
-    "crates/sword/rust/ibig",
-    "crates/sword/rust/murmur3",
-    "crates/sword/rust/sword_macros",
-    "crates/sword/rust/sword",
-    "crates/wallet",
+    "crates/nockvm/rust/assert_no_alloc",
+    "crates/nockvm/rust/ibig",
+    "crates/nockvm/rust/murmur3",
+    "crates/nockvm/rust/nockvm_macros",
+    "crates/nockvm/rust/nockvm",
+    "crates/nockchain-wallet",
     "crates/zkvm-jetpack",
 ]
 
@@ -23,22 +23,22 @@ version = "0.1.0"
 edition = "2021"
 
 [workspace.dependencies.assert_no_alloc]
-path = "crates/sword/rust/assert_no_alloc"
+path = "crates/nockvm/rust/assert_no_alloc"
 
-[workspace.dependencies.choo]
-path = "crates/nockapp/apps/choo"
+[workspace.dependencies.hoonc]
+path = "crates/hoonc"
 
-[workspace.dependencies.crown]
-path = "crates/nockapp/crown"
+[workspace.dependencies.nockapp]
+path = "crates/nockapp"
 
 [workspace.dependencies.ibig]
-path = "crates/sword/rust/ibig"
+path = "crates/nockvm/rust/ibig"
 
 [workspace.dependencies.kernels]
 path = "crates/kernels"
 
 [workspace.dependencies.murmur3]
-path = "crates/sword/rust/murmur3"
+path = "crates/nockvm/rust/murmur3"
 
 [workspace.dependencies.nockchain]
 path = "crates/nockchain"
@@ -49,14 +49,14 @@ path = "crates/nockchain-bitcoin-sync"
 [workspace.dependencies.nockchain-libp2p-io]
 path = "crates/nockchain-libp2p-io"
 
-[workspace.dependencies.sword]
-path = "crates/sword/rust/sword"
+[workspace.dependencies.nockvm]
+path = "crates/nockvm/rust/nockvm"
 
-[workspace.dependencies.sword_crypto]
-path = "crates/sword/rust/sword_crypto"
+[workspace.dependencies.nockvm_crypto]
+path = "crates/nockvm/rust/nockvm_crypto"
 
-[workspace.dependencies.sword_macros]
-path = "crates/sword/rust/sword_macros"
+[workspace.dependencies.nockvm_macros]
+path = "crates/nockvm/rust/nockvm_macros"
 
 [workspace.dependencies.zkvm-jetpack]
 path = "crates/zkvm-jetpack"

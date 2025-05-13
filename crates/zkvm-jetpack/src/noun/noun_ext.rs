@@ -1,4 +1,4 @@
-use sword::noun::{IndirectAtom, NounAllocator, Result};
+use nockvm::noun::{IndirectAtom, NounAllocator, Result};
 
 use crate::form::poly::Felt;
 use crate::form::Belt;

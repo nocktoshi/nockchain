@@ -1,15 +1,15 @@
 use std::error::Error;
 
 use clap::Parser;
-use crown::kernel::boot;
 use kernels::dumb::KERNEL;
+use nockapp::kernel::boot;
 use zkvm_jetpack::hot::produce_prover_hot_state;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error>> {
-    sword::check_endian();
+    nockvm::check_endian();
     let cli = nockchain::NockchainCli::parse();
-    boot::init_default_tracing(&cli.crown_cli);
+    boot::init_default_tracing(&cli.nockapp_cli);
 
     let prover_hot_state = produce_prover_hot_state();
     let nockchain =

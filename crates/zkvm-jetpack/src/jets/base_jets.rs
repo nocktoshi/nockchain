@@ -1,7 +1,7 @@
-use sword::interpreter::Context;
-use sword::jets::util::slot;
-use sword::jets::Result;
-use sword::noun::{Atom, Noun};
+use nockvm::interpreter::Context;
+use nockvm::jets::util::slot;
+use nockvm::jets::Result;
+use nockvm::noun::{Atom, Noun};
 use tracing::debug;
 
 use crate::form::math::base::*;

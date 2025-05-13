@@ -4,29 +4,28 @@ use std::str::FromStr;
 use std::sync::Arc;
 
 use bytes::Bytes;
-use crown::nockapp::driver::{IODriverFn, NockAppHandle, PokeResult};
-use crown::nockapp::wire::{Wire, WireRepr};
-use crown::nockapp::NockAppError;
-use crown::noun::slab::NounSlab;
-use crown::utils::make_tas;
-use crown::utils::scry::*;
-use crown::{AtomExt, NounExt};
 use either::{Either, Left, Right};
 use futures::{Future, StreamExt};
-use libp2p::allow_block_list;
-use libp2p::connection_limits;
 use libp2p::identify::Event::Received;
 use libp2p::identity::Keypair;
 use libp2p::kad::NoKnownPeers;
-use libp2p::memory_connection_limits;
 use libp2p::request_response::Event::*;
 use libp2p::request_response::Message::*;
 use libp2p::request_response::{self};
 use libp2p::swarm::SwarmEvent;
-use libp2p::{Multiaddr, PeerId, Swarm};
+use libp2p::{
+    allow_block_list, connection_limits, memory_connection_limits, Multiaddr, PeerId, Swarm,
+};
+use nockapp::driver::{IODriverFn, NockAppHandle, PokeResult};
+use nockapp::noun::slab::NounSlab;
+use nockapp::utils::make_tas;
+use nockapp::utils::scry::*;
+use nockapp::wire::{Wire, WireRepr};
+use nockapp::NockAppError;
+use nockapp::{AtomExt, NounExt};
+use nockvm::noun::{Atom, Noun, D, T};
+use nockvm_macros::tas;
 use serde_bytes::ByteBuf;
-use sword::noun::{Atom, Noun, D, T};
-use sword_macros::tas;
 use tokio::sync::{mpsc, Mutex};
 use tokio::task::{AbortHandle, JoinError, JoinSet};
 use tracing::{debug, error, info, instrument, trace, warn};
@@ -47,6 +46,7 @@ impl Wire for NockchainWire {
     const SOURCE: &'static str = "nc";
 }
 
+#[derive(Debug)]
 pub enum Libp2pWire {
     Gossip(PeerId),
     Response(PeerId),
@@ -181,6 +181,8 @@ impl FromStr for MiningKeyConfig {
     }
 }
 
+const POKE_VERSION: u64 = 0;
+
 #[instrument(skip(keypair, bind, allowed, limits, memory_limits, equix_builder))]
 pub fn make_libp2p_driver(
     keypair: Keypair,
@@ -257,7 +259,7 @@ pub fn make_libp2p_driver(
                                 identify_received(&mut swarm, peer_id, info)?;
                             },
                             SwarmEvent::ConnectionEstablished { peer_id, endpoint, .. } => {
-                                info!("SEvent: {peer_id} is new friend via: {endpoint:?}");
+                                debug!("SEvent: {peer_id} is new friend via: {endpoint:?}");
                             },
                             SwarmEvent::ConnectionClosed { peer_id, endpoint, cause, .. } => {
                                 info!("SEvent: friendship ended with {peer_id} via: {endpoint:?}. cause: {cause:?}");
@@ -475,6 +477,7 @@ async fn set_mining_key(
         .expect("Failed to create set-mining-key atom");
     let pubkey_cord =
         Atom::from_value(&mut set_mining_key_slab, pubkey).expect("Failed to create pubkey atom");
+
     let set_mining_key_poke = T(
         &mut set_mining_key_slab,
         &[D(tas!(b"command")), set_mining_key.as_noun(), pubkey_cord.as_noun()],
@@ -530,6 +533,7 @@ async fn enable_mining(handle: &NockAppHandle, enable: bool) -> Result<PokeResul
     let mut enable_mining_slab = NounSlab::new();
     let enable_mining = Atom::from_value(&mut enable_mining_slab, "enable-mining")
         .expect("Failed to create enable-mining atom");
+
     let enable_mining_poke = T(
         &mut enable_mining_slab,
         &[D(tas!(b"command")), enable_mining.as_noun(), D(if enable { 0 } else { 1 })],
@@ -549,14 +553,19 @@ async fn handle_effect(
 ) -> Result<(), NockAppError> {
     match EffectType::from_noun_slab(&noun_slab) {
         EffectType::Gossip => {
-            // remove the %gossip head
+            // Get the tail of the gossip effect (after %gossip head)
             let mut tail_slab = NounSlab::new();
-            tail_slab.copy_into(unsafe { noun_slab.root().as_cell()?.tail() });
+            let gossip_cell = unsafe { noun_slab.root().as_cell()?.tail() };
+
+            // Skip version number
+            // TODO: add version negotiation, reject unknown/incompatible versions
+            let data_cell = gossip_cell.as_cell()?.tail();
+            tail_slab.copy_into(data_cell);
 
             // Check if this is a heard-block gossip
             let gossip_noun = unsafe { tail_slab.root() };
-            if let Ok(cell) = gossip_noun.as_cell() {
-                if cell.head().eq_bytes(b"heard-block") {
+            if let Ok(data_cell) = gossip_noun.as_cell() {
+                if data_cell.head().eq_bytes(b"heard-block") {
                     trace!("Gossip effect for heard-block, clearing block cache");
                     let mut tracker = message_tracker.lock().await;
                     tracker.block_cache.clear();
@@ -939,10 +948,19 @@ async fn handle_request_response(
                             }
                         }
 
-                        let request_fact = prepend_tas(&mut request_slab, "fact", request_noun)?;
+                        let request_fact = prepend_tas(
+                            &mut request_slab,
+                            "fact",
+                            vec![D(POKE_VERSION), request_noun],
+                        )?;
                         request_slab.set_root(request_fact);
                         let wire = Libp2pWire::Gossip(peer);
 
+                        trace!(
+                            "Poking kernel with wire: {:?} noun: {:?}",
+                            wire,
+                            nockvm::noun::FullDebugCell(unsafe { &request_slab.root().as_cell()? })
+                        );
                         match nockapp.try_poke(wire.to_wire(), request_slab).await {
                             Ok(PokeResult::Ack) => {
                                 metrics.gossip_acked.increment();
@@ -981,7 +999,15 @@ async fn handle_request_response(
                 let response_noun = response_slab.cue_into(message_bytes)?;
                 trace!("Received response from peer");
 
-                let response_fact = prepend_tas(&mut response_slab, "fact", response_noun)?;
+                trace!(
+                    "Response noun: {:?}",
+                    nockvm::noun::FullDebugCell(&response_noun.as_cell()?)
+                );
+                let response_fact = prepend_tas(
+                    &mut response_slab,
+                    "fact",
+                    vec![D(POKE_VERSION), response_noun],
+                )?;
                 response_slab.set_root(response_fact);
                 let wire = Libp2pWire::Response(peer);
 
@@ -1078,9 +1104,9 @@ fn request_to_scry_slab(noun: &Noun) -> Result<NounSlab, NockAppError> {
                 &[D(tas!(b"heavy-n")), tail_cell.tail(), D(0)],
             );
             scry_path_slab.set_root(pax);
-            info!(
+            trace!(
                 "block by-height: {:?}",
-                sword::noun::DebugPath(&pax.as_cell()?)
+                nockvm::noun::DebugPath(&pax.as_cell()?)
             );
             return Ok(scry_path_slab);
         } else if tail_cell.head().eq_bytes(b"elders") {
@@ -1107,9 +1133,9 @@ fn request_to_scry_slab(noun: &Noun) -> Result<NounSlab, NockAppError> {
                 &mut scry_path_slab,
                 &[D(tas!(b"elders")), block_id_atom.as_noun(), peer_id, D(0)],
             );
-            info!(
+            debug!(
                 "block elders: {:?}",
-                sword::noun::DebugPath(&pax.as_cell()?)
+                nockvm::noun::DebugPath(&pax.as_cell()?)
             );
             scry_path_slab.set_root(pax);
             return Ok(scry_path_slab);
@@ -1138,7 +1164,7 @@ fn request_to_scry_slab(noun: &Noun) -> Result<NounSlab, NockAppError> {
                 &mut scry_path_slab,
                 &[raw_tx_tag, tx_id_atom.as_noun(), D(0)],
             );
-            info!("tx by-id: {:?}", sword::noun::DebugPath(&pax.as_cell()?));
+            debug!("tx by-id: {:?}", nockvm::noun::DebugPath(&pax.as_cell()?));
             scry_path_slab.set_root(pax);
             return Ok(scry_path_slab);
         }
@@ -1178,7 +1204,8 @@ fn create_scry_response(
             Left(())
         }
         ScryResult::Some(x) => {
-            if let Ok(response_noun) = prepend_tas(res_slab, heard_type, x) {
+            let nouns = vec![x];
+            if let Ok(response_noun) = prepend_tas(res_slab, heard_type, nouns) {
                 res_slab.set_root(response_noun);
                 Right(Ok(NockchainResponse::new_response_result(res_slab.jam())))
             } else {
@@ -1193,24 +1220,31 @@ fn create_scry_response(
     }
 }
 
-/// Prepends a @tas to a Noun.
+/// Prepends a @tas to one or more Nouns.
 ///
 /// # Arguments
 /// * `slab` - The NounSlab containing the noun
-/// * `noun` - The Noun to prepend @tas to
+/// * `tas_str` - The tag string to prepend
+/// * `nouns` - The Nouns to include
 ///
 /// # Returns
 /// The noun with @tas prepended
-fn prepend_tas(slab: &mut NounSlab, tas_str: &str, noun: Noun) -> Result<Noun, NockAppError> {
+fn prepend_tas(slab: &mut NounSlab, tas_str: &str, nouns: Vec<Noun>) -> Result<Noun, NockAppError> {
     let tas_atom = Atom::from_value(slab, tas_str)?;
-    Ok(T(slab, &[tas_atom.as_noun(), noun]))
+
+    // Create a cell with the tag and all provided nouns
+    let mut cell_elements = Vec::with_capacity(nouns.len() + 1);
+    cell_elements.push(tas_atom.as_noun());
+    cell_elements.extend(nouns);
+
+    Ok(T(slab, &cell_elements))
 }
 
 #[cfg(test)]
 mod tests {
-    use crown::noun::slab::NounSlab;
-    use sword::noun::{D, T};
-    use sword_macros::tas;
+    use nockapp::noun::slab::NounSlab;
+    use nockvm::noun::{D, T};
+    use nockvm_macros::tas;
 
     use super::*;
 

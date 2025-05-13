@@ -1,5 +1,6 @@
 /=  sp  /common/stark/prover
 /=  emission  /common/schedule
+/=  mine  /common/pow
 /=  *  /common/zeke
 /=  *  /common/zoon
 ::    tx-engine: this contains all transaction types and logic related to dumbnet.
@@ -395,34 +396,6 @@
       ==
     pag(digest (compute-digest pag))
   ::
-  ++  genesis-test
-    |=  [pag=form target-bn=bignum:bn =btc-hash =genesis-seal]
-    ^-  ?
-    =/  check-pow=?  =(pow.pag *(unit proof:sp))
-    =/  check-txs=?  =(tx-ids.pag *(z-set tx-id))
-    =/  check-epoch=?  =(epoch-counter.pag *@)
-    =/  check-target=?  =(target.pag target-bn)
-    =/  check-work=?  =(accumulated-work.pag (compute-work genesis-target))
-    =/  check-coinbase=?  =(coinbase.pag *(z-map lock @))
-    =/  check-height=?  =(height.pag *page-number)
-    =/  check-btc-hash=?
-      =(parent.pag (hash:^btc-hash btc-hash))
-    ::
-    ::  check that the message matches what's in the seal
-    =/  check-msg=?
-      ?~  genesis-seal  %.y
-      =((hash:page-msg msg.pag) msg-hash.u.genesis-seal)
-    ?&  check-pow
-        check-txs
-        check-epoch
-        check-target
-        check-work
-        check-coinbase
-        check-height
-        check-msg
-        check-btc-hash
-        ::TODO timestamp check?
-    ==
   ::
   ::  +block-commitment: hash commitment of block contents for miner
   ::
@@ -628,7 +601,7 @@
   ++  new
     |=  [=btc-hash block-height=@ message=cord]
     ^-  form
-    =/  split-msg  (rip-correct 5 message)
+    =/  split-msg  (new:page-msg message)
     [btc-hash block-height split-msg]
   ::
   ++  hashable

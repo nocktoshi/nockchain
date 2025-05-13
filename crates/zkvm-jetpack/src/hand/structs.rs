@@ -1,4 +1,4 @@
-use sword::noun::{Cell, Noun};
+use nockvm::noun::{Cell, Noun};
 
 #[derive(Copy, Clone)]
 pub struct HoonList {

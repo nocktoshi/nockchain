@@ -5,14 +5,14 @@ use std::sync::Arc;
 use bitcoincore_rpc::bitcoin::BlockHash;
 use bitcoincore_rpc::bitcoincore_rpc_json::{BlockRef, GetBlockResult};
 use bitcoincore_rpc::{Auth, Client, RpcApi};
-use crown::nockapp::driver::{make_driver, IODriverFn};
-use crown::nockapp::wire::{SystemWire, Wire};
-use crown::noun::slab::NounSlab;
-use crown::{AtomExt, Bytes, ToBytes};
 use ibig::ops::DivRem;
 use ibig::{ubig, UBig};
-use sword::noun::{Atom, Noun, NounAllocator, D, T};
-use sword_macros::tas;
+use nockapp::driver::{make_driver, IODriverFn};
+use nockapp::noun::slab::NounSlab;
+use nockapp::wire::{SystemWire, Wire};
+use nockapp::{AtomExt, Bytes, ToBytes};
+use nockvm::noun::{Atom, Noun, NounAllocator, D, T};
+use nockvm_macros::tas;
 use tokio::sync::oneshot::channel;
 use tokio::sync::RwLock;
 use tracing::{debug, info, instrument};
@@ -23,7 +23,7 @@ const TEST_GENESIS_BLOCK_HASH: &str =
     "00000000e6c3c75c18bdb06cc39d616d636fca0fc967c29ebf8225ddf7f2fe48";
 const TEST_GENESIS_BLOCK_HEIGHT: u64 = 2048;
 
-const TEST_GENESIS_SEAL_MSG: &str = "8UZkpNdGKTPGafrbkGZHwUeeWMu7gLzpBsPuffVkDydnSB4NFRXwZsB";
+const GENESIS_SEAL_MSG: &str = "8K5RhhjnZQChv7cnhEiafkaxBReVhaySKEZatFEg7cagoK96kUo92sz";
 
 /// Helper function to get the test block used for fake genesis blocks
 fn get_test_block() -> BlockRef {
@@ -122,8 +122,7 @@ pub fn bitcoin_watcher_driver(
                     let mut poke_slab = NounSlab::new();
                     let block_height_noun =
                         Atom::new(&mut poke_slab, TEST_GENESIS_BLOCK_HEIGHT).as_noun();
-                    let seal_byts =
-                        Bytes::from(TEST_GENESIS_SEAL_MSG.to_bytes().expect("blah 242"));
+                    let seal_byts = Bytes::from(GENESIS_SEAL_MSG.to_bytes().expect("blah 242"));
                     let seal_noun = Atom::from_bytes(&mut poke_slab, &seal_byts).as_noun();
                     let set_genesis_seal_byts = Bytes::from(b"set-genesis-seal".to_vec());
                     let set_genesis_seal =
@@ -168,8 +167,7 @@ pub fn bitcoin_watcher_driver(
                     let mut poke_slab = NounSlab::new();
                     let block_height_noun =
                         Atom::new(&mut poke_slab, TEST_GENESIS_BLOCK_HEIGHT).as_noun();
-                    let seal_byts =
-                        Bytes::from(TEST_GENESIS_SEAL_MSG.to_bytes().expect("blah 242"));
+                    let seal_byts = Bytes::from(GENESIS_SEAL_MSG.to_bytes().expect("blah 242"));
                     let seal_noun = Atom::from_bytes(&mut poke_slab, &seal_byts).as_noun();
                     let set_genesis_seal_byts = Bytes::from(b"set-genesis-seal".to_vec());
                     let set_genesis_seal =

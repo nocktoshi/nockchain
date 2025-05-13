@@ -119,9 +119,12 @@
 ::
 +$  fact
   $+  fact
-  $%  [%heard-block p=page:dt]
-      [%heard-tx p=raw-tx:dt]
-      [%heard-elders p=[oldest=page-number:dt ids=(list block-id:dt)]]
+  $:  version=%0
+    $=  data
+    $%  [%heard-block p=page:dt]
+        [%heard-tx p=raw-tx:dt]
+        [%heard-elders p=[oldest=page-number:dt ids=(list block-id:dt)]]
+    ==
   ==
 ::
 +$  effect

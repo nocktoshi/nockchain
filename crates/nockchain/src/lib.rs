@@ -3,11 +3,11 @@ use std::fs;
 use std::path::Path;
 
 use clap::{arg, command, ArgAction, Parser};
-use crown::kernel::boot;
-use crown::nockapp::NockApp;
 use libp2p::identity::Keypair;
 use libp2p::multiaddr::Multiaddr;
 use libp2p::{allow_block_list, connection_limits, memory_connection_limits, PeerId};
+use nockapp::kernel::boot;
+use nockapp::NockApp;
 use nockchain_bitcoin_sync::{bitcoin_watcher_driver, BitcoinRPCConnection, GenesisNodeType};
 use nockchain_libp2p_io::p2p::{
     MAX_ESTABLISHED_CONNECTIONS, MAX_ESTABLISHED_CONNECTIONS_PER_PEER,
@@ -21,20 +21,20 @@ use std::path::PathBuf;
 
 use clap::value_parser;
 use colors::*;
-use crown::noun::slab::NounSlab;
+use nockapp::noun::slab::NounSlab;
 use nockchain_libp2p_io::nc::MiningKeyConfig;
-use sword::jets::hot::HotEntry;
-use sword::noun::{D, T};
-use sword_macros::tas;
+use nockvm::jets::hot::HotEntry;
+use nockvm::noun::{D, T};
+use nockvm_macros::tas;
 use tracing::{debug, info, instrument};
 
 /// Module for handling driver initialization signals
 pub mod driver_init {
-    use crown::nockapp::driver::{make_driver, IODriverFn, PokeResult};
-    use crown::nockapp::wire::{SystemWire, Wire};
-    use crown::noun::slab::NounSlab;
-    use sword::noun::{D, T};
-    use sword_macros::tas;
+    use nockapp::driver::{make_driver, IODriverFn, PokeResult};
+    use nockapp::noun::slab::NounSlab;
+    use nockapp::wire::{SystemWire, Wire};
+    use nockvm::noun::{D, T};
+    use nockvm_macros::tas;
     use tokio::sync::oneshot;
     use tracing::{debug, error, info};
 
@@ -167,7 +167,7 @@ const GENESIS_HEIGHT: u64 = 892723;
 #[command(name = "nockchain")]
 pub struct NockchainCli {
     #[command(flatten)]
-    pub crown_cli: crown::kernel::boot::Cli,
+    pub nockapp_cli: nockapp::kernel::boot::Cli,
     #[arg(
         long,
         help = "npc socket path",
@@ -358,7 +358,7 @@ pub async fn init_with_kernel(
 
     let mut nockapp = boot::setup(
         kernel_jam,
-        cli.as_ref().map(|c| c.crown_cli.clone()),
+        cli.as_ref().map(|c| c.nockapp_cli.clone()),
         hot_state,
         "nockchain",
         None,
@@ -573,7 +573,7 @@ pub async fn init_with_kernel(
     let listener = UnixListener::bind(socket_path)?;
 
     nockapp
-        .add_io_driver(crown::npc_listener_driver(listener))
+        .add_io_driver(nockapp::npc_listener_driver(listener))
         .await;
 
     // set up timer
@@ -584,7 +584,7 @@ pub async fn init_with_kernel(
     );
     timer_slab.set_root(timer_noun);
     nockapp
-        .add_io_driver(crown::timer_driver(CHAIN_INTERVAL_SECS, timer_slab))
+        .add_io_driver(nockapp::timer_driver(CHAIN_INTERVAL_SECS, timer_slab))
         .await;
 
     Ok(nockapp)

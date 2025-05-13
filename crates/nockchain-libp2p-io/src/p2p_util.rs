@@ -1,12 +1,12 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::str::FromStr;
 
-use crown::nockapp::NockAppError;
-use crown::noun::slab::NounSlab;
-use crown::{AtomExt, NounExt};
 use libp2p::PeerId;
-use sword::noun::Noun;
-use sword_macros::tas;
+use nockapp::noun::slab::NounSlab;
+use nockapp::NockAppError;
+use nockapp::{AtomExt, NounExt};
+use nockvm::noun::Noun;
+use nockvm_macros::tas;
 use tracing::debug;
 
 use crate::metrics::NockchainP2PMetrics;
@@ -245,8 +245,8 @@ impl MessageTracker {
 
 #[cfg(test)]
 mod tests {
-    use crown::noun::slab::NounSlab;
-    use sword::noun::{D, T};
+    use nockapp::noun::slab::NounSlab;
+    use nockvm::noun::{D, T};
 
     use super::*;
 
@@ -342,7 +342,7 @@ mod tests {
 
     #[test]
     fn test_peer_id_base58_roundtrip() {
-        use sword::noun::Atom;
+        use nockvm::noun::Atom;
         // Generate a random PeerId
         let original_peer_id = PeerId::random();
         let base58_str = original_peer_id.to_base58();

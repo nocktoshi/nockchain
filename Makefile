@@ -5,9 +5,13 @@ export MINIMAL_LOG_FORMAT := true
 export MINING_PUBKEY := EHmKL2U3vXfS5GYAY5aVnGdukfDWwvkQPCZXnjvZVShsSQi3UAuA4tQQpVwGJMzc9FfpTY8pLDkqhBGfWutiF4prrCktUH9oAWJxkXQBzAavKDc95NR3DjmYwnnw8GuugnK
 
 
-## Build everything
 .PHONY: build
-build:
+build: build-hoon-all build-rust
+	$(call show_env_vars)
+
+## Build all rust
+.PHONY: build-rust
+build-rust:
 	cargo build --release
 
 ## Run all tests
@@ -15,14 +19,36 @@ build:
 test:
 	cargo test --release
 
-.PHONY: install-choo
-install-choo: nuke-choo-data ## Install choo from this repo
+.PHONY: install-hoonc
+install-hoonc: nuke-hoonc-data ## Install hoonc from this repo
 	$(call show_env_vars)
-	cargo install --locked --force --path crates/nockapp/apps/choo --bin choo
+	cargo install --locked --force --path crates/hoonc --bin hoonc
 
-update-choo:
+.PHONY: update-hoonc
+update-hoonc:
 	$(call show_env_vars)
-	cargo install --locked --path crates/nockapp/apps/choo --bin choo
+	cargo install --locked --path crates/hoonc --bin hoonc
+
+.PHONY: install-nockchain
+install-nockchain: build-hoon-all
+	$(call show_env_vars)
+	cargo install --locked --force --path crates/nockchain --bin nockchain
+
+.PHONY: update-nockchain
+update-nockchain: build-hoon-all
+	$(call show_env_vars)
+	cargo install --locked --path crates/nockchain --bin nockchain
+
+
+.PHONY: install-nockchain-wallet
+install-nockchain-wallet: build-hoon-all
+	$(call show_env_vars)
+	cargo install --locked --force --path crates/nockchain-wallet --bin nockchain-wallet
+
+.PHONY: update-nockchain-wallet
+update-nockchain-wallet: build-hoon-all
+	$(call show_env_vars)
+	cargo install --locked --path crates/nockchain-wallet --bin nockchain-wallet
 
 .PHONY: ensure-dirs
 ensure-dirs:
@@ -33,29 +59,25 @@ ensure-dirs:
 build-trivial-new: ensure-dirs
 	$(call show_env_vars)
 	echo '%trivial' > hoon/trivial.hoon
-	choo --new --arbitrary hoon/trivial.hoon
+	hoonc --new --arbitrary hoon/trivial.hoon
 
 HOON_TARGETS=assets/dumb.jam assets/wal.jam
 
-.PHONY: nuke-choo-data
-nuke-choo-data:
-	rm -rf .data.choo
-	rm -rf ~/.nockapp/choo
+.PHONY: nuke-hoonc-data
+nuke-hoonc-data:
+	rm -rf .data.hoonc
+	rm -rf ~/.nockapp/hoonc
 
 .PHONY: nuke-assets
 nuke-assets:
 	rm -f assets/*.jam
 
-.PHONY: build-hoon-fresh
-build-hoon-fresh: nuke-assets nuke-choo-data install-choo ensure-dirs build-trivial-new $(HOON_TARGETS)
-	$(call show_env_vars)
-
-.PHONY: build-hoon-new
-build-hoon-all: ensure-dirs update-choo build-trivial-new $(HOON_TARGETS)
+.PHONY: build-hoon-all
+build-hoon-all: nuke-assets update-hoonc ensure-dirs build-trivial-new $(HOON_TARGETS)
 	$(call show_env_vars)
 
 .PHONY: build-hoon
-build-hoon: ensure-dirs update-choo $(HOON_TARGETS)
+build-hoon: ensure-dirs update-hoonc $(HOON_TARGETS)
 	$(call show_env_vars)
 
 .PHONY: run-nockchain-leader
@@ -71,14 +93,14 @@ run-nockchain-follower:  # Run nockchain mode in follower mode
 
 HOON_SRCS := $(find hoon -type file -name '*.hoon')
 
-## Build dumb.jam with choo
-assets/dumb.jam: update-choo hoon/apps/dumbnet/outer.hoon $(HOON_SRCS)
+## Build dumb.jam with hoonc
+assets/dumb.jam: update-hoonc hoon/apps/dumbnet/outer.hoon $(HOON_SRCS)
 	$(call show_env_vars)
-	RUST_LOG=trace choo hoon/apps/dumbnet/outer.hoon hoon
+	RUST_LOG=trace hoonc hoon/apps/dumbnet/outer.hoon hoon
 	mv out.jam assets/dumb.jam
 
-## Build wal.jam with choo
-assets/wal.jam: update-choo hoon/apps/wallet/wallet.hoon $(HOON_SRCS)
+## Build wal.jam with hoonc
+assets/wal.jam: update-hoonc hoon/apps/wallet/wallet.hoon $(HOON_SRCS)
 	$(call show_env_vars)
-	RUST_LOG=trace choo hoon/apps/wallet/wallet.hoon hoon
+	RUST_LOG=trace hoonc hoon/apps/wallet/wallet.hoon hoon
 	mv out.jam assets/wal.jam

@@ -13,6 +13,7 @@
 ++  set-genesis-seal
   |=  [height=page-number:t msg-hash=@t]
   ^-  consensus-state:dk
+  ~>  %slog.[0 leaf+"setting genesis seal."]
   =/  seal  (new:genesis-seal:t height msg-hash)
   c(genesis-seal seal)
 ::
@@ -339,8 +340,8 @@
 ++  update-heaviest
   |=  pag=page:t
   ^-  consensus-state:dk
-  =/  digest-b58=tape  (trip (to-b58:hash:t digest.pag))
-  ::~&   "checking if block {digest-b58} is heaviest"
+  =/  digest-b58=cord  (to-b58:hash:t digest.pag)
+  ::~>   %slog.[0 leaf+"checking if block {digest-b58} is heaviest"]
   ?:  =(~ heaviest-block.c)
     :: if we have no heaviest block, this must be genesis block.
     ~|  "received non-genesis block before genesis block"
@@ -349,8 +350,21 @@
   ::  > rather than >= since we take the first heaviest block we've heard
   ?:  %+  compare-heaviness:page:t  pag
       (~(got z-by blocks.c) (need heaviest-block.c))
-    ::~&  "{digest-b58} is new heaviest block"
+    =/  print-var
+      %-  trip
+      ^-  @t
+      %^  cat  3
+        digest-b58
+      ' is new heaviest block'
+    ~>  %slog.[0 leaf+print-var]
     c(heaviest-block (some digest.pag))
+  =/  print-var
+    %-  trip
+    ^-  @t
+    %^  cat  3
+      digest-b58
+    ' is NOT new heaviest block'
+  ~>  %slog.[0 leaf+print-var]
   c
 ::
 ::  +get-elders: get list of ancestor block IDs up to 24 deep

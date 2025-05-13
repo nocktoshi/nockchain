@@ -2,7 +2,6 @@ use std::convert::Infallible;
 use std::error::Error;
 use std::time::Duration;
 
-use crown::nockapp::NockAppError;
 use hickory_resolver::config::{ResolverConfig, ResolverOpts};
 use libp2p::identity::Keypair;
 use libp2p::multiaddr::Multiaddr;
@@ -13,6 +12,7 @@ use libp2p::{
     allow_block_list, connection_limits, identify, kad, memory_connection_limits, ping, PeerId,
     Swarm,
 };
+use nockapp::NockAppError;
 use tracing::{debug, trace};
 
 use crate::nc::*;

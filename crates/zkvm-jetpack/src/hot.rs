@@ -1,5 +1,5 @@
 use either::Either::*;
-use sword::jets::hot::{HotEntry, K_138};
+use nockvm::jets::hot::{HotEntry, K_138};
 
 use crate::jets::base_jets::*;
 use crate::jets::bp_jets::*;

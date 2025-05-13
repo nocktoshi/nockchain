@@ -1,6 +1,6 @@
 use either::{Left, Right};
-use sword::jets::JetErr;
-use sword::noun::{Atom, Cell, Error, Noun, Result};
+use nockvm::jets::JetErr;
+use nockvm::noun::{Atom, Cell, Error, Noun, Result};
 
 use super::structs::HoonMapIter;
 use crate::form::mary::*;
@@ -245,12 +245,12 @@ impl TryFrom<Cell> for FPolySlice<'_> {
     }
 }
 
-fn not_cell<T>() -> core::result::Result<T, sword::noun::Error> {
-    Err(sword::noun::Error::NotCell)
+fn not_cell<T>() -> core::result::Result<T, nockvm::noun::Error> {
+    Err(nockvm::noun::Error::NotCell)
 }
 
 impl TryFrom<Noun> for HoonList {
-    type Error = sword::noun::Error;
+    type Error = nockvm::noun::Error;
     fn try_from(n: Noun) -> core::result::Result<Self, Self::Error> {
         if n.is_cell() {
             Ok(HoonList::from(n.as_cell().unwrap_or_else(|err| {
@@ -274,7 +274,7 @@ impl From<Cell> for HoonList {
 }
 
 impl TryFrom<Noun> for HoonMap {
-    type Error = sword::noun::Error;
+    type Error = nockvm::noun::Error;
 
     fn try_from(n: Noun) -> std::result::Result<Self, Self::Error> {
         if n.is_cell() {
@@ -293,7 +293,7 @@ impl TryFrom<Noun> for HoonMap {
 }
 
 impl TryFrom<Cell> for HoonMap {
-    type Error = sword::noun::Error;
+    type Error = nockvm::noun::Error;
 
     fn try_from(c: Cell) -> std::result::Result<Self, Self::Error> {
         let tail: Noun = c.tail();

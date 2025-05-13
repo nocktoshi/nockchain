@@ -1,7 +1,7 @@
 use std::ops::{Add, Mul, Neg, Sub};
 
+use nockvm::noun::Noun;
 use num_traits::Pow;
-use sword::noun::Noun;
 use tracing::debug;
 
 use crate::based;

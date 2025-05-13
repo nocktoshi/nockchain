@@ -1,5 +1,5 @@
-use sword::mem::NockStack;
-use sword::noun::*;
+use nockvm::mem::NockStack;
+use nockvm::noun::*;
 
 use crate::form::mary::*;
 use crate::form::poly::*;

@@ -48,6 +48,7 @@
   |=  crash=?
   |=  inner=fort
   |=  hash=@uvI
+  ~&  build-hash+hash
   =<  .(desk-hash.outer `hash)
   |_  outer=outer-state
   +*  inner-fort  ~(. inner internal.outer)
@@ -62,7 +63,11 @@
   ++  peek
     |=  arg=path
     ^-  (unit (unit *))
-    (peek:inner-fort arg)
+    =/  pax  ((soft path) arg)
+    ?~  pax
+      ~>  %slog.[0 leaf+"wrapper +poke: arg is not a path"]
+      ~
+    (peek:inner-fort u.pax)
   ::
   ++  wish
     |=  txt=@

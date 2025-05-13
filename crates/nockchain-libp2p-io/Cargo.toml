@@ -4,9 +4,9 @@ version.workspace = true
 edition.workspace = true
 
 [dependencies]
-crown = { workspace = true }
-sword = { workspace = true }
-sword_macros = { workspace = true }
+nockapp = { workspace = true }
+nockvm = { workspace = true }
+nockvm_macros = { workspace = true }
 
 bytes = { workspace = true }
 bs58 = { workspace = true }

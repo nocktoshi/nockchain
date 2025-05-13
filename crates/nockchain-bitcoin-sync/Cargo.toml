@@ -6,9 +6,9 @@ edition.workspace = true
 [dependencies]
 zkvm-jetpack.workspace = true
 
-crown = { workspace = true }
-sword = { workspace = true }
-sword_macros = { workspace = true }
+nockapp = { workspace = true }
+nockvm = { workspace = true }
+nockvm_macros = { workspace = true }
 
 bitcoincore-rpc.workspace = true
 ibig = { workspace = true }

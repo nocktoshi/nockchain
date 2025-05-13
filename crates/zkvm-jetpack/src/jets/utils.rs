@@ -1,7 +1,7 @@
-use sword::interpreter::{Error, Mote};
-use sword::jets::JetErr;
-use sword::jets::JetErr::*;
-use sword::noun::D;
+use nockvm::interpreter::{Error, Mote};
+use nockvm::jets::JetErr;
+use nockvm::jets::JetErr::*;
+use nockvm::noun::D;
 
 use crate::form::math::FieldError;
 

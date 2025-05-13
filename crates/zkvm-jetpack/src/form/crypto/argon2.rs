@@ -1,9 +1,9 @@
 use argon2::{Algorithm, Argon2, AssociatedData, Params, Version};
-use crown::utils::bytes::Byts;
-use crown::utils::make_tas;
-use crown::{AtomExt, Noun};
-use sword::jets::cold::{Nounable, NounableResult};
-use sword::noun::{NounAllocator, Slots, D, T};
+use nockapp::utils::bytes::Byts;
+use nockapp::utils::make_tas;
+use nockapp::{AtomExt, Noun};
+use nockvm::jets::cold::{Nounable, NounableResult};
+use nockvm::noun::{NounAllocator, Slots, D, T};
 
 #[derive(Debug, Clone)]
 pub struct Argon2Args {
@@ -109,14 +109,14 @@ impl Nounable for Argon2Args {
             "i" => argon2::Algorithm::Argon2i,
             "id" => argon2::Algorithm::Argon2id,
             _ => {
-                return Err(sword::noun::Error::NotRepresentable)?;
+                return Err(nockvm::noun::Error::NotRepresentable)?;
             }
         };
         let version = match version {
             0x10 => argon2::Version::V0x10,
             0x13 => argon2::Version::V0x13,
             _ => {
-                return Err(sword::noun::Error::NotRepresentable)?;
+                return Err(nockvm::noun::Error::NotRepresentable)?;
             }
         };
 

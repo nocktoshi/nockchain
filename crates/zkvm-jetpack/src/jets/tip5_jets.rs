@@ -1,7 +1,7 @@
-use sword::interpreter::Context;
-use sword::jets::util::slot;
-use sword::jets::JetErr;
-use sword::noun::{Atom, Noun, D, T};
+use nockvm::interpreter::Context;
+use nockvm::jets::util::slot;
+use nockvm::jets::JetErr;
+use nockvm::noun::{Atom, Noun, D, T};
 
 use crate::form::math::tip5::*;
 use crate::jets::utils::jet_err;
