@@ -59,12 +59,3 @@ To run a test Nockchain node that waits for the genesis block:
 make run-nockchain-follower
 ```
 
-
-## Testing utilities
-
-To run the unit test suite:
-
-```
-make test
-```
-
