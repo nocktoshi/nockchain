@@ -7,7 +7,6 @@ members = [
     "crates/nockchain-bitcoin-sync",
     "crates/nockchain-libp2p-io",
     "crates/nockchain",
-    "crates/nockvm/rust/assert_no_alloc",
     "crates/nockvm/rust/ibig",
     "crates/nockvm/rust/murmur3",
     "crates/nockvm/rust/nockvm_macros",

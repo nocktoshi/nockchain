@@ -94,6 +94,22 @@ To run a Nockchain miner:
 make run-nockchain
 ```
 
+=======
+To run a Nockchain node without mining:
+
+```
+nockchain
+```
+
+To run a Nockchain node and mine to a pubkey:
+
+```
+nockchain --mining_pubkey <your_pubkey> --mine
+```
+
+For launch, make sure you run in a fresh working directory that does not include a .data.nockchain file from testing.
+
+
 ## FAQ
 
 ### Can I use same pubkey if running multiple miners?
