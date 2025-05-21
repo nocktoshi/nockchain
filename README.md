@@ -12,6 +12,17 @@ We believe the future of blockchains is lightweight trustless settlement of heav
 
 Install `rustup` by following their instructions at: [https://rustup.rs/](https://rustup.rs/)
 
+Ensure you have these dependencies installed if running on Debian/Ubuntu:
+```
+sudo apt update
+sudo apt install clang llvm-dev libclang-dev
+```
+
+Copy the example environment file and rename it to `.env`:
+```
+cp .env_example .env
+```
+
 Install `hoonc`, the Hoon compiler:
 
 ```
@@ -32,30 +43,73 @@ After you've run the setup and build commands, install the wallet:
 make install-nockchain-wallet
 ```
 
-To run the wallet, see the nockchain-wallet [README](./crates/nockchain-wallet/README.md).
+See the nockchain-wallet [README](./crates/nockchain-wallet/README.md) for more information.
 
 
 ## Install Nockchain
 
-After you've run the setup and build commands, install the wallet:
+After you've run the setup and build commands, install Nockchain:
 
 ```
 make install-nockchain
 ```
 
+## Setup Keys
 
-## Testing Nodes
-
-To run a test Nockchain node that publishes the genesis block:
-
-```
-make run-nockchain-leader
-```
-
-
-To run a test Nockchain node that waits for the genesis block:
+To generate a new key pair:
 
 ```
-make run-nockchain-follower
+nockchain-wallet keygen
 ```
 
+This will print a new public/private key pair + chain code to the console, as well as the seed phrase for the private key.
+
+Now, copy the public key to the `.env` file:
+
+```
+MINING_PUBKEY=<public-key>
+```
+
+## Backup Keys
+
+To backup your keys, run:
+
+```
+nockchain-wallet export-keys
+```
+
+This will save your keys to a file called `keys.export` in the current directory.
+
+They can be imported later with:
+
+```
+nockchain-wallet import-keys --input keys.export
+```
+
+## Running Nodes
+
+To run a Nockchain miner:
+
+```
+make run-nockchain
+```
+
+## FAQ
+
+### Can I use same pubkey if running multiple miners?
+
+Yes, you can use the same pubkey if running multiple miners.
+
+### How do I change the mining pubkey?
+
+Run `nockchain-wallet keygen` to generate a new key pair and copy the new public key to the `.env` file.
+
+### How do I import an existing key that I generated with a different tool?
+
+If you have a **base58 encoded** public key *AND* a **base58 encoded** chain code, you can import it with:
+
+```
+nockchain-wallet import-master-pubkey --key <base58-encoded-public-key> --chain-code <base58-encoded-chain-code>
+```
+
+But you really should use the `nockchain-wallet keygen` command to generate a new key pair and use that instead.
