@@ -5,8 +5,7 @@ include .env
 export RUST_BACKTRACE ?= full
 export RUST_LOG ?= info,nockchain=debug,nockchain_libp2p_io=info,libp2p=info,libp2p_quic=info
 export MINIMAL_LOG_FORMAT ?= true
-export MINING_PUBKEY ?= EHmKL2U3vXfS5GYAY5aVnGdukfDWwvkQPCZXnjvZVShsSQi3UAuA4tQQpVwGJMzc9FfpTY8pLDkqhBGfWutiF4prrCktUH9oAWJxkXQBzAavKDc95NR3DjmYwnnw8GuugnK
-
+export MINING_PUBKEY ?= 2qwq9dQRZfpFx8BDicghpMRnYGKZsZGxxhh9m362pzpM9aeo276pR1yHZPS41y3CW3vPKxeYM8p8fzZS8GXmDGzmNNCnVNekjrSYogqfEFMqwhHh5iCjaKPaDTwhupWqiXj6
 export
 
 .PHONY: build
@@ -65,7 +64,7 @@ build-trivial: ensure-dirs
 	echo '%trivial' > hoon/trivial.hoon
 	hoonc --arbitrary hoon/trivial.hoon
 
-HOON_TARGETS=assets/dumb.jam assets/wal.jam
+HOON_TARGETS=assets/dumb.jam assets/wal.jam assets/miner.jam
 
 .PHONY: nuke-hoonc-data
 nuke-hoonc-data:
@@ -89,10 +88,15 @@ run-nockchain-leader:  # Run nockchain node in leader mode
 	$(call show_env_vars)
 	mkdir -p test-leader && cd test-leader && rm -f nockchain.sock && RUST_BACKTRACE=1 cargo run --release --bin nockchain -- --fakenet --genesis-leader --npc-socket nockchain.sock --mining-pubkey $(MINING_PUBKEY) --bind /ip4/0.0.0.0/udp/3005/quic-v1 --peer /ip4/127.0.0.1/udp/3006/quic-v1 --new-peer-id --no-default-peers
 
-.PHONY: run-nockchain
+.PHONY: run-nockchain-follower
 run-nockchain:  # Run a nockchain node in follower mode with a mining pubkey
 	$(call show_env_vars)
 	mkdir -p miner-node && cd miner-node && rm -f nockchain.sock && RUST_BACKTRACE=1 cargo run --release --bin nockchain -- --fakenet --genesis-watcher --npc-socket nockchain.sock --mining-pubkey $(MINING_PUBKEY) --bind /ip4/0.0.0.0/udp/3006/quic-v1 --peer /ip4/127.0.0.1/udp/3005/quic-v1 --new-peer-id --no-default-peers
+
+.PHONY: run-nockchain
+run-nockchain:  # Run a nockchain node in follower mode with a mining pubkey
+	$(call show_env_vars)
+	mkdir -p miner-node && cd miner-node && rm -f nockchain.sock && RUST_BACKTRACE=1 cargo run --release --bin nockchain -- --npc-socket nockchain.sock --mining-pubkey $(MINING_PUBKEY) --bind /ip4/0.0.0.0/udp/3006/quic-v1
 
 HOON_SRCS := $(find hoon -type file -name '*.hoon')
 

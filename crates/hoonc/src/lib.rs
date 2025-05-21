@@ -1,19 +1,19 @@
-use clap::{arg, command, ColorChoice, Parser};
-use nockvm::interpreter::{self, Context};
 use std::env::current_dir;
 use std::ffi::OsStr;
 use std::path::{Path, PathBuf};
-use tokio::fs::{self, File};
-use tokio::io::AsyncReadExt;
-use tracing::{debug, info, instrument, trace};
-use walkdir::{DirEntry, WalkDir};
 
+use clap::{arg, command, ColorChoice, Parser};
 use nockapp::driver::Operation;
 use nockapp::kernel::boot::{self, default_boot_cli, Cli as BootCli};
 use nockapp::noun::slab::NounSlab;
 use nockapp::{system_data_dir, AtomExt, Noun, NounExt};
+use nockvm::interpreter::{self, Context};
 use nockvm::noun::{Atom, D, T};
 use nockvm_macros::tas;
+use tokio::fs::{self, File};
+use tokio::io::AsyncReadExt;
+use tracing::{debug, info, instrument, trace};
+use walkdir::{DirEntry, WalkDir};
 
 pub const OUT_JAM_NAME: &str = "out.jam";
 
@@ -28,6 +28,9 @@ pub struct ChooCli {
     #[command(flatten)]
     pub boot: BootCli,
 
+    //  TODO: REPRODUCIBILITY:
+    //  make entry path relative to the dependency directory
+    //  we may have to go back to requiring that the entry exists in the dependency directory
     #[arg(help = "Path to file to compile")]
     pub entry: std::path::PathBuf,
 
@@ -340,7 +343,7 @@ pub fn canonicalize_and_string(path: &std::path::Path) -> String {
 
 /// Run the build and verify the output file, used to build files outside of cli.
 pub async fn run_build(
-    nockapp: nockapp::NockApp,
+    mut nockapp: nockapp::NockApp,
     out_path: Option<PathBuf>,
 ) -> Result<Vec<u8>, Error> {
     nockapp.run().await?;
