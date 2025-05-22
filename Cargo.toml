@@ -27,9 +27,6 @@ path = "crates/hoonc"
 [workspace.dependencies.nockapp]
 path = "crates/nockapp"
 
-[workspace.dependencies.assert_no_alloc]
-path = "crates/nockvm/rust/assert_no_alloc"
-
 [workspace.dependencies.ibig]
 path = "crates/nockvm/rust/ibig"
 
@@ -143,7 +140,7 @@ hickory-resolver = { version = "0.25.0-alpha.4", features = ["system-config"] }
 hickory-proto = "0.25.0-alpha.4"
 image = "0.24.7"
 # libp2p = "0.55.0"
-libp2p = { git = "https://github.com/libp2p/rust-libp2p.git", rev = "da0017ee887a868e231ed78c7de892779c17800d" }
+libp2p = { git = "ssh://git@github.com/libp2p/rust-libp2p.git", rev = "da0017ee887a868e231ed78c7de892779c17800d" }
 qrcode = "0.13"
 quickcheck = "1.0.3"
 quickcheck_macros = "1.0"
