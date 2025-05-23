@@ -91,8 +91,6 @@ nockchain-wallet import-keys --input keys.export
 
 ## Running Nodes
 
-To run a Nockchain node without mining:
-
 Make sure your current directory is nockchain.
 
 To run a Nockchain node without mining.
@@ -108,7 +106,6 @@ sh ./scripts/run_nockchain_miner.sh
 ```
 
 For launch, make sure you run in a fresh working directory that does not include a .data.nockchain file from testing.
-
 
 ## FAQ
 

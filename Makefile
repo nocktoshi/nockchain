@@ -83,6 +83,16 @@ build-hoon-all: nuke-assets update-hoonc ensure-dirs build-trivial $(HOON_TARGET
 build-hoon: ensure-dirs update-hoonc $(HOON_TARGETS)
 	$(call show_env_vars)
 
+.PHONY: run-nockchain-leader
+run-nockchain-leader:  # Run nockchain node in leader mode
+	$(call show_env_vars)
+	mkdir -p test-leader && cd test-leader && rm -f nockchain.sock && RUST_BACKTRACE=1 cargo run --release --bin nockchain -- --fakenet --genesis-leader --npc-socket nockchain.sock --mining-pubkey $(MINING_PUBKEY) --bind /ip4/0.0.0.0/udp/3005/quic-v1 --peer /ip4/127.0.0.1/udp/3006/quic-v1 --new-peer-id --no-default-peers
+
+.PHONY: run-nockchain-follower
+run-nockchain:  # Run a nockchain node in follower mode with a mining pubkey
+	$(call show_env_vars)
+	mkdir -p miner-node && cd miner-node && rm -f nockchain.sock && RUST_BACKTRACE=1 cargo run --release --bin nockchain -- --fakenet --genesis-watcher --npc-socket nockchain.sock --mining-pubkey $(MINING_PUBKEY) --bind /ip4/0.0.0.0/udp/3006/quic-v1 --peer /ip4/127.0.0.1/udp/3005/quic-v1 --new-peer-id --no-default-peers
+
 .PHONY: run-nockchain
 run-nockchain:  # Run a nockchain node in follower mode with a mining pubkey
 	$(call show_env_vars)
