@@ -3,11 +3,19 @@
 /=  mine  /common/pow
 /=  dumb-transact  /common/tx-engine
 /=  *  /common/zoon
+::
 ::  this library is where _every_ update to the consensus state
 ::  occurs, no matter how minor.
 |_  [c=consensus-state:dk =blockchain-constants:dumb-transact]
 +*  t  ~(. dumb-transact blockchain-constants)
-+|  %genesis
+::
+::
+::  checkpointed digests for chain stability
+++  checkpointed-digests
+  ^-  (z-map page-number:t hash:t)
+  %-  ~(gas z-by *(z-map page-number:t hash:t))
+  :~  [%144 (from-b58:hash:t '3rbqdep8HLqwwkW4YvZazVPYZpbqsFbqHCfEKGt13GVUUzA9ToDCsxT')]
+  ==
 ::
 ::  +set-genesis-seal: set .genesis-seal
 ++  set-genesis-seal
@@ -26,7 +34,6 @@
   ~>  %slog.[0 leaf+"received btc block hash, waiting to hear nockchain genesis block!"]
   c(btc-data `btc-hash)
 ::
-+|  %checks-and-computes
 ++  inputs-in-heaviest-balance
   |=  raw=raw-tx:t
   ^-  ?
@@ -133,7 +140,6 @@
   ^-  ?
   (lte (compute-size:page:t pag raw-txs.p) max-block-size:t)
 ::
-+|  %page-handling
 ++  add-page
   |=  [pag=page:t acc=tx-acc:t now=@da]
   ^-  consensus-state:dk
@@ -255,6 +261,12 @@
   ::  check height
   ?.  =(height.pag +(height.par))
     [%.n %page-height-invalid]
+  ::
+  ::  check if digest matches checkpointed history
+  ?.  ?|  ?!((~(has z-by checkpointed-digests) height.pag))
+          =(digest.pag (~(got z-by checkpointed-digests) height.pag))
+      ==
+    [%.n %checkpoint-match-failed]
   ::
   =/  check-heaviness=?
     .=  accumulated-work.pag
@@ -402,7 +414,6 @@
     ~
   $(height prev-height, ids [u.prev-id ids], count +(count))
 ::
-+|  %timestamp
 ::  +update-min-timestamps: sets min timestamp of children of .id
 ::
 ++  update-min-timestamps
