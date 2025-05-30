@@ -1,4 +1,5 @@
 #![allow(dead_code)]
+use crate::metrics::NockAppMetrics;
 use crate::noun::slab::NounSlab;
 use blake3::{Hash, Hasher};
 use byteorder::{LittleEndian, WriteBytesExt};
@@ -77,6 +78,11 @@ pub enum SerfAction {
         wire: WireRepr,
         cause: NounSlab,
         result: oneshot::Sender<Result<NounSlab>>,
+    },
+    // Provide metrics
+    ProvideMetrics {
+        metrics: Arc<NockAppMetrics>,
+        result: oneshot::Sender<()>,
     },
     // Stop the loop
     Stop,
@@ -167,6 +173,23 @@ impl SerfThread {
             event_number,
             cancel_token,
         })
+    }
+
+    pub(crate) fn provide_metrics(
+        &mut self,
+        metrics: Arc<NockAppMetrics>,
+    ) -> impl Future<Output = Result<()>> {
+        let action_sender = self.action_sender.clone();
+        let (result, result_recv) = oneshot::channel();
+        async move {
+            action_sender
+                .send(SerfAction::ProvideMetrics {
+                    metrics,
+                    result: result,
+                })
+                .await?;
+            Ok(result_recv.await?)
+        }
     }
 
     pub(crate) fn stop(&mut self) -> impl Future<Output = Result<()>> {
@@ -299,9 +322,17 @@ fn serf_loop(
     inhibit: Arc<AtomicBool>,
 ) {
     loop {
+        let start = std::time::Instant::now();
         let Some(action) = action_receiver.blocking_recv() else {
             break;
         };
+        let recv_elapsed = start.elapsed();
+        if let Some(nockapp_metrics) = &serf.metrics {
+            nockapp_metrics
+                .serf_loop_blocking_recv
+                .add_timing(&recv_elapsed);
+        };
+        let action_start = std::time::Instant::now();
         match action {
             SerfAction::LoadState { state, result } => {
                 let res = load_state_from_bytes(&mut serf, &state);
@@ -309,6 +340,12 @@ fn serf_loop(
                     debug!("Could not send load state result");
                     e
                 });
+                let action_elapsed = action_start.elapsed();
+                if let Some(nockapp_metrics) = &serf.metrics {
+                    nockapp_metrics
+                        .serf_loop_load_state
+                        .add_timing(&action_elapsed);
+                };
             }
             SerfAction::Stop => {
                 break;
@@ -319,6 +356,12 @@ fn serf_loop(
                     debug!("Could not send state bytes to dropped channel");
                     e
                 });
+                let action_elapsed = action_start.elapsed();
+                if let Some(nockapp_metrics) = &serf.metrics {
+                    nockapp_metrics
+                        .serf_loop_get_state_bytes
+                        .add_timing(&action_elapsed);
+                };
             }
             SerfAction::GetKernelStateSlab { result } => {
                 let kernel_state_noun = serf.arvo.slot(STATE_AXIS);
@@ -334,6 +377,12 @@ fn serf_loop(
                     debug!("Tried to send to dropped result channel");
                     e
                 });
+                let action_elapsed = action_start.elapsed();
+                if let Some(nockapp_metrics) = &serf.metrics {
+                    nockapp_metrics
+                        .serf_loop_get_kernel_state_slab
+                        .add_timing(&action_elapsed);
+                };
             }
             SerfAction::GetColdStateSlab { result } => {
                 let cold_state_noun = serf.context.cold.into_noun(serf.stack());
@@ -346,6 +395,12 @@ fn serf_loop(
                     debug!("Could not send cold state to dropped channel.");
                     e
                 });
+                let action_elapsed = action_start.elapsed();
+                if let Some(nockapp_metrics) = &serf.metrics {
+                    nockapp_metrics
+                        .serf_loop_get_cold_state_slab
+                        .add_timing(&action_elapsed);
+                };
             }
             SerfAction::Checkpoint { result } => {
                 let checkpoint = create_checkpoint(&mut serf, buffer_toggle.clone());
@@ -354,7 +409,13 @@ fn serf_loop(
                     debug!(
                         "Checkpoint receiver dropped before receiving result - likely timed out"
                     );
-                }
+                };
+                let action_elapsed = action_start.elapsed();
+                if let Some(nockapp_metrics) = &serf.metrics {
+                    nockapp_metrics
+                        .serf_loop_checkpoint
+                        .add_timing(&action_elapsed);
+                };
             }
             SerfAction::Peek { ovo, result } => {
                 if inhibit.load(Ordering::SeqCst) {
@@ -376,7 +437,11 @@ fn serf_loop(
                         debug!("Tried to send peek state to dropped channel");
                         e
                     });
-                }
+                };
+                let action_elapsed = action_start.elapsed();
+                if let Some(nockapp_metrics) = &serf.metrics {
+                    nockapp_metrics.serf_loop_peek.add_timing(&action_elapsed);
+                };
             }
             SerfAction::Poke {
                 wire,
@@ -402,9 +467,30 @@ fn serf_loop(
                         debug!("Failed to send poke result from serf thread");
                         e
                     });
-                }
+                };
+                let action_elapsed = action_start.elapsed();
+                if let Some(nockapp_metrics) = &serf.metrics {
+                    nockapp_metrics.serf_loop_poke.add_timing(&action_elapsed);
+                };
             }
-        }
+            SerfAction::ProvideMetrics { metrics, result } => {
+                serf.metrics = Some(metrics);
+                let _ = result.send(()).map_err(|e| {
+                    debug!("Failed to send metric-provision result from serf thread");
+                    e
+                });
+                let action_elapsed = action_start.elapsed();
+                if let Some(nockapp_metrics) = &serf.metrics {
+                    nockapp_metrics
+                        .serf_loop_provide_metrics
+                        .add_timing(&action_elapsed);
+                };
+            }
+        };
+        let elapsed = start.elapsed();
+        if let Some(nockapp_metrics) = &serf.metrics {
+            nockapp_metrics.serf_loop_all.add_timing(&elapsed);
+        };
     }
 }
 
@@ -690,6 +776,13 @@ impl Kernel {
         self.serf.peek(ovo)
     }
 
+    pub(crate) fn provide_metrics(
+        &mut self,
+        metrics: Arc<NockAppMetrics>,
+    ) -> impl Future<Output = Result<()>> {
+        self.serf.provide_metrics(metrics)
+    }
+
     pub async fn create_state_bytes(&self) -> Result<Vec<u8>> {
         self.serf.create_state_bytes().await
     }
@@ -710,6 +803,8 @@ pub struct Serf {
     pub cancel_token: NockCancelToken,
     /// The current event number.
     pub event_num: Arc<AtomicU64>,
+    /// A metrics
+    pub metrics: Option<Arc<NockAppMetrics>>,
 }
 
 impl Serf {
@@ -802,6 +897,7 @@ impl Serf {
             context,
             event_num,
             cancel_token,
+            metrics: None,
         };
 
         if let Some(checkpoint) = checkpoint {
@@ -932,7 +1028,7 @@ impl Serf {
     /// Result containing the slammed result or an error.
     pub fn slam(&mut self, axis: u64, ovo: Noun) -> Result<Noun> {
         let arvo = self.arvo;
-        slam(&mut self.context, arvo, axis, ovo)
+        slam(&mut self.context, arvo, axis, ovo, self.metrics.clone())
     }
 
     /// Performs a "soft" computation, handling errors gracefully.

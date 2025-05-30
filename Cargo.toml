@@ -157,6 +157,7 @@ serde_json = "1.0.104"
 sha3 = "0.10.8"
 slotmap = "1.0.7"
 smallvec = "1.13.2"
+strum = { version = "0.26", features = ["derive"] }
 termcolor = "1.4"
 testcontainers = { git = "https://github.com/bitemyapp/testcontainers-rs.git", rev = "54851fd9faf9b9cded9d681b46f87c056880d870" }
 

@@ -269,13 +269,12 @@ impl Wallet {
         command_noun_slab: NounSlab,
         operation: Operation,
     ) -> Result<(NounSlab, Operation), NockAppError> {
-        let original_root_noun_clone = unsafe { command_noun_slab.root() };
         let mut sync_slab = command_noun_slab.clone();
+
         let sync_tag = make_tas(&mut sync_slab, "sync-run");
         let tag_noun = sync_tag.as_noun();
-        let sync_run_cell = Cell::new(&mut sync_slab, tag_noun, *original_root_noun_clone);
-        let sync_run_noun = sync_run_cell.as_noun();
-        sync_slab.set_root(sync_run_noun);
+
+        sync_slab.modify(move |original_root| vec![tag_noun, original_root]);
 
         Ok((sync_slab, operation))
     }

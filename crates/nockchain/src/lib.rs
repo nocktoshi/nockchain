@@ -8,10 +8,9 @@ use clap::{arg, command, ArgAction, Parser};
 use libp2p::identity::Keypair;
 use libp2p::multiaddr::Multiaddr;
 use libp2p::{allow_block_list, connection_limits, memory_connection_limits, PeerId};
-use nockapp::driver::Operation;
 use nockapp::kernel::boot;
 use nockapp::wire::Wire;
-use nockapp::{one_punch_driver, NockApp, NounExt};
+use nockapp::NockApp;
 use nockchain_bitcoin_sync::{bitcoin_watcher_driver, BitcoinRPCConnection, GenesisNodeType};
 use nockchain_libp2p_io::p2p::{
     MAX_ESTABLISHED_CONNECTIONS, MAX_ESTABLISHED_CONNECTIONS_PER_PEER,
@@ -213,6 +212,8 @@ pub struct NockchainCli {
     pub btc_auth_cookie: Option<String>,
     #[arg(long, short, help = "Initial peer", action = ArgAction::Append)]
     pub peer: Vec<String>,
+    #[arg(long, short, help = "Force peer", action = ArgAction::Append)]
+    pub force_peer: Vec<String>,
     #[arg(long, help = "Allowed peer IDs file")]
     pub allowed_peers_path: Option<String>,
     #[arg(long, help = "Don't dial default peers")]
@@ -474,11 +475,12 @@ pub async fn init_with_kernel(
         .collect();
 
     // Set up initial peer addresses to connect to
-    let mut peer_multiaddrs: Vec<Multiaddr> = if cli.as_ref().is_some_and(|c| c.no_default_peers) {
-        Vec::new()
-    } else {
-        backbone_peers
-    };
+    let mut initial_peer_multiaddrs: Vec<Multiaddr> =
+        if cli.as_ref().is_some_and(|c| c.no_default_peers) {
+            Vec::new()
+        } else {
+            backbone_peers
+        };
 
     if let Some(c) = cli.as_ref() {
         let v: Vec<Multiaddr> = c
@@ -491,10 +493,27 @@ pub async fn init_with_kernel(
                     .expect("could not parse multiaddr from string")
             })
             .collect();
-        peer_multiaddrs.extend(v);
+        initial_peer_multiaddrs.extend(v);
     }
 
-    debug!("peer_multiaddrs: {:?}", peer_multiaddrs);
+    let force_peers = cli.as_ref().map_or(Vec::<Multiaddr>::new(), |c| {
+        c.force_peer
+            .clone()
+            .into_iter()
+            .map(|multiaddr_str| {
+                multiaddr_str
+                    .parse()
+                    .expect("could not parse multiaddr from string")
+            })
+            .collect()
+    });
+
+    for multiaddr in &force_peers {
+        initial_peer_multiaddrs.push(multiaddr.clone());
+    }
+
+    debug!("initial_peer_multiaddrs: {:?}", initial_peer_multiaddrs);
+    debug!("force_peer_multiaddrs: {:?}", force_peers);
 
     let equix_builder = equix::EquiXBuilder::new();
 
@@ -581,7 +600,8 @@ pub async fn init_with_kernel(
         allowed,
         limits,
         memory_limits,
-        &peer_multiaddrs,
+        &initial_peer_multiaddrs,
+        &force_peers,
         equix_builder,
         Some(libp2p_init_tx),
     );

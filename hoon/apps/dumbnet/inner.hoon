@@ -57,7 +57,7 @@
       =/  block-id  (from-b58:hash:t bid.pole)
       `(bind (~(get z-by blocks.c.k) block-id) to-page:local-page:t)
     ::
-        [%elders bid=@ peer-id=@ ~]
+        [%elders bid=@ ~]
       ::  get ancestor block IDs up to 24 deep for a given block
       ^-  (unit (unit [page-number:t (list block-id:t)]))
       =/  block-id  (from-b58:hash:t bid.pole)
@@ -269,7 +269,7 @@
       ::
       ::  tell driver we have seen this block so don't send it back to the kernel again
       =.  block-effs
-        [[%seen %block digest.pag] block-effs]
+        [[%seen %block digest.pag `height.pag] block-effs]
       ::  stop tracking block id as soon as we verify pow
       =.  block-effs
         %+  snoc  block-effs
@@ -547,7 +547,7 @@
             (to-page:local-page:t (~(got z-by pending-blocks.p.k) bid))
             :: if the block is bad, then tell the driver never to send it
             :: to us again
-            ~[[%seen %block bid]]
+            ~[[%seen %block bid ~]]
           ==
         ::  remove the block from pending blocks. at this point, its either
         ::  been discarded by the kernel or lives in the consensus state
@@ -616,7 +616,7 @@
         ::  request block N+1 on each peer's heaviest chain
         :+  [%request %block %by-height +(height.pag)]
           ::  tell driver we've seen this block so don't process it again
-          [%seen %block digest.pag]
+          [%seen %block digest.pag `height.pag]
         ~
       ::
       =/  old-heavy  heaviest-block.c.k
@@ -685,12 +685,12 @@
       ^-  [(list effect:dk) kernel-state:dk]
       ~>  %slog.[3 (cat 3 'command: ' -.command)]
       ::  ~&  "handling command: {<-.command>}"
-      ?:  &(?=(init-command:dk -.command) !init.a.k)
-        ::  kernel no longer in init phase, can't do init command
-        ~>  %slog.[3 leaf+"kernel no longer in init phase, can't do init command"]
+      ?:  &(?=(init-only-command:dk -.command) !init.a.k)
+        ::  kernel no longer in init phase, can't do init-only command
+        ~>  %slog.[3 leaf+"kernel no longer in init phase, can't do init-only command"]
         `k
-      ?:  &(?=(non-init-command:dk -.command) init.a.k)
-        ::  kernel in init phase, can't perform command
+      ?:  &(?!(?=(init-command:dk -.command)) init.a.k)
+        ::  kernel in init phase, can't perform non-init command
         ~>  %slog.[3 leaf+"kernel is in init phase, can't do non-init command"]
         `k
       |^
@@ -747,11 +747,14 @@
           [%request %block %by-height *page-number:t]~
         :: yes, so get height N of heaviest block and request the block
         :: of height N+1
+        :: Also emit %seen for the heaviest block so our cache can start to update
         =/  height=page-number:t
           +(height:(~(got z-by blocks.c.k) u.heaviest-block.c.k))
         ~>  %slog.[0 leaf+"dumbnet born"]
         :_  k
-        [%request %block %by-height height]~
+        :~  [%request %block %by-height height]
+            [%seen %block u.heaviest-block.c.k `height]
+        ==
       ::
       ++  do-pow
         ^-  [(list effect:dk) kernel-state:dk]

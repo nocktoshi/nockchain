@@ -9,16 +9,18 @@ use futures::{Future, StreamExt};
 use libp2p::identify::Event::Received;
 use libp2p::identity::Keypair;
 use libp2p::kad::NoKnownPeers;
+use libp2p::multiaddr::Protocol;
 use libp2p::peer_store::Store;
 use libp2p::request_response::Event::*;
 use libp2p::request_response::Message::*;
 use libp2p::request_response::{self};
-use libp2p::swarm::SwarmEvent;
+use libp2p::swarm::{ConnectionId, SwarmEvent};
 use libp2p::{
     allow_block_list, connection_limits, memory_connection_limits, Multiaddr, PeerId, Swarm,
 };
 use nockapp::driver::{IODriverFn, NockAppHandle, PokeResult};
 use nockapp::noun::slab::NounSlab;
+use nockapp::noun::FromAtom;
 use nockapp::utils::make_tas;
 use nockapp::utils::scry::*;
 use nockapp::wire::{Wire, WireRepr};
@@ -32,7 +34,10 @@ use tracing::{debug, error, info, instrument, trace, warn};
 
 use crate::metrics::NockchainP2PMetrics;
 use crate::p2p::*;
-use crate::p2p_util::{log_fail2ban_ipv4, log_fail2ban_ipv6, MessageTracker, PeerIdExt};
+use crate::p2p_util::{
+    log_fail2ban_ipv4, log_fail2ban_ipv6, CacheResponse, MessageTracker, NockchainDataRequest,
+    PeerIdExt,
+};
 use crate::tip5_util::tip5_hash_to_base58;
 
 //TODO This wire is a placeholder for now. The libp2p driver is entangled with the other types of nockchain pokes
@@ -161,13 +166,17 @@ pub fn make_libp2p_driver(
     limits: connection_limits::ConnectionLimits,
     memory_limits: Option<memory_connection_limits::Behaviour>,
     initial_peers: &[Multiaddr],
+    force_peers: &[Multiaddr],
     equix_builder: equix::EquiXBuilder,
     init_complete_tx: Option<tokio::sync::oneshot::Sender<()>>,
 ) -> IODriverFn {
     let initial_peers = Vec::from(initial_peers);
+    let force_peers = Vec::from(force_peers);
     Box::new(|mut handle| {
-        let metrics = NockchainP2PMetrics::register(gnort::global_metrics_registry())
-            .expect("Failed to register metrics!");
+        let metrics = Arc::new(
+            NockchainP2PMetrics::register(gnort::global_metrics_registry())
+                .expect("Failed to register metrics!"),
+        );
 
         Box::pin(async move {
             let mut swarm =
@@ -186,11 +195,15 @@ pub fn make_libp2p_driver(
                 };
             let (swarm_tx, mut swarm_rx) = mpsc::channel::<SwarmAction>(1000); // number needs to be high enough to send gossips to peers
             let mut join_set = TrackedJoinSet::<Result<(), NockAppError>>::new();
-            let message_tracker = Arc::new(Mutex::new(MessageTracker::new()));
+            let message_tracker = Arc::new(Mutex::new(MessageTracker::new(metrics.clone())));
             let mut kad_bootstrap = tokio::time::interval(KADEMLIA_BOOTSTRAP_INTERVAL);
+            let mut force_peer_dial = tokio::time::interval(FORCE_PEER_DIAL_INTERVAL);
+            let mut reset_request_counts = tokio::time::interval(REQUEST_HIGH_RESET);
+            let (traffic_handle, effect_handle) = handle.dup();
+            let traffic_cop = traffic_cop::TrafficCop::new(traffic_handle, &mut join_set);
 
             let mut initial_peer_retries_remaining = INITIAL_PEER_RETRIES;
-            dial_initial_peers(&mut swarm, &initial_peers)?;
+            dial_peers(&mut swarm, &initial_peers)?;
 
             if let Some(tx) = init_complete_tx {
                 let _ = tx.send(());
@@ -199,15 +212,16 @@ pub fn make_libp2p_driver(
 
             loop {
                 tokio::select! {
-                    Ok(noun_slab) = handle.next_effect() => {
+                    Ok(noun_slab) = effect_handle.next_effect() => {
                         let _span = tracing::trace_span!("broadcast").entered();
                         let swarm_tx_clone = swarm_tx.clone();
                         let equix_builder_clone = equix_builder.clone();
                         let local_peer_id = *swarm.local_peer_id();
                         let connected_peers: Vec<PeerId> = swarm.connected_peers().cloned().collect();
                         let message_tracker_clone = Arc::clone(&message_tracker); // Clone the Arc, not the MessageTracker
+                        let metrics_clone = metrics.clone();
                         join_set.spawn("handle_effect".to_string(), async move {
-                            handle_effect(noun_slab, swarm_tx_clone, equix_builder_clone, local_peer_id, connected_peers, message_tracker_clone).await
+                            handle_effect(noun_slab, swarm_tx_clone, equix_builder_clone, local_peer_id, connected_peers, message_tracker_clone, metrics_clone).await
                         });
                     },
                     Some(event) = swarm.next() => {
@@ -219,10 +233,12 @@ pub fn make_libp2p_driver(
                                 trace!("SEvent: identify_received");
                                 identify_received(&mut swarm, peer_id, info)?;
                             },
-                            SwarmEvent::ConnectionEstablished { peer_id, endpoint, .. } => {
+                            SwarmEvent::ConnectionEstablished { connection_id, peer_id, endpoint, .. } => {
+                                message_tracker.lock().await.track_connection(connection_id, peer_id, endpoint.get_remote_address());
                                 debug!("SEvent: {peer_id} is new friend via: {endpoint:?}");
                             },
-                            SwarmEvent::ConnectionClosed { peer_id, endpoint, cause, .. } => {
+                            SwarmEvent::ConnectionClosed { connection_id, peer_id, endpoint, cause, .. } => {
+                                message_tracker.lock().await.lost_connection(connection_id);
                                 info!("SEvent: friendship ended with {peer_id} via: {endpoint:?}. cause: {cause:?}");
                                 // Clean up the message tracker when a peer disconnects
                                 let mut tracker = message_tracker.lock().await;
@@ -232,19 +248,18 @@ pub fn make_libp2p_driver(
                                trace!("SEvent: Failed incoming connection from {} to {}: {}",
                                send_back_addr, local_addr, error);
                             },
-                            SwarmEvent::Behaviour(NockchainEvent::RequestResponse(Message { connection_id: _, peer, message })) => {
+                            SwarmEvent::Behaviour(NockchainEvent::RequestResponse(Message { connection_id , peer, message })) => {
                                 trace!("SEvent: received RequestResponse");
                                 let _span = tracing::debug_span!("SwarmEvent::Behavior(NockchainEvent::RequestResponse(…))").entered();
                                 let swarm_tx_clone = swarm_tx.clone();
                                 let mut equix_builder_clone = equix_builder.clone();
                                 let local_peer_id = *swarm.local_peer_id();
                                 // We have to dup and move a handle back into `handle` to propitiate the borrow checker
-                                let (orig_handle, request_response_handle) = handle.dup();
-                                handle = orig_handle;
+                                let traffic_clone = traffic_cop.clone();
                                 let metrics = metrics.clone();
                                 let message_tracker_clone = Arc::clone(&message_tracker); // Clone the Arc, not the MessageTracker
                                 join_set.spawn("handle_request_response".to_string(), async move {
-                                    handle_request_response(peer, message, swarm_tx_clone, &mut equix_builder_clone, local_peer_id, request_response_handle, metrics, message_tracker_clone).await
+                                    handle_request_response(peer, connection_id, message, swarm_tx_clone, &mut equix_builder_clone, local_peer_id, traffic_clone, metrics.clone(), message_tracker_clone).await
                                 });
                             },
                             SwarmEvent::OutgoingConnectionError { peer_id, error, .. } => {
@@ -317,11 +332,19 @@ pub fn make_libp2p_driver(
                             if initial_peer_retries_remaining > 0 {
                                 info!("Failed to bootstrap: {}", NoKnownPeers());
                                 initial_peer_retries_remaining -= 1;
-                                dial_initial_peers(&mut swarm, &initial_peers)?;
+                                dial_peers(&mut swarm, &initial_peers)?;
                             } else {
                                 warn!("Failed to bootstrap after {} retries, will not attempt to redial initial peers.", INITIAL_PEER_RETRIES);
                             }
                         }
+                    },
+                    _ = force_peer_dial.tick() => {
+                        debug!("Force dialing peers");
+                        dial_peers(&mut swarm, &force_peers)?;
+                    },
+                    _ = reset_request_counts.tick() => {
+                        trace!("Resetting request counts");
+                        message_tracker.lock().await.reset_requests();
                     },
                     Some(result) = join_set.join_next() => {
                         if let Err(e) = result {
@@ -464,6 +487,7 @@ async fn handle_effect(
     local_peer_id: PeerId,
     connected_peers: Vec<PeerId>,
     message_tracker: Arc<Mutex<MessageTracker>>,
+    metrics: Arc<NockchainP2PMetrics>,
 ) -> Result<(), NockAppError> {
     match EffectType::from_noun_slab(&noun_slab) {
         EffectType::Gossip => {
@@ -480,9 +504,11 @@ async fn handle_effect(
             let gossip_noun = unsafe { tail_slab.root() };
             if let Ok(data_cell) = gossip_noun.as_cell() {
                 if data_cell.head().eq_bytes(b"heard-block") {
-                    trace!("Gossip effect for heard-block, clearing block cache");
+                    trace!("Gossip effect for heard-block, clearing block and elders cache");
                     let mut tracker = message_tracker.lock().await;
                     tracker.block_cache.clear();
+                    tracker.elders_cache.clear();
+                    tracker.elders_negative_cache.clear();
                 }
             }
 
@@ -624,12 +650,22 @@ async fn handle_effect(
             let seen_type = seen_cell.head();
 
             if seen_type.eq_bytes(b"block") {
-                let block_id = seen_cell.tail().as_cell()?;
+                let seen_pq = seen_cell.tail().as_cell()?;
+                let block_id = seen_pq.head().as_cell()?;
                 let mut tracker = message_tracker.lock().await;
                 let block_id_str = tip5_hash_to_base58(block_id.as_noun())
                     .expect("failed to convert block ID to base58");
-                debug!("seen block id: {:?}", &block_id_str);
+                trace!("seen block id: {:?}", &block_id_str);
                 tracker.seen_blocks.insert(block_id_str);
+
+                if let Ok(block_height_unit_cell) = seen_pq.tail().as_cell() {
+                    let block_height = block_height_unit_cell.tail().as_atom()?.as_u64()?;
+                    if tracker.first_negative <= block_height {
+                        metrics.highest_block_height_seen.swap(block_height as f64);
+                        tracker.first_negative = block_height + 1;
+                        trace!("Setting tracker.first_negative to {:?}", tracker.first_negative);
+                    }
+                }
             } else if seen_type.eq_bytes(b"tx") {
                 let tx_id = seen_cell.tail().as_cell()?;
                 let mut tracker = message_tracker.lock().await;
@@ -650,12 +686,13 @@ async fn handle_effect(
 #[allow(clippy::too_many_arguments)]
 async fn handle_request_response(
     peer: PeerId,
+    connection_id: ConnectionId,
     message: request_response::Message<NockchainRequest, NockchainResponse>,
     swarm_tx: mpsc::Sender<SwarmAction>,
     equix_builder: &mut equix::EquiXBuilder,
     local_peer_id: PeerId,
-    nockapp: NockAppHandle,
-    metrics: NockchainP2PMetrics,
+    traffic: traffic_cop::TrafficCop,
+    metrics: Arc<NockchainP2PMetrics>,
     message_tracker: Arc<Mutex<MessageTracker>>,
 ) -> Result<(), NockAppError> {
     trace!("handle_request_response peer: {peer}");
@@ -672,6 +709,34 @@ async fn handle_request_response(
                 return Ok(());
             };
             trace!("handle_request_response: powork verified");
+            let addr = {
+                message_tracker
+                    .lock()
+                    .await
+                    .connection_address(connection_id)
+            };
+            if let Some(addr) = addr {
+                let addr_str = addr.to_string();
+                debug!("Request received from peer at address {addr_str} with id {peer}");
+                let mut ip4_addr = None;
+                for proto in addr.iter() {
+                    if let Protocol::Ip4(ip4) = proto {
+                        ip4_addr = Some(ip4);
+                    }
+                    break;
+                }
+                if let Some(ip4) = ip4_addr {
+                    let threshold_exceeded = message_tracker
+                        .lock()
+                        .await
+                        .requested(ip4, REQUEST_HIGH_THRESHOLD);
+                    if let Some(count) = threshold_exceeded {
+                        warn!("IP address {ip4} exceeded the request-per-interval threshold with {count} requests");
+                    }
+                }
+            } else {
+                debug!("Request received but connection not tracked. Bug?");
+            }
             let mut request_slab = NounSlab::new();
             match request {
                 NockchainRequest::Request {
@@ -682,15 +747,37 @@ async fn handle_request_response(
                     trace!("handle_request_response: Request received");
                     let message_bytes = Bytes::from(message.to_vec());
                     let request_noun = request_slab.cue_into(message_bytes)?;
-                    let (scry_res_slab, cache_hit) = if let Ok(Some(cache_result)) = {
-                        let mut tracker = message_tracker.lock().await;
-                        tracker.check_cache(&request_noun, &metrics).await
-                    } {
-                        debug!("found cached response for request");
+
+                    let data_request = NockchainDataRequest::from_noun(request_noun)?;
+
+                    let cached = {
+                        let cache_result = {
+                            let mut tracker = message_tracker.lock().await;
+                            tracker.check_cache(data_request.clone(), &metrics).await
+                        };
+                        match cache_result {
+                            Ok(CacheResponse::Cached(slab)) => {
+                                trace!("Found cached response for request");
+                                Some(slab)
+                            }
+                            Ok(CacheResponse::NegativeCached) => {
+                                trace!("Negative-cached response for request");
+                                return Ok(()); // short-circuit
+                            }
+                            Ok(CacheResponse::NotCached) => None,
+                            Err(e) => {
+                                warn!("Error checking block cache: {e:?}");
+                                None
+                            }
+                        }
+                    };
+
+                    let (scry_res_slab, cache_hit) = if let Some(cache_result) = cached {
+                        trace!("found cached response for request");
                         (cache_result, true)
                     } else {
-                        let scry_slab = request_to_scry_slab(&request_noun)?;
-                        let Some(scry_res_slab) = (match nockapp.try_peek(scry_slab).await {
+                        let scry_slab = request_to_scry_slab(data_request.clone())?;
+                        let Some(scry_res_slab) = (match traffic.peek(scry_slab).await {
                             Ok(Some(res_slab)) => {
                                 metrics.requests_peeked_some.increment();
                                 Some(res_slab)
@@ -722,70 +809,43 @@ async fn handle_request_response(
                         (scry_res_slab, false)
                     };
 
-                    let Ok(request_cell) = request_noun.as_cell() else {
-                        error!("request noun not a cell");
-                        return Err(NockAppError::OtherError);
-                    };
-                    let Ok(scry_tag) = request_cell.tail().as_cell()?.head().as_direct() else {
-                        error!("request tag axis not an atom");
-                        return Err(NockAppError::OtherError);
-                    };
-                    trace!("handle_request_response: request cell parsed");
                     let mut res_slab = NounSlab::new();
-                    let response = match scry_tag.data() {
-                        tas!(b"block") => {
-                            trace!("handle_request_response: block tag");
+                    let response = match data_request {
+                        NockchainDataRequest::BlockByHeight(height) => {
                             let scry_res = unsafe { scry_res_slab.root() };
-
-                            // Extract the request type from under %block
-                            let request_type = request_cell
-                                .tail()
-                                .as_cell()
-                                .and_then(|c| c.tail().as_cell())
-                                .map(|c| c.head().eq_bytes(b"elders"))
-                                .map_err(|_| {
-                                    NockAppError::IoError(std::io::Error::new(
-                                        std::io::ErrorKind::Other,
-                                        "invalid block request structure",
-                                    ))
-                                })?;
-
-                            // Use heard-elders for elders requests, heard-block otherwise
-                            let heard_type = if request_type {
-                                "heard-elders"
-                            } else {
-                                "heard-block"
-                            };
-
-                            match create_scry_response(scry_res, heard_type, &mut res_slab) {
+                            match create_scry_response(scry_res, "heard-block", &mut res_slab) {
                                 Left(()) => {
-                                    trace!(
-                                        "No data found for incoming block request, type: {}",
-                                        heard_type
-                                    );
+                                    trace!("No data found for incoming block by-height request");
                                     return Ok(());
                                 }
                                 Right(result) => {
-                                    // cache response
-                                    if !cache_hit && heard_type == "heard-block" {
-                                        let height = request_cell
-                                            .tail()
-                                            .as_cell()?
-                                            .tail()
-                                            .as_cell()?
-                                            .tail()
-                                            .as_direct()?
-                                            .data();
+                                    if !cache_hit {
                                         let mut tracker = message_tracker.lock().await;
                                         tracker.block_cache.insert(height, scry_res_slab.clone());
-                                        debug!("cacheing block request by height={:?}", height);
                                     }
                                     result?
                                 }
                             }
                         }
-                        tas!(b"raw-tx") => {
-                            trace!("handle_request_response: raw-tx tag");
+                        NockchainDataRequest::EldersById(id, _, _) => {
+                            let scry_res = unsafe { scry_res_slab.root() };
+                            match create_scry_response(scry_res, "heard-elders", &mut res_slab) {
+                                Left(()) => {
+                                    trace!("No data found for incoming elders request");
+                                    let mut tracker = message_tracker.lock().await;
+                                    tracker.elders_negative_cache.insert(id.clone());
+                                    return Ok(());
+                                }
+                                Right(result) => {
+                                    if !cache_hit {
+                                        let mut tracker = message_tracker.lock().await;
+                                        tracker.elders_cache.insert(id, scry_res_slab.clone());
+                                    }
+                                    result?
+                                }
+                            }
+                        }
+                        NockchainDataRequest::RawTransactionById(id, _) => {
                             let scry_res = unsafe { scry_res_slab.root() };
                             match create_scry_response(scry_res, "heard-tx", &mut res_slab) {
                                 Left(()) => {
@@ -794,19 +854,13 @@ async fn handle_request_response(
                                 }
                                 Right(result) => {
                                     if !cache_hit {
-                                        let tx_id = request_cell.tail().as_cell()?.tail();
-                                        let tx_id_str = tip5_hash_to_base58(tx_id)?;
                                         let mut tracker = message_tracker.lock().await;
-                                        debug!("cacheing tx request by id={:?}", tx_id_str);
-                                        tracker.tx_cache.insert(tx_id_str, scry_res_slab.clone());
+                                        trace!("cacheing tx request by id={:?}", id);
+                                        tracker.tx_cache.insert(id.clone(), scry_res_slab.clone());
                                     }
                                     result?
                                 }
                             }
-                        }
-                        tag => {
-                            error!("Unknown request tag: {:?}", tag);
-                            return Err(NockAppError::OtherError);
                         }
                     };
                     swarm_tx
@@ -838,11 +892,11 @@ async fn handle_request_response(
                             let block_id_str = tip5_hash_to_base58(block_id)?;
                             let tracker = message_tracker.lock().await;
                             if tracker.seen_blocks.contains(&block_id_str) {
-                                debug!("Block already seen, not processing: {:?}", block_id_str);
+                                trace!("Block already seen, not processing: {:?}", block_id_str);
                                 metrics.block_seen_cache_hits.increment();
                                 return Ok(());
                             } else {
-                                debug!("block not seen, processing: {:?}", block_id_str);
+                                trace!("block not seen, processing: {:?}", block_id_str);
                                 metrics.block_seen_cache_misses.increment();
                             }
                         }
@@ -853,11 +907,11 @@ async fn handle_request_response(
                             let tracker = message_tracker.lock().await;
                             let tx_id_str = tip5_hash_to_base58(tx_id)?;
                             if tracker.seen_txs.contains(&tx_id_str) {
-                                debug!("Tx already seen, not processing: {:?}", tx_id_str);
+                                trace!("Tx already seen, not processing: {:?}", tx_id_str);
                                 metrics.tx_seen_cache_hits.increment();
                                 return Ok(());
                             } else {
-                                debug!("tx not seen, processing: {:?}", tx_id_str);
+                                trace!("tx not seen, processing: {:?}", tx_id_str);
                                 metrics.tx_seen_cache_misses.increment();
                             }
                         }
@@ -875,7 +929,10 @@ async fn handle_request_response(
                             wire,
                             nockvm::noun::FullDebugCell(unsafe { &request_slab.root().as_cell()? })
                         );
-                        match nockapp.try_poke(wire.to_wire(), request_slab).await {
+                        match traffic
+                            .poke_high_priority(wire.to_wire(), request_slab)
+                            .await
+                        {
                             Ok(PokeResult::Ack) => {
                                 metrics.gossip_acked.increment();
                             }
@@ -925,7 +982,10 @@ async fn handle_request_response(
                 response_slab.set_root(response_fact);
                 let wire = Libp2pWire::Response(peer);
 
-                match nockapp.try_poke(wire.to_wire(), response_slab).await {
+                match traffic
+                    .poke_high_priority(wire.to_wire(), response_slab)
+                    .await
+                {
                     Ok(PokeResult::Ack) => {
                         metrics.responses_acked.increment();
                     }
@@ -979,116 +1039,31 @@ async fn handle_request_response(
 /// [%request [%block [%elders [1 2 3 4 5] abcDEF]]] -> [%elders base58-block-id peer-id 0]
 /// For a raw transaction request:
 /// [%request [%raw-tx [%by-id [1 2 3 4 5]]]] -> [%raw-transaction base58-tx-id 0]
-fn request_to_scry_slab(noun: &Noun) -> Result<NounSlab, NockAppError> {
-    let Ok(request) = noun.as_cell() else {
-        return Err(NockAppError::IoError(std::io::Error::new(
-            std::io::ErrorKind::Other,
-            "Unknown request - not a cell",
-        )));
-    };
-
-    let Ok(tag) = request.head().as_direct() else {
-        return Err(NockAppError::IoError(std::io::Error::new(
-            std::io::ErrorKind::Other,
-            "Unknown request - not a direct",
-        )));
-    };
-
-    if tag.data() != tas!(b"request") {
-        return Err(NockAppError::IoError(std::io::Error::new(
-            std::io::ErrorKind::Other,
-            "Unknown request - not a request",
-        )));
-    }
-
-    let mut scry_path_slab = NounSlab::new();
-    let request_body = request.tail().as_cell()?;
-
-    if request_body.head().eq_bytes(b"block") {
-        let Ok(tail_cell) = request_body.tail().as_cell() else {
-            return Err(NockAppError::IoError(std::io::Error::new(
-                std::io::ErrorKind::Other,
-                "Invalid block request",
-            )));
-        };
-
-        if tail_cell.head().eq_bytes(b"by-height") && tail_cell.tail().is_atom() {
-            let pax = T(
-                &mut scry_path_slab,
-                &[D(tas!(b"heavy-n")), tail_cell.tail(), D(0)],
-            );
-            scry_path_slab.set_root(pax);
-            trace!(
-                "block by-height: {:?}",
-                nockvm::noun::DebugPath(&pax.as_cell()?)
-            );
-            return Ok(scry_path_slab);
-        } else if tail_cell.head().eq_bytes(b"elders") {
-            let Ok(elders_cell) = tail_cell.tail().as_cell() else {
-                return Err(NockAppError::IoError(std::io::Error::new(
-                    std::io::ErrorKind::Other,
-                    "Invalid elders request",
-                )));
-            };
-
-            let block_id_b58 = tip5_hash_to_base58(elders_cell.head())?;
-            let block_id_atom =
-                Atom::from_value(&mut scry_path_slab, block_id_b58).unwrap_or_else(|_| {
-                    panic!(
-                        "Called `expect()` at {}:{} (git sha: {})",
-                        file!(),
-                        line!(),
-                        option_env!("GIT_SHA").unwrap_or("unknown")
-                    )
-                });
-            let peer_id = elders_cell.tail();
-
-            let pax = T(
-                &mut scry_path_slab,
-                &[D(tas!(b"elders")), block_id_atom.as_noun(), peer_id, D(0)],
-            );
-            debug!(
-                "block elders: {:?}",
-                nockvm::noun::DebugPath(&pax.as_cell()?)
-            );
-            scry_path_slab.set_root(pax);
-            return Ok(scry_path_slab);
+fn request_to_scry_slab(request: NockchainDataRequest) -> Result<NounSlab, NockAppError> {
+    match request {
+        NockchainDataRequest::BlockByHeight(height) => {
+            let mut slab = NounSlab::new();
+            let height_atom = Noun::from_atom(Atom::new(&mut slab, height));
+            let noun = T(&mut slab, &[D(tas!(b"heavy-n")), height_atom, D(0)]);
+            slab.set_root(noun);
+            Ok(slab)
         }
-    } else if request_body.head().eq_bytes(b"raw-tx") {
-        let Ok(tail_cell) = request_body.tail().as_cell() else {
-            return Err(NockAppError::IoError(std::io::Error::new(
-                std::io::ErrorKind::Other,
-                "Invalid raw-tx request",
-            )));
-        };
-
-        if tail_cell.head().eq_bytes(b"by-id") {
-            let tx_id_b58 = tip5_hash_to_base58(tail_cell.tail())?;
-            let tx_id_atom =
-                Atom::from_value(&mut scry_path_slab, tx_id_b58).unwrap_or_else(|_| {
-                    panic!(
-                        "Called `expect()` at {}:{} (git sha: {})",
-                        file!(),
-                        line!(),
-                        option_env!("GIT_SHA").unwrap_or("unknown")
-                    )
-                });
-            let raw_tx_tag = make_tas(&mut scry_path_slab, "raw-transaction").as_noun();
-            let pax = T(
-                &mut scry_path_slab,
-                &[raw_tx_tag, tx_id_atom.as_noun(), D(0)],
-            );
-            debug!("tx by-id: {:?}", nockvm::noun::DebugPath(&pax.as_cell()?));
-            scry_path_slab.set_root(pax);
-            return Ok(scry_path_slab);
+        NockchainDataRequest::EldersById(str, _, _) => {
+            let mut slab = NounSlab::new();
+            let id_atom = Atom::from_value(&mut slab, str)?;
+            let noun = T(&mut slab, &[D(tas!(b"elders")), id_atom.as_noun(), D(0)]);
+            slab.set_root(noun);
+            Ok(slab)
+        }
+        NockchainDataRequest::RawTransactionById(str, _) => {
+            let mut slab = NounSlab::new();
+            let raw_tx_tag = make_tas(&mut slab, "raw-transaction").as_noun();
+            let id_atom = Atom::from_value(&mut slab, str)?;
+            let noun = T(&mut slab, &[raw_tx_tag, id_atom.as_noun(), D(0)]);
+            slab.set_root(noun);
+            Ok(slab)
         }
     }
-
-    // log the head of the request body
-    Err(NockAppError::IoError(std::io::Error::new(
-        std::io::ErrorKind::Other,
-        format!("Unknown request - {:?}", request_body.head()),
-    )))
 }
 
 /// Creates a response to a scry request by processing the scry result noun
@@ -1175,7 +1150,10 @@ mod tests {
             let request = T(&mut slab, &[D(tas!(b"request")), block_cell]);
             slab.set_root(request);
 
-            let result_slab = request_to_scry_slab(unsafe { slab.root() }).unwrap_or_else(|_| {
+            let data_request = NockchainDataRequest::from_noun(request)
+                .expect("Failed to create request from noun");
+
+            let result_slab = request_to_scry_slab(data_request).unwrap_or_else(|_| {
                 panic!(
                     "Called `expect()` at {}:{} (git sha: {})",
                     file!(),
@@ -1249,7 +1227,8 @@ mod tests {
         {
             let mut slab = NounSlab::new();
             slab.set_root(D(123));
-            let result = request_to_scry_slab(unsafe { slab.root() });
+            let result = NockchainDataRequest::from_noun(*unsafe { slab.root() })
+                .and_then(|r| request_to_scry_slab(r));
             assert!(result.is_err());
         }
 
@@ -1261,15 +1240,7 @@ mod tests {
 
             // Create a random peer ID and store its bytes
             let peer_id = PeerId::random();
-            let peer_id_atom =
-                Atom::from_value(&mut slab, peer_id.to_base58()).unwrap_or_else(|_| {
-                    panic!(
-                        "Called `expect()` at {}:{} (git sha: {})",
-                        file!(),
-                        line!(),
-                        option_env!("GIT_SHA").unwrap_or("unknown")
-                    )
-                });
+            let peer_id_atom = Atom::from_value(&mut slab, peer_id.to_base58()).unwrap();
 
             let elders_cell = T(&mut slab, &[five_tuple, peer_id_atom.as_noun()]);
             let elders_tas = D(tas!(b"elders"));
@@ -1278,7 +1249,10 @@ mod tests {
             let request = T(&mut slab, &[D(tas!(b"request")), block_cell]);
             slab.set_root(request);
 
-            let result_slab = request_to_scry_slab(unsafe { slab.root() }).unwrap_or_else(|_| {
+            let data_request = NockchainDataRequest::from_noun(request)
+                .expect("Could not create request from noun");
+
+            let result_slab = request_to_scry_slab(data_request).unwrap_or_else(|_| {
                 panic!(
                     "Called `expect()` at {}:{} (git sha: {})",
                     file!(),
@@ -1288,7 +1262,7 @@ mod tests {
             });
             let result = unsafe { result_slab.root() };
 
-            // Verify the structure: [%elders block_id_b58 peer_id 0]
+            // Verify the structure: [%elders block_id_b58 0]
             assert!(result.is_cell());
             let result_cell = result.as_cell().unwrap_or_else(|_| {
                 panic!(
@@ -1349,44 +1323,9 @@ mod tests {
             });
             assert_eq!(block_id_str, expected_b58);
 
-            // Check peer ID
-            let peer_cell = tail_cell.tail().as_cell().unwrap_or_else(|_| {
-                panic!(
-                    "Called `expect()` at {}:{} (git sha: {})",
-                    file!(),
-                    line!(),
-                    option_env!("GIT_SHA").unwrap_or("unknown")
-                )
-            });
-            let peer_id_result = peer_cell.head().as_atom().unwrap_or_else(|_| {
-                panic!(
-                    "Called `expect()` at {}:{} (git sha: {})",
-                    file!(),
-                    line!(),
-                    option_env!("GIT_SHA").unwrap_or("unknown")
-                )
-            });
-            let peer_bytes = peer_id_result.to_bytes_until_nul().unwrap_or_else(|_| {
-                panic!(
-                    "Called `expect()` at {}:{} (git sha: {})",
-                    file!(),
-                    line!(),
-                    option_env!("GIT_SHA").unwrap_or("unknown")
-                )
-            });
-            let peer_str = String::from_utf8(peer_bytes).unwrap_or_else(|_| {
-                panic!(
-                    "Called `expect()` at {}:{} (git sha: {})",
-                    file!(),
-                    line!(),
-                    option_env!("GIT_SHA").unwrap_or("unknown")
-                )
-            });
-            assert_eq!(peer_str, peer_id.to_base58());
-
             // Check final 0
             assert_eq!(
-                peer_cell
+                tail_cell
                     .tail()
                     .as_direct()
                     .unwrap_or_else(|err| {
@@ -1411,8 +1350,10 @@ mod tests {
             );
             slab.set_root(invalid_request);
 
-            let result = request_to_scry_slab(unsafe { slab.root() });
+            let result = NockchainDataRequest::from_noun(invalid_request)
+                .and_then(|r| request_to_scry_slab(r));
             assert!(result.is_err());
+            drop(slab);
         }
     }
 
@@ -1507,6 +1448,10 @@ mod tests {
             &[liar_peer_atom.as_noun(), peer_id_atom.as_noun()],
         );
         effect_slab.set_root(effect);
+        let metrics = Arc::new(
+            NockchainP2PMetrics::register(gnort::global_metrics_registry())
+                .expect("Could not register metrics"),
+        );
 
         // Create channel to receive SwarmAction
         let (swarm_tx, mut swarm_rx) = mpsc::channel(1);
@@ -1518,7 +1463,8 @@ mod tests {
             EquiXBuilder::new(),
             PeerId::random(), // local peer ID (not relevant for this test)
             vec![],           // connected peers (not relevant for this test)
-            Arc::new(Mutex::new(MessageTracker::new())),
+            Arc::new(Mutex::new(MessageTracker::new(metrics.clone()))),
+            metrics,
         )
         .await;
 
@@ -1566,8 +1512,13 @@ mod tests {
         effect_slab.set_root(track_cell);
 
         // Create message tracker and other required components
-        let message_tracker = Arc::new(Mutex::new(MessageTracker::new()));
         let (swarm_tx, _swarm_rx) = mpsc::channel(1);
+
+        let metrics = Arc::new(
+            NockchainP2PMetrics::register(gnort::global_metrics_registry())
+                .expect("Could not register metrics"),
+        );
+        let message_tracker = Arc::new(Mutex::new(MessageTracker::new(metrics.clone())));
 
         // Call handle_effect with the track add effect
         let result = handle_effect(
@@ -1577,6 +1528,7 @@ mod tests {
             PeerId::random(), // local peer ID (not relevant for this test)
             vec![],           // connected peers (not relevant for this test)
             message_tracker.clone(),
+            metrics,
         )
         .await;
 
@@ -1620,8 +1572,12 @@ mod tests {
         // Create test peer ID
         let peer_id = PeerId::random();
 
+        let metrics = Arc::new(
+            NockchainP2PMetrics::register(gnort::global_metrics_registry())
+                .expect("Could not register metrics"),
+        );
         // Create a message tracker and add an entry that we'll later remove
-        let message_tracker = Arc::new(Mutex::new(MessageTracker::new()));
+        let message_tracker = Arc::new(Mutex::new(MessageTracker::new(metrics)));
 
         // Create block ID as [1 2 3 4 5]
         let mut setup_slab = NounSlab::new();
@@ -1664,6 +1620,11 @@ mod tests {
         // Create channel for SwarmAction (not used in this test)
         let (swarm_tx, _swarm_rx) = mpsc::channel(1);
 
+        let metrics = Arc::new(
+            NockchainP2PMetrics::register(gnort::global_metrics_registry())
+                .expect("Could not register metrics"),
+        );
+
         // Call handle_effect with the track remove effect
         let result = handle_effect(
             effect_slab,
@@ -1672,6 +1633,7 @@ mod tests {
             PeerId::random(), // local peer ID (not relevant for this test)
             vec![],           // connected peers (not relevant for this test)
             message_tracker.clone(),
+            metrics,
         )
         .await;
 
@@ -1712,8 +1674,12 @@ mod tests {
             bad_peer1, bad_peer2, good_peer
         );
 
+        let metrics = Arc::new(
+            NockchainP2PMetrics::register(gnort::global_metrics_registry())
+                .expect("Could not register metrics"),
+        );
         // Create a message tracker and add entries
-        let message_tracker = Arc::new(Mutex::new(MessageTracker::new()));
+        let message_tracker = Arc::new(Mutex::new(MessageTracker::new(metrics)));
 
         // Create block IDs
         let mut setup_slab = NounSlab::new();
@@ -1792,6 +1758,11 @@ mod tests {
         let (swarm_tx, mut swarm_rx) = mpsc::channel(10); // Increased capacity for multiple actions
         println!("Created swarm channel");
 
+        let metrics = Arc::new(
+            NockchainP2PMetrics::register(gnort::global_metrics_registry())
+                .expect("Could not register metrics"),
+        );
+
         // Call handle_effect with the liar-block-id effect
         println!("Calling handle_effect");
         let result = handle_effect(
@@ -1801,6 +1772,7 @@ mod tests {
             PeerId::random(), // local peer ID (not relevant for this test)
             vec![],           // connected peers (not relevant for this test)
             message_tracker.clone(),
+            metrics,
         )
         .await;
 
@@ -1900,13 +1872,18 @@ mod tests {
         });
         let effect = T(
             &mut effect_slab,
-            &[D(tas!(b"seen")), D(tas!(b"block")), block_id],
+            &[D(tas!(b"seen")), D(tas!(b"block")), block_id, D(0)],
         );
         effect_slab.set_root(effect);
 
         let (swarm_tx, _) = mpsc::channel(1);
 
-        let message_tracker = Arc::new(Mutex::new(MessageTracker::new()));
+        let metrics = Arc::new(
+            NockchainP2PMetrics::register(gnort::global_metrics_registry())
+                .expect("Could not register metrics"),
+        );
+
+        let message_tracker = Arc::new(Mutex::new(MessageTracker::new(metrics.clone())));
         let message_tracker_clone = Arc::clone(&message_tracker); // Clone the Arc, not the MessageTracker
         let result = handle_effect(
             effect_slab,
@@ -1915,6 +1892,7 @@ mod tests {
             PeerId::random(), // local peer ID (not relevant for this test)
             vec![],           // connected peers (not relevant for this test)
             message_tracker_clone,
+            metrics,
         )
         .await;
 
@@ -1947,8 +1925,12 @@ mod tests {
         effect_slab.set_root(effect);
 
         let (swarm_tx, _) = mpsc::channel(1);
+        let metrics = Arc::new(
+            NockchainP2PMetrics::register(gnort::global_metrics_registry())
+                .expect("Could not register metrics"),
+        );
 
-        let message_tracker = Arc::new(Mutex::new(MessageTracker::new()));
+        let message_tracker = Arc::new(Mutex::new(MessageTracker::new(metrics.clone())));
         let message_tracker_clone = Arc::clone(&message_tracker); // Clone the Arc, not the MessageTracker
         let result = handle_effect(
             effect_slab,
@@ -1957,6 +1939,7 @@ mod tests {
             PeerId::random(), // local peer ID (not relevant for this test)
             vec![],           // connected peers (not relevant for this test)
             message_tracker_clone,
+            metrics,
         )
         .await;
 
@@ -1969,16 +1952,167 @@ mod tests {
     }
 }
 
-fn dial_initial_peers(
+fn dial_peers(
     swarm: &mut Swarm<NockchainBehaviour>,
     peers: &[Multiaddr],
 ) -> Result<(), NockAppError> {
     for peer in peers {
         let peer = peer.clone();
         swarm.dial(peer.clone()).map_err(|e| {
-            error!("Failed to dial initial peer {}: {}", peer, e);
+            error!("Failed to dial peer {}: {}", peer, e);
             NockAppError::OtherError
         })?;
     }
     Ok(())
+}
+
+mod traffic_cop {
+    use tokio::select;
+    use tokio::sync::oneshot;
+    use tokio::task::AbortHandle;
+
+    use super::*;
+
+    const TRAFFIC_COP_BUFFER_SIZE: usize = 50;
+
+    enum TrafficCopAction {
+        Poke(TrafficCopPoke),
+        Peek {
+            path: NounSlab,
+            result: oneshot::Sender<Result<Option<NounSlab>, NockAppError>>,
+        },
+    }
+
+    struct TrafficCopPoke {
+        wire: WireRepr,
+        cause: NounSlab,
+        result: oneshot::Sender<Result<PokeResult, NockAppError>>,
+    }
+
+    #[derive(Clone)]
+    pub(crate) struct TrafficCop {
+        high_priority_pokes: mpsc::Sender<TrafficCopPoke>,
+        low_priority: mpsc::Sender<TrafficCopAction>,
+    }
+
+    impl TrafficCop {
+        pub(crate) fn new(
+            handle: NockAppHandle,
+            join_set: &mut TrackedJoinSet<Result<(), NockAppError>>,
+        ) -> Self {
+            let (high_priority_pokes, high) = mpsc::channel(1);
+            let (low_priority, low) = mpsc::channel(TRAFFIC_COP_BUFFER_SIZE);
+            join_set.spawn(
+                "traffic_cop".to_string(),
+                traffic_cop_task(handle, high, low),
+            );
+            Self {
+                high_priority_pokes,
+                low_priority,
+            }
+        }
+
+        pub(crate) async fn poke_high_priority(
+            &self,
+            wire: WireRepr,
+            cause: NounSlab,
+        ) -> Result<PokeResult, NockAppError> {
+            let (result_tx, result_rx) = oneshot::channel();
+            let poke = TrafficCopPoke {
+                wire,
+                cause,
+                result: result_tx,
+            };
+            self.high_priority_pokes
+                .send(poke)
+                .await
+                .map_err(|_| NockAppError::ChannelClosedError)?;
+            result_rx.await?
+        }
+
+        #[allow(dead_code)]
+        pub(crate) async fn poke_low_priority(
+            &self,
+            wire: WireRepr,
+            cause: NounSlab,
+        ) -> Result<PokeResult, NockAppError> {
+            let (result_tx, result_rx) = oneshot::channel();
+            let action = TrafficCopAction::Poke(TrafficCopPoke {
+                wire,
+                cause,
+                result: result_tx,
+            });
+            self.low_priority.try_send(action).map_err(|e| match e {
+                mpsc::error::TrySendError::Full(_) => NockAppError::IoError(std::io::Error::new(
+                    std::io::ErrorKind::Other,
+                    "dropping poke: queue full",
+                )),
+                mpsc::error::TrySendError::Closed(_) => NockAppError::ChannelClosedError,
+            })?;
+            result_rx.await?
+        }
+
+        pub(crate) async fn peek(&self, path: NounSlab) -> Result<Option<NounSlab>, NockAppError> {
+            let (result_tx, result_rx) = oneshot::channel();
+            let action = TrafficCopAction::Peek {
+                path,
+                result: result_tx,
+            };
+            self.low_priority.try_send(action).map_err(|e| match e {
+                mpsc::error::TrySendError::Full(_) => NockAppError::IoError(std::io::Error::new(
+                    std::io::ErrorKind::Other,
+                    "dropping peek: queue full",
+                )),
+                mpsc::error::TrySendError::Closed(_) => NockAppError::ChannelClosedError,
+            })?;
+            result_rx.await?
+        }
+    }
+
+    async fn traffic_cop_task(
+        handle: NockAppHandle,
+        mut high: mpsc::Receiver<TrafficCopPoke>,
+        mut low: mpsc::Receiver<TrafficCopAction>,
+    ) -> Result<(), NockAppError> {
+        loop {
+            select! { biased;
+                high_priority_poke = high.recv() => match high_priority_poke {
+                    Some(TrafficCopPoke { wire, cause, result }) => {
+                        let res = handle.poke(wire, cause).await;
+                        let _ = result.send(res).map_err(|e| {
+                            error!("Failed to send high priority poke result");
+                            e
+                        });
+                    }
+                    None => {
+                        error!("High priority channel closed");
+                        break Err(NockAppError::ChannelClosedError);
+                    }
+                },
+                low_priority_action = low.recv() => match low_priority_action {
+                    Some(TrafficCopAction::Poke(TrafficCopPoke { wire, cause, result })) => {
+                        let res = handle.poke(wire, cause).await;
+                        let _ = result.send(res).map_err(|e| {
+                            error!("Failed to send low priority poke result");
+                            e
+                        });
+                    }
+                    Some(TrafficCopAction::Peek { path, result }) => {
+                        let res = handle.peek(path).await;
+                        let _ = result.send(res).map_err(|e| {
+                            error!("Failed to send low priority peek result");
+                            e
+                        });
+                    }
+                    None => {
+                        error!("Low priority channel closed");
+                        break Err(NockAppError::ChannelClosedError);
+                    }
+                },
+                _ = handle.next_effect() => {
+                    // We have to do this to prevent the broadcast channel from lagging
+                }
+            }
+        }
+    }
 }

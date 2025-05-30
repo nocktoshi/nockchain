@@ -110,16 +110,21 @@
   $%  [%set-constants p=blockchain-constants:dt]
   ==
 ::
-::  commands that can only be performed if init-phase is %.y
+::  commands that can be performed if init-phase is %.y
 +$  init-command
-  $?  %set-constants
+  $?  %born
+      %set-mining-key
+      %set-mining-key-advanced
+      %enable-mining
+      init-only-command
+  ==
+::  commands that can *only* be performed if init-phase is %.y
++$  init-only-command
+  $?  %genesis
       %set-genesis-seal
       %btc-data
-      %genesis
-      %born
+      %set-constants
   ==
-::  commands that can only be performed if init-phase is %.n
-+$  non-init-command  ?(%timer %pow)
 ::
 +$  fact
   $+  fact
@@ -145,8 +150,8 @@
 ::
 +$  seen
   $+  seen
-  $%  [%block p=block-id:dt]  ::  block has been seen, don't reprocess
-      [%tx p=tx-id:dt]       ::  tx has been seen, don't reprocess
+  $%  [%block p=block-id:dt q=(unit page-number:dt)]  ::  block has been seen, don't reprocess
+      [%tx p=tx-id:dt]                                ::  tx has been seen, don't reprocess
   ==
 ::
 +$  span-field

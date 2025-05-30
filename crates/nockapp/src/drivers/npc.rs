@@ -288,6 +288,7 @@ async fn write_message(
 
 #[cfg(test)]
 mod tests {
+    use crate::metrics::NockAppMetrics;
     use crate::nockapp::driver::{IOAction, NockAppHandle};
     use crate::NockAppExit;
 
@@ -515,12 +516,17 @@ mod tests {
         let (tx_io, mut rx_io) = mpsc::channel(32);
         let (tx_effect_chan, rx_effect) = broadcast::channel(32);
         let tx_effect = Arc::new(tx_effect_chan);
+        let metrics = Arc::new(
+            NockAppMetrics::register(gnort::global_metrics_registry())
+                .expect("Failed to register metrics!"),
+        );
         let (tx_exit, _) = NockAppExit::new();
 
         let handle = NockAppHandle {
             io_sender: tx_io,
             effect_sender: tx_effect.clone(),
             effect_receiver: Mutex::new(rx_effect),
+            metrics: metrics,
             exit: tx_exit,
         };
 

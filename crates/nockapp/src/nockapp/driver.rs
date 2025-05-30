@@ -7,6 +7,7 @@ use tokio::task::JoinSet;
 use tracing::instrument;
 
 use super::error::NockAppError;
+use super::metrics::NockAppMetrics;
 use super::wire::WireRepr;
 use super::NockAppExit;
 
@@ -42,6 +43,7 @@ pub struct NockAppHandle {
     pub io_sender: ActionSender,
     pub effect_sender: Arc<EffectSender>,
     pub effect_receiver: Mutex<EffectReceiver>,
+    pub metrics: Arc<NockAppMetrics>,
     pub exit: NockAppExit,
 }
 
@@ -163,7 +165,21 @@ impl NockAppHandle {
     pub async fn next_effect(&self) -> Result<NounSlab, NockAppError> {
         let mut effect_receiver = self.effect_receiver.lock().await;
         tracing::debug!("Waiting for recv on next effect");
-        Ok(effect_receiver.recv().await?)
+
+        match effect_receiver.recv().await {
+            Ok(effect) => {
+                tracing::trace!("Received effect successfully");
+                Ok(effect)
+            }
+            Err(e @ broadcast::error::RecvError::Closed) => {
+                self.exit.shutdown(Err(e.clone().into())).await?;
+                Err(e.into())
+            }
+            Err(e @ broadcast::error::RecvError::Lagged(n)) => {
+                let _ = self.metrics.next_effect_lagged_error.fetch_add(n as usize);
+                Err(e.into())
+            }
+        }
     }
 
     #[instrument(skip(self))]
@@ -171,6 +187,7 @@ impl NockAppHandle {
         let io_sender = self.io_sender.clone();
         let effect_sender = self.effect_sender.clone();
         let effect_receiver = Mutex::new(effect_sender.subscribe());
+        let metrics = self.metrics.clone();
         let exit = self.exit.clone();
         (
             self,
@@ -178,6 +195,7 @@ impl NockAppHandle {
                 io_sender,
                 effect_sender,
                 effect_receiver,
+                metrics,
                 exit,
             },
         )

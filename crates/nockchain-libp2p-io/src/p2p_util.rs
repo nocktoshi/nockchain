@@ -1,13 +1,15 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::net::{Ipv4Addr, Ipv6Addr};
 use std::str::FromStr;
+use std::sync::Arc;
 
-use libp2p::PeerId;
+use libp2p::swarm::ConnectionId;
+use libp2p::{Multiaddr, PeerId};
 use nockapp::noun::slab::NounSlab;
 use nockapp::{AtomExt, NockAppError, NounExt};
 use nockvm::noun::Noun;
 use nockvm_macros::tas;
-use tracing::{debug, warn};
+use tracing::{trace, warn};
 
 use crate::metrics::NockchainP2PMetrics;
 use crate::tip5_util::tip5_hash_to_base58;
@@ -33,6 +35,12 @@ impl PeerIdExt for PeerId {
     }
 }
 
+pub enum CacheResponse {
+    Cached(NounSlab),
+    NotCached,
+    NegativeCached,
+}
+
 /// This struct is used to track which peers sent us which block IDs.
 /// `block_id_to_peers` is the one we really care about, since it's what we use
 /// to figure out which peers to ban when we get a %liar-block-id effect.
@@ -40,30 +48,101 @@ impl PeerIdExt for PeerId {
 /// every block ID and check if the peer is in the set. So we also maintain
 /// a `peer_to_block_ids` map.
 pub struct MessageTracker {
+    metrics: Arc<NockchainP2PMetrics>,
     block_id_to_peers: BTreeMap<String, BTreeSet<PeerId>>,
     peer_to_block_ids: BTreeMap<PeerId, BTreeSet<String>>,
+    // It's stupid that we must track this state instead of just getting it from libp2p.
+    connections: BTreeMap<ConnectionId, PeerId>,
+    peer_connections: BTreeMap<PeerId, BTreeMap<ConnectionId, Multiaddr>>,
+    request_counts_by_ip: BTreeMap<Ipv4Addr, u64>,
     pub seen_blocks: BTreeSet<String>,
     pub seen_txs: BTreeSet<String>,
     pub block_cache: BTreeMap<u64, NounSlab>,
     pub tx_cache: BTreeMap<String, NounSlab>,
-}
-
-impl Default for MessageTracker {
-    fn default() -> Self {
-        Self::new()
-    }
+    pub elders_cache: BTreeMap<String, NounSlab>,
+    pub elders_negative_cache: BTreeSet<String>,
+    pub first_negative: u64,
 }
 
 impl MessageTracker {
-    pub fn new() -> Self {
+    pub fn new(metrics: Arc<NockchainP2PMetrics>) -> Self {
         Self {
+            metrics,
             block_id_to_peers: BTreeMap::new(),
             peer_to_block_ids: BTreeMap::new(),
+            connections: BTreeMap::new(),
+            peer_connections: BTreeMap::new(),
+            request_counts_by_ip: BTreeMap::new(),
             seen_blocks: BTreeSet::new(),
             seen_txs: BTreeSet::new(),
             block_cache: BTreeMap::new(),
             tx_cache: BTreeMap::new(),
+            elders_cache: BTreeMap::new(),
+            elders_negative_cache: BTreeSet::new(),
+            first_negative: 0,
         }
+    }
+
+    pub(crate) fn track_connection(
+        &mut self,
+        connection_id: ConnectionId,
+        peer_id: PeerId,
+        addr: &Multiaddr,
+    ) {
+        self.connections.insert(connection_id, peer_id);
+        if let Some(c) = self.peer_connections.get_mut(&peer_id) {
+            c.insert(connection_id, addr.clone());
+        } else {
+            let mut new_map = BTreeMap::new();
+            new_map.insert(connection_id, addr.clone());
+            self.peer_connections.insert(peer_id, new_map);
+        }
+        let peer_count = self.peer_connections.len() as f64;
+        let _ = self.metrics.peer_count.swap(peer_count);
+    }
+
+    pub(crate) fn lost_connection(&mut self, connection_id: ConnectionId) {
+        if let Some(peer_id) = self.connections.remove(&connection_id) {
+            if let Some(c) = self.peer_connections.get_mut(&peer_id) {
+                c.remove(&connection_id);
+                if c.is_empty() {
+                    self.peer_connections.remove(&peer_id);
+                }
+            }
+        }
+        let peer_count = self.peer_connections.len() as f64;
+        let _ = self.metrics.peer_count.swap(peer_count);
+    }
+
+    pub(crate) fn requested(&mut self, ip4: Ipv4Addr, threshhold: u64) -> Option<u64> {
+        if let Some(count) = self.request_counts_by_ip.get_mut(&ip4) {
+            *count += 1;
+            if *count >= threshhold {
+                Some(*count)
+            } else {
+                None
+            }
+        } else {
+            self.request_counts_by_ip.insert(ip4, 1);
+            if threshhold <= 1 {
+                Some(1)
+            } else {
+                None
+            }
+        }
+    }
+
+    pub(crate) fn reset_requests(&mut self) {
+        self.request_counts_by_ip.clear();
+    }
+
+    pub(crate) fn connection_address(&self, connection_id: ConnectionId) -> Option<Multiaddr> {
+        self.connections.get(&connection_id).and_then(|peer_id| {
+            self.peer_connections
+                .get(peer_id)
+                .and_then(|map| map.get(&connection_id))
+                .cloned()
+        })
     }
 
     fn track_block_id_str_and_peer(&mut self, block_id_str: String, peer_id: PeerId) {
@@ -204,51 +283,109 @@ impl MessageTracker {
 
     pub async fn check_cache(
         &mut self,
-        request: &Noun,
+        request: NockchainDataRequest,
         metrics: &NockchainP2PMetrics,
-    ) -> Result<Option<NounSlab>, NockAppError> {
-        let tag = request.as_cell()?.head().as_direct()?.data();
-        if tag != tas!(b"request") {
-            return Ok(None);
+    ) -> Result<CacheResponse, NockAppError> {
+        match request {
+            NockchainDataRequest::BlockByHeight(height) => {
+                if height >= self.first_negative {
+                    metrics.block_request_cache_negative.increment();
+                    trace!("Request for block height not yet seen by cache, height = {:?}", height);
+                    Ok(CacheResponse::NegativeCached)
+                } else if let Some(cached_block) = self.block_cache.get(&height) {
+                    trace!("found cached block request by height={:?}", height);
+                    metrics.block_request_cache_hits.increment();
+                    Ok(CacheResponse::Cached(cached_block.clone()))
+                } else {
+                    trace!("didn't find cached block request by height={:?}", height);
+                    metrics.block_request_cache_misses.increment();
+                    Ok(CacheResponse::NotCached)
+                }
+            }
+            NockchainDataRequest::RawTransactionById(id, _) => {
+                if let Some(cached_transaction) = self.tx_cache.get(&id) {
+                    trace!("found cached transaction request by id={:?}", id);
+                    Ok(CacheResponse::Cached(cached_transaction.clone()))
+                } else {
+                    trace!("didn't find cached transaction request by id={:?}", id);
+                    Ok(CacheResponse::NotCached)
+                }
+            }
+            NockchainDataRequest::EldersById(id, ..) => {
+                if let Some(cached_elders) = self.elders_cache.get(&id) {
+                    trace!("found cached elders request by id={:?}", id);
+                    Ok(CacheResponse::Cached(cached_elders.clone()))
+                } else if let Some(_cached_negative) = self.elders_negative_cache.get(&id) {
+                    trace!("elders id={:?} is cached-not-known", id);
+                    Ok(CacheResponse::NegativeCached)
+                } else {
+                    trace!("didn't find cached elders request by id={:?}", id);
+                    Ok(CacheResponse::NotCached)
+                }
+            }
         }
+    }
+}
 
-        let request_body = request.as_cell()?.tail().as_cell()?;
-        if request_body.head().eq_bytes(b"block") {
-            let tail = request_body.tail();
-            let kind = tail.as_cell()?.head();
-            if !kind.eq_bytes(b"by-height") {
-                return Ok(None);
+#[derive(Debug, Clone)]
+pub enum NockchainDataRequest {
+    BlockByHeight(u64),                   // Height requested
+    EldersById(String, PeerId, NounSlab), // Block ID as string, peer id, block id as noun,
+    RawTransactionById(String, NounSlab), // transaction id as string, transaction id as noun,
+}
+
+impl NockchainDataRequest {
+    /// Takes noun of type [%request p=request]
+    pub fn from_noun(noun: Noun) -> Result<Self, NockAppError> {
+        let res = (|| {
+            let request_cell = noun.as_cell()?;
+            if !request_cell.head().eq_bytes(b"request") {
+                return Err(NockAppError::OtherError);
             }
-            let height = tail.as_cell()?.tail().as_direct()?.data();
-            if let Some(cached_block) = self.block_cache.get(&height) {
-                debug!("found cached block request by height={:?}", height);
-                metrics.block_request_cache_hits.increment();
-                Ok(Some(cached_block.clone()))
+            // kind cell type $%([%block request-block] [%raw-tx request-tx])
+            let kind_cell = request_cell.tail().as_cell()?;
+            if kind_cell.head().eq_bytes(b"block") {
+                // block_cell type
+                // $%  [%by-height p=page-number:dt]
+                //     [%elders p=block-id:dt q=peer-id]
+                // ==
+                let block_cell = kind_cell.tail().as_cell()?;
+                if block_cell.head().eq_bytes(b"by-height") {
+                    let height = block_cell.tail().as_atom()?.as_u64()?;
+                    Ok(Self::BlockByHeight(height))
+                } else if block_cell.head().eq_bytes(b"elders") {
+                    let elders_cell = block_cell.tail().as_cell()?;
+                    let block_id = tip5_hash_to_base58(elders_cell.head())?;
+                    let peer_id = PeerId::from_noun(elders_cell.tail())?;
+                    let slab = {
+                        let mut slab = NounSlab::new();
+                        slab.copy_into(elders_cell.head());
+                        slab
+                    };
+                    Ok(Self::EldersById(block_id, peer_id, slab))
+                } else {
+                    Err(NockAppError::OtherError)
+                }
+            } else if kind_cell.head().eq_bytes(b"raw-tx") {
+                // has type [%by-id p=tx-id:dt]
+                let raw_tx_cell = kind_cell.tail().as_cell()?;
+                let raw_tx_id = tip5_hash_to_base58(raw_tx_cell.tail())?;
+                let slab = {
+                    let mut slab = NounSlab::new();
+                    slab.copy_into(raw_tx_cell.tail());
+                    slab
+                };
+                Ok(Self::RawTransactionById(raw_tx_id, slab))
             } else {
-                debug!("didn't find cached block request by height={:?}", height);
-                metrics.block_request_cache_misses.increment();
-                Ok(None)
+                Err(NockAppError::OtherError)
             }
-        } else if request_body.head().eq_bytes(b"raw-tx") {
-            let tail = request_body.tail();
-            let kind = tail.as_cell()?.head();
-            if !kind.eq_bytes(b"by-id") {
-                return Ok(None);
-            }
-            let tx_id = tail.as_cell()?.tail();
-            let tx_id_str = tip5_hash_to_base58(tx_id)?;
-            if let Some(cached_tx) = self.tx_cache.get(&tx_id_str) {
-                debug!("found cached tx request by id={:?}", tx_id_str);
-                metrics.tx_request_cache_hits.increment();
-                return Ok(Some(cached_tx.clone()));
-            } else {
-                debug!("didn't find cached tx request by id={:?}", tx_id_str);
-                metrics.tx_request_cache_misses.increment();
-                return Ok(None);
-            }
-        } else {
-            return Ok(None);
-        }
+        })();
+        res.map_err(|_| {
+            NockAppError::IoError(std::io::Error::new(
+                std::io::ErrorKind::Other,
+                "bad request",
+            ))
+        })
     }
 }
 
@@ -262,7 +399,11 @@ mod tests {
     #[test]
     #[cfg_attr(miri, ignore)] // ibig has a memory leak so miri fails this test
     fn test_message_tracker_basic() {
-        let mut tracker = MessageTracker::new();
+        let metrics = Arc::new(
+            NockchainP2PMetrics::register(gnort::global_metrics_registry())
+                .expect("Could not register metrics"),
+        );
+        let mut tracker = MessageTracker::new(metrics);
         let peer_id = PeerId::random();
 
         // Create a block ID as [1 2 3 4 5]
@@ -313,7 +454,11 @@ mod tests {
     #[test]
     #[cfg_attr(miri, ignore)] // ibig has a memory leak so miri fails this test
     fn test_bad_block_id() {
-        let mut tracker = MessageTracker::new();
+        let metrics = Arc::new(
+            NockchainP2PMetrics::register(gnort::global_metrics_registry())
+                .expect("Could not register metrics"),
+        );
+        let mut tracker = MessageTracker::new(metrics);
         let peer_id = PeerId::random();
 
         // Create a block ID
@@ -379,7 +524,11 @@ mod tests {
     #[test]
     #[cfg_attr(miri, ignore)] // ibig has a memory leak so miri fails this test
     fn test_add_peer_if_tracking_block_id() {
-        let mut tracker = MessageTracker::new();
+        let metrics = Arc::new(
+            NockchainP2PMetrics::register(gnort::global_metrics_registry())
+                .expect("Could not register metrics"),
+        );
+        let mut tracker = MessageTracker::new(metrics);
         let peer_id1 = PeerId::random();
         let peer_id2 = PeerId::random();
 
@@ -435,7 +584,11 @@ mod tests {
     #[test]
     #[cfg_attr(miri, ignore)] // ibig has a memory leak so miri fails this test
     fn test_add_peer_if_tracking_block_id_then_remove() {
-        let mut tracker = MessageTracker::new();
+        let metrics = Arc::new(
+            NockchainP2PMetrics::register(gnort::global_metrics_registry())
+                .expect("Could not register metrics"),
+        );
+        let mut tracker = MessageTracker::new(metrics);
         let peer_id1 = PeerId::random();
         let peer_id2 = PeerId::random();
 
@@ -513,7 +666,11 @@ mod tests {
     #[test]
     #[cfg_attr(miri, ignore)] // ibig has a memory leak so miri fails this test
     fn test_process_bad_block_id_removes_peers() {
-        let mut tracker = MessageTracker::new();
+        let metrics = Arc::new(
+            NockchainP2PMetrics::register(gnort::global_metrics_registry())
+                .expect("Could not register metrics"),
+        );
+        let mut tracker = MessageTracker::new(metrics);
         let peer_id1 = PeerId::random();
         let peer_id2 = PeerId::random();
 

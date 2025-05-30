@@ -21,6 +21,9 @@ use crate::nc::*;
 /** How often we should run a kademlia bootstrap to keep our peer table fresh */
 pub const KADEMLIA_BOOTSTRAP_INTERVAL: Duration = Duration::from_secs(300);
 
+// If the --force-peer cli arg is passed, we will force dial it every FORCE_PEER_BOOT_INTERVAL
+pub const FORCE_PEER_DIAL_INTERVAL: Duration = Duration::from_secs(600);
+
 /** How long we should keep a peer connection alive with no traffic */
 pub const SWARM_IDLE_TIMEOUT: Duration = Duration::from_secs(30);
 
@@ -60,6 +63,8 @@ pub const MAX_PENDING_OUTGOING_CONNECTIONS: u32 = 16;
 // Request/response constants
 pub const REQUEST_RESPONSE_MAX_CONCURRENT_STREAMS: usize = MAX_ESTABLISHED_CONNECTIONS as usize * 2;
 pub const REQUEST_RESPONSE_TIMEOUT: Duration = Duration::from_secs(20);
+pub const REQUEST_HIGH_THRESHOLD: u64 = 60;
+pub const REQUEST_HIGH_RESET: Duration = Duration::from_secs(60);
 
 // ALL PROTOCOLS MUST HAVE UNIQUE VERSIONS
 pub const REQ_RES_PROTOCOL_VERSION: &str = "/nockchain-1-req-res";

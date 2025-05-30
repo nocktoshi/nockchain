@@ -14,7 +14,9 @@
 ++  checkpointed-digests
   ^-  (z-map page-number:t hash:t)
   %-  ~(gas z-by *(z-map page-number:t hash:t))
-  :~  [%144 (from-b58:hash:t '3rbqdep8HLqwwkW4YvZazVPYZpbqsFbqHCfEKGt13GVUUzA9ToDCsxT')]
+  :~  [%720 (from-b58:hash:t 'C4vJRnFNHCLHKHVRJGiYeoiYXS7CyTGrVk2ibEv95HQiZoxRvtr5SRQ')]
+      [%144 (from-b58:hash:t '3rbqdep8HLqwwkW4YvZazVPYZpbqsFbqHCfEKGt13GVUUzA9ToDCsxT')]
+      [%0 (from-b58:hash:t '7pR2bvzoMvfFcxXaHv4ERm8AgEnExcZLuEsjNgLkJziBkqBLidLg39Y')]
   ==
 ::
 ::  +set-genesis-seal: set .genesis-seal
@@ -400,13 +402,17 @@
   =/  block  (~(get z-by blocks.c) bid)
   ?~  block
     ~
-  =/  pag=page:t  (to-page:local-page:t u.block)
-  =/  height=page-number:t  height.pag
-  =/  ids=(list block-id:t)  [bid ~]
+  =/  height=page-number:t
+    ?~  heaviest-block.c  0
+    =/  heaviest-block  (~(got z-by blocks.c) u.heaviest-block.c)
+    (min height.heaviest-block height.u.block)
+  =/  bid-at-height=(unit block-id:t)  (~(get z-by heaviest-chain.d) height)
+  ?~  bid-at-height  ~
+  =/  ids=(list block-id:t)  [u.bid-at-height ~]
   =/  count  1
   |-
-  ?:  =(height *page-number:t)  `[height (flop ids)]
-  ?:  =(24 count)  `[height (flop ids)]
+  ?:  =(height *page-number:t)  `[height (flop ids)] :: genesis block
+  ?:  =(24 count)  `[height (flop ids)] :: 24 blocks
   =/  prev-height=page-number:t  (dec height)
   =/  prev-id=(unit block-id:t)  (~(get z-by heaviest-chain.d) prev-height)
   ?~  prev-id

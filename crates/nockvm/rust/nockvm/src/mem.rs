@@ -237,6 +237,8 @@ pub struct NockStack {
     stack_offset: usize,
     /// Offset from base for the current allocation pointer (in words)
     alloc_offset: usize,
+    /// The least amount of space between the stack and alloc pointers since last reset
+    least_space: usize,
     /// The underlying memory allocation which must be kept alive
     memory: Memory,
     /// Whether or not [`Self::pre_copy()`] has been called on the current stack frame.
@@ -318,6 +320,9 @@ impl NockStack {
         let stack_offset = frame_offset;
         // FIXME: This was alloc_offset = size; why?
         let alloc_offset = size;
+        let least_space = alloc_offset
+            .checked_sub(stack_offset)
+            .expect("Stack too small to create");
 
         unsafe {
             // Store previous frame/stack/alloc info in reserved slots
@@ -338,6 +343,7 @@ impl NockStack {
                 frame_offset,
                 stack_offset,
                 alloc_offset,
+                least_space,
                 memory,
                 pc: false,
             },
@@ -612,6 +618,9 @@ impl NockStack {
             self.frame_offset = new_frame_offset;
             self.stack_offset = new_frame_offset;
             self.alloc_offset = new_alloc_offset;
+            self.least_space = new_frame_offset
+                .checked_sub(new_alloc_offset)
+                .expect("Uncaught OOM in flip_top_frame west->east");
             self.pc = false;
 
             assert!(!self.is_west());
@@ -640,6 +649,9 @@ impl NockStack {
             self.frame_offset = new_frame_offset;
             self.stack_offset = new_frame_offset;
             self.alloc_offset = new_alloc_offset;
+            self.least_space = new_alloc_offset
+                .checked_sub(new_frame_offset)
+                .expect("Uncaught OOM in flip_top_frame east->west");
             self.pc = false;
 
             assert!(self.is_west());
@@ -653,6 +665,10 @@ impl NockStack {
         self.frame_offset = RESERVED + top_slots;
         self.stack_offset = self.frame_offset;
         self.alloc_offset = self.size;
+        self.least_space = self
+            .alloc_offset
+            .checked_sub(self.frame_offset)
+            .expect("Resetting a stack too small (should never happen)");
         self.pc = false;
 
         unsafe {
@@ -723,6 +739,11 @@ impl NockStack {
     /** Size **in 64-bit words** of this NockStack */
     pub(crate) fn size(&self) -> usize {
         self.size
+    }
+
+    /** Get the low-water-mark for space in this nockstack */
+    pub fn least_space(&self) -> usize {
+        self.least_space
     }
 
     /** Check to see if an allocation is in frame */
@@ -1004,6 +1025,12 @@ impl NockStack {
             None => panic!("Alloc offset underflow in West frame"),
         };
 
+        // Update the space low-water-mark
+        let new_space = new_alloc_offset
+            .checked_sub(self.stack_offset)
+            .expect("Uncaught OOM in raw_alloc_west");
+        self.least_space = new_space.min(self.least_space);
+
         // Derive pointer from the new offset
         let alloc_ptr = self.derive_ptr(new_alloc_offset);
 
@@ -1030,6 +1057,12 @@ impl NockStack {
             Some(offset) => offset,
             None => panic!("Alloc offset overflow in East frame"),
         };
+
+        let new_space = self
+            .stack_offset
+            .checked_sub(new_alloc_offset)
+            .expect("Uncaught OOM in raw_alloc_east");
+        self.least_space = new_space.min(self.least_space);
 
         // Check that the new offset is within bounds
         if new_alloc_offset > self.size {

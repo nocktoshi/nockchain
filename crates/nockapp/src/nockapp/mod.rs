@@ -79,7 +79,7 @@ pub struct NockApp {
     pub(crate) save_mutex: Arc<Mutex<()>>,
     /// Shutdown oneshot sender
     pub npc_socket_path: Option<PathBuf>,
-    metrics: NockAppMetrics,
+    metrics: Arc<NockAppMetrics>,
     /// Signals handled by the work loop
     signals: Signals,
 }
@@ -145,7 +145,7 @@ impl NockAppExit {
 
 impl NockApp {
     /// This constructs a Tokio interval, even though it doesn't look like it, a Tokio runtime is _required_.
-    pub async fn new(kernel: Kernel, save_interval_duration: Duration) -> Self {
+    pub async fn new(mut kernel: Kernel, save_interval_duration: Duration) -> Self {
         // important: we are tracking this separately here because
         // what matters is the last poke *we* received an ack for. Using
         // the Arc in the serf would result in a race condition!
@@ -166,10 +166,18 @@ impl NockApp {
         let exit_status = AtomicBool::new(false);
         let abort_immediately = AtomicBool::new(false);
         // let cancel_token = tokio_util::sync::CancellationToken::new();
-        let metrics = NockAppMetrics::register(gnort::global_metrics_registry())
-            .expect("Failed to register metrics!");
+        let metrics = Arc::new(
+            NockAppMetrics::register(gnort::global_metrics_registry())
+                .expect("Failed to register metrics!"),
+        );
+        kernel
+            .provide_metrics(metrics.clone())
+            .await
+            .expect("Failed to provide metrics to kernel");
+
         let signals = Signals::new(&[TERM_SIGNALS, &[SIGHUP]].concat())
             .expect("Failed to create signal handler");
+
         let (exit, exit_recv) = NockAppExit::new();
         Self {
             kernel,
@@ -197,6 +205,7 @@ impl NockApp {
             io_sender: self.action_channel_sender.clone(),
             effect_sender: self.effect_broadcast.clone(),
             effect_receiver: Mutex::new(self.effect_broadcast.subscribe()),
+            metrics: self.metrics.clone(),
             exit: self.exit.clone(),
         }
     }
@@ -208,11 +217,13 @@ impl NockApp {
         let io_sender = self.action_channel_sender.clone();
         let effect_sender = self.effect_broadcast.clone();
         let effect_receiver = Mutex::new(self.effect_broadcast.subscribe());
+        let metrics = self.metrics.clone();
         let exit = self.exit.clone();
         let fut = driver(NockAppHandle {
             io_sender,
             effect_sender,
             effect_receiver,
+            metrics,
             exit,
         });
         // TODO: Stop using the task tracker for user code?
@@ -230,11 +241,13 @@ impl NockApp {
         let io_sender = self.action_channel_sender.clone();
         let effect_sender = self.effect_broadcast.clone();
         let effect_receiver = Mutex::new(self.effect_broadcast.subscribe());
+        let metrics = self.metrics.clone();
         let exit = self.exit.clone();
         let fut = driver(NockAppHandle {
             io_sender,
             effect_sender,
             effect_receiver,
+            metrics,
             exit,
         });
         // TODO: Stop using the task tracker for user code?

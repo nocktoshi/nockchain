@@ -19,7 +19,10 @@ metrics_struct![
     (block_seen_cache_hits, "nockchain-libp2p-io.block_seen_cache_hits", Count),
     (tx_seen_cache_hits, "nockchain-libp2p-io.tx_seen_cache_hits", Count),
     (block_request_cache_misses, "nockchain-libp2p-io.block_request_cache_misses", Count),
+    (block_request_cache_negative, "nockchain-libp2p-io.block_request_cache_negative", Count),
     (tx_request_cache_misses, "nockchain-libp2p-io.tx_request_cache_misses", Count),
     (block_seen_cache_misses, "nockchain-libp2p-io.block_seen_cache_misses", Count),
-    (tx_seen_cache_misses, "nockchain-libp2p-io.tx_seen_cache_misses", Count)
+    (tx_seen_cache_misses, "nockchain-libp2p-io.tx_seen_cache_misses", Count),
+    (highest_block_height_seen, "nockchain-libp2p-io.highest_block_height_seen", Gauge),
+    (peer_count, "nockchain-libp2p-io.peer_count", Gauge)
 ];

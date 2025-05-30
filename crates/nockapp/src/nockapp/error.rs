@@ -27,8 +27,10 @@ pub enum NockAppError {
     OneShotRecvError(#[from] tokio::sync::oneshot::error::RecvError),
     #[error("Error cueing jam buffer: {0}")]
     CueError(#[from] CueError),
-    #[error("Error receiving effect broadcast: {0}")]
-    BroadcastRecvError(#[from] tokio::sync::broadcast::error::RecvError),
+    #[error("Error receiving effect broadcast (lagged): {0}")]
+    BroadcastRecvLaggedError(u64), // Lagged contains the number of missed messages
+    #[error("Error receiving effect broadcast (closed)")]
+    BroadcastRecvClosedError,
     #[error("Error joining task (probably the task panicked: {0}")]
     JoinError(#[from] tokio::task::JoinError),
     #[error("Error converting string: {0}")]
@@ -62,6 +64,16 @@ impl From<TrySendError<IOAction>> for NockAppError {
         match tse {
             TrySendError::Closed(act) => NockAppError::MPSCSendError(SendError(act)),
             TrySendError::Full(act) => NockAppError::MPSCFullError(act),
+        }
+    }
+}
+impl From<tokio::sync::broadcast::error::RecvError> for NockAppError {
+    fn from(err: tokio::sync::broadcast::error::RecvError) -> Self {
+        match err {
+            tokio::sync::broadcast::error::RecvError::Lagged(count) => {
+                Self::BroadcastRecvLaggedError(count)
+            }
+            tokio::sync::broadcast::error::RecvError::Closed => Self::BroadcastRecvClosedError,
         }
     }
 }
