@@ -520,6 +520,7 @@ mod tests {
             NockAppMetrics::register(gnort::global_metrics_registry())
                 .expect("Failed to register metrics!"),
         );
+
         let (tx_exit, _) = NockAppExit::new();
 
         let handle = NockAppHandle {

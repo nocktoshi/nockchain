@@ -172,7 +172,7 @@ impl NockAppHandle {
                 Ok(effect)
             }
             Err(e @ broadcast::error::RecvError::Closed) => {
-                self.exit.shutdown(Err(e.clone().into())).await?;
+                // We don't shutdown here, instead we allow the driver to handle the error
                 Err(e.into())
             }
             Err(e @ broadcast::error::RecvError::Lagged(n)) => {

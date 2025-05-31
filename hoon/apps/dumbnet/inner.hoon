@@ -28,7 +28,25 @@
   ::  We should be calling the inner kernel load in case of update
   ++  load
     |=  arg=kernel-state:dk
-    arg
+    |^  (check-checkpoints arg)
+    ++  check-checkpoints
+      |=  arg=kernel-state:dk
+      =/  checkpoints  ~(tap z-by checkpointed-digests:con)
+      |-  ^-  kernel-state:dk
+      ?~  checkpoints  arg
+      =/  block-at-checkpoint  (~(get z-by heaviest-chain.d.arg) -.i.checkpoints)
+      ?~  block-at-checkpoint  $(checkpoints t.checkpoints)
+      ?.  =(u.block-at-checkpoint +.i.checkpoints)
+        ~>  %slog.[1 leaf+"Mismatched checkpoint when loading, resetting state"]
+        =|  nk=kernel-state:dk
+        :: preserve mining options and init status, otherwise drop all consensus state
+        =.  mining.m.nk  mining.m.arg
+        =.  pubkeys.m.nk  pubkeys.m.arg
+        =.  shares.m.nk  shares.m.arg
+        =.  init.a.k  init.a.arg
+        nk
+      arg
+    --
   ::
   ::TODO make referentially transparent by requiring event number in the scry path
   ++  peek
@@ -222,8 +240,10 @@
       ::
       ::  do we already have this block?
       ?:  (check-duplicate-block digest.pag)
-        :: do nothing (idempotency), we already have block
-        `k
+        :: do almost nothing (idempotency), we already have block
+        :: however we *should* tell the runtime we have it
+        :_  k
+        [%seen %block digest.pag ~]~
       ::
       ::  check to see if the .digest is valid. if it is not, we
       ::  emit a %liar-peer. if it is, then any further %liar effects
@@ -464,9 +484,11 @@
       ::
       ::  do we already have raw-tx?
       ?:  (~(has z-by raw-txs.p.k) id.raw)
-        :: do nothing (idempotency), we already have it
+        :: do almost nothing (idempotency), we already have it
+        :: but do tell the runtime we've already seen it
         ~>  %slog.[3 leaf+"tx-id-already-seen"]
-        `k
+        :_  k
+        [%seen %tx id.raw]~
       ?:  (based:raw-tx:t raw)
         :_  k
         [(liar-effect wir %raw-tx-not-based)]~
