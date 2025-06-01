@@ -54,6 +54,8 @@ pub enum NockAppError {
     DecodeError(#[from] bincode::error::DecodeError),
     #[error("Send error: {0}")]
     SendError(#[from] tokio::sync::watch::error::SendError<u64>),
+    #[error("Config error: {0}")]
+    ConfigError(#[from] config::ConfigError),
 }
 
 impl From<TrySendError<IOAction>> for NockAppError {

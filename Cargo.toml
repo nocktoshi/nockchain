@@ -124,6 +124,7 @@ bitvec = "1.0.1"
 bytes = "1.5.0"
 cfg-if = "1.0.0"
 clap = "4.4.4"
+config = "0.15"
 num-traits = "0.2"
 pin-project-lite = "0.2.16"
 criterion = { git = "https://github.com/vlovich/criterion.rs.git", rev = "9b485aece85a3546126b06cc25d33e14aba829b3", features = [
