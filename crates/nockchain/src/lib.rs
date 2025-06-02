@@ -1,28 +1,22 @@
+pub mod config;
 pub mod mining;
 
 use std::error::Error;
 use std::fs;
 use std::path::Path;
 
-use clap::{arg, command, ArgAction, Parser};
+pub use config::NockchainCli;
 use libp2p::identity::Keypair;
 use libp2p::multiaddr::Multiaddr;
 use libp2p::{allow_block_list, connection_limits, memory_connection_limits, PeerId};
 use nockapp::kernel::boot;
 use nockapp::wire::Wire;
 use nockapp::NockApp;
-use nockchain_bitcoin_sync::{bitcoin_watcher_driver, BitcoinRPCConnection, GenesisNodeType};
-use nockchain_libp2p_io::p2p::{
-    MAX_ESTABLISHED_CONNECTIONS, MAX_ESTABLISHED_CONNECTIONS_PER_PEER,
-    MAX_ESTABLISHED_INCOMING_CONNECTIONS, MAX_ESTABLISHED_OUTGOING_CONNECTIONS,
-    MAX_PENDING_INCOMING_CONNECTIONS, MAX_PENDING_OUTGOING_CONNECTIONS,
-};
+use nockchain_bitcoin_sync::{bitcoin_watcher_driver, GenesisNodeType};
 use termcolor::{ColorChoice, StandardStream};
 use tokio::net::UnixListener;
 pub mod colors;
-use std::path::PathBuf;
 
-use clap::value_parser;
 use colors::*;
 use nockapp::noun::slab::NounSlab;
 use nockvm::jets::hot::HotEntry;
@@ -134,184 +128,6 @@ pub mod driver_init {
     }
 }
 
-// TODO: command-line/configure
-/** Path to read current node's identity from */
-pub const IDENTITY_PATH: &str = ".nockchain_identity";
-
-/** Path to read current node's peer ID from */
-pub const PEER_ID_EXTENSION: &str = ".peer_id";
-
-// TODO: command-line/configure
-/** Extension for peer ID files */
-const PEER_ID_FILE_EXTENSION: &str = "peerid";
-
-// Libp2p multiaddrs don't support const construction, so we have to put strings literals and parse them at startup
-/** Backbone nodes for our testnet */
-const TESTNET_BACKBONE_NODES: &[&str] = &[];
-
-// Libp2p multiaddrs don't support const construction, so we have to put strings literals and parse them at startup
-// TODO: feature flag testnet/realnet
-/** Backbone nodes for our realnet */
-#[allow(dead_code)]
-const REALNET_BACKBONE_NODES: &[&str] = &["/dnsaddr/nockchain-backbone.zorp.io"];
-
-/** How often we should affirmatively ask other nodes for their heaviest chain */
-const CHAIN_INTERVAL_SECS: u64 = 20;
-
-/// The height of the bitcoin block that we want to sync our genesis block to
-/// Currently, this is the height of an existing block for testing. It will be
-/// switched to a future block for launch.
-const GENESIS_HEIGHT: u64 = 897767;
-
-/// Command line arguments
-#[derive(Parser, Debug, Clone)]
-#[command(name = "nockchain")]
-pub struct NockchainCli {
-    #[command(flatten)]
-    pub nockapp_cli: nockapp::kernel::boot::Cli,
-    #[arg(
-        long,
-        help = "npc socket path",
-        default_value = ".socket/nockchain_npc.sock"
-    )]
-    pub npc_socket: String,
-    #[arg(long, help = "Mine in-kernel", default_value = "false")]
-    pub mine: bool,
-    #[arg(
-        long,
-        help = "Pubkey to mine to (mutually exclusive with --mining-key-adv)"
-    )]
-    pub mining_pubkey: Option<String>,
-    #[arg(
-        long,
-        help = "Advanced mining key configuration (mutually exclusive with --mining-pubkey). Format: share,m:key1,key2,key3",
-        value_parser = value_parser!(MiningKeyConfig),
-        num_args = 1..,
-        value_delimiter = ',',
-    )]
-    pub mining_key_adv: Option<Vec<MiningKeyConfig>>,
-    #[arg(long, help = "Watch for genesis block", default_value = "false")]
-    pub genesis_watcher: bool,
-    #[arg(long, help = "Mine genesis block", default_value = "false")]
-    pub genesis_leader: bool,
-    #[arg(long, help = "use fake genesis block", default_value = "false")]
-    pub fakenet: bool,
-    #[arg(long, help = "Genesis block message", default_value = "Hail Zorp")]
-    pub genesis_message: String,
-    #[arg(
-        long,
-        help = "URL for Bitcoin Core RPC",
-        default_value = "http://100.98.183.39:8332"
-    )]
-    pub btc_node_url: String,
-    #[arg(long, help = "Username for Bitcoin Core RPC")]
-    pub btc_username: Option<String>,
-    #[arg(long, help = "Password for Bitcoin Core RPC")]
-    pub btc_password: Option<String>,
-    #[arg(long, help = "Auth cookie path for Bitcoin Core RPC")]
-    pub btc_auth_cookie: Option<String>,
-    #[arg(long, short, help = "Initial peer", action = ArgAction::Append)]
-    pub peer: Vec<String>,
-    #[arg(long, short, help = "Force peer", action = ArgAction::Append)]
-    pub force_peer: Vec<String>,
-    #[arg(long, help = "Allowed peer IDs file")]
-    pub allowed_peers_path: Option<String>,
-    #[arg(long, help = "Don't dial default peers")]
-    pub no_default_peers: bool,
-    #[arg(long, help = "Bind address", action = ArgAction::Append)]
-    pub bind: Vec<String>,
-    #[arg(
-        long,
-        help = "Generate a new peer ID, discarding the existing one",
-        default_value = "false"
-    )]
-    pub new_peer_id: bool,
-    #[arg(long, help = "Maximum established incoming connections")]
-    pub max_established_incoming: Option<u32>,
-    #[arg(long, help = "Maximum established outgoing connections")]
-    pub max_established_outgoing: Option<u32>,
-    #[arg(long, help = "Maximum pending incoming connections")]
-    pub max_pending_incoming: Option<u32>,
-    #[arg(long, help = "Maximum pending outgoing connections")]
-    pub max_pending_outgoing: Option<u32>,
-    #[arg(long, help = "Maximum established connections")]
-    pub max_established: Option<u32>,
-    #[arg(long, help = "Maximum established connections per peer")]
-    pub max_established_per_peer: Option<u32>,
-    #[arg(long, help = "Maximum system memory percentage for connection limits")]
-    pub max_system_memory_fraction: Option<f64>,
-    #[arg(long, help = "Maximum process memory for connection limits (bytes)")]
-    pub max_system_memory_bytes: Option<usize>,
-}
-
-impl NockchainCli {
-    pub fn validate(&self) -> Result<(), String> {
-        if self.mine && !(self.mining_pubkey.is_some() || self.mining_key_adv.is_some()) {
-            return Err(
-                "Cannot specify mine without either mining_pubkey or mining_key_adv".to_string(),
-            );
-        }
-
-        if self.mining_pubkey.is_some() && self.mining_key_adv.is_some() {
-            return Err(
-                "Cannot specify both mining_pubkey and mining_key_adv at the same time".to_string(),
-            );
-        }
-
-        if self.genesis_leader && self.genesis_watcher {
-            return Err(
-                "Cannot specify both genesis_leader and genesis_watcher at the same time"
-                    .to_string(),
-            );
-        }
-
-        if !self.fakenet && (self.genesis_watcher || self.genesis_leader) {
-            if self.btc_node_url.is_empty() {
-                return Err(
-                    "Must specify --btc-node-url when using genesis_watcher or genesis_leader"
-                        .to_string(),
-                );
-            }
-            if self.btc_auth_cookie.is_none() {
-                if self.btc_username.is_none() && self.btc_password.is_none() {
-                    return Err("Must specify either --btc-username or --btc-password when using genesis_watcher or genesis_leader on livenet".to_string());
-                }
-            }
-        }
-
-        Ok(())
-    }
-
-    /// Helper function to create a BitcoinRPCConnection from CLI arguments
-    fn create_bitcoin_connection(&self) -> BitcoinRPCConnection {
-        let url = self.btc_node_url.clone();
-        let height = GENESIS_HEIGHT;
-        let auth = if let Some(username) = self.btc_username.clone() {
-            let password = self.btc_password.clone().unwrap_or_else(|| {
-                panic!(
-                    "Panicked at {}:{} (git sha: {:?})",
-                    file!(),
-                    line!(),
-                    option_env!("GIT_SHA")
-                )
-            });
-            bitcoincore_rpc::Auth::UserPass(username, password)
-        } else {
-            let cookie_path_str = self.btc_auth_cookie.clone().unwrap_or_else(|| {
-                panic!(
-                    "Panicked at {}:{} (git sha: {:?})",
-                    file!(),
-                    line!(),
-                    option_env!("GIT_SHA")
-                )
-            });
-            let cookie_path = PathBuf::from(cookie_path_str);
-            bitcoincore_rpc::Auth::CookieFile(cookie_path)
-        };
-        BitcoinRPCConnection::new(url, auth, height)
-    }
-}
-
 /// # Load a keypair from a file or create a new one if the file doesn't exist
 ///
 /// This function attempts to read a keypair from a specified file. If the file exists, it reads the keypair from the file.
@@ -330,7 +146,7 @@ pub fn gen_keypair(keypair_path: &Path) -> Result<Keypair, Box<dyn Error>> {
     let peer_id = new_keypair.public().to_peer_id();
     // write the peer_id encoded as base58 to a file
     std::fs::write(
-        keypair_path.with_extension(PEER_ID_FILE_EXTENSION),
+        keypair_path.with_extension(config::PEER_ID_FILE_EXTENSION),
         peer_id.to_base58(),
     )?;
     info!("Generated new identity as peer {peer_id}");
@@ -342,7 +158,7 @@ fn load_keypair(keypair_path: &Path, force_new: bool) -> Result<Keypair, Box<dyn
         let keypair_bytes = std::fs::read(keypair_path)?;
         let keypair = libp2p::identity::Keypair::from_protobuf_encoding(&keypair_bytes[..])?;
         let peer_id = keypair.public().to_peer_id();
-        let pubkey_path = keypair_path.with_extension(PEER_ID_FILE_EXTENSION);
+        let pubkey_path = keypair_path.with_extension(config::PEER_ID_FILE_EXTENSION);
         if !pubkey_path.exists() {
             info!("Writing pubkey to {pubkey_path:?}");
             std::fs::write(pubkey_path, peer_id.to_base58())?;
@@ -360,7 +176,7 @@ fn load_keypair(keypair_path: &Path, force_new: bool) -> Result<Keypair, Box<dyn
 
 #[instrument(skip(kernel_jam, hot_state))]
 pub async fn init_with_kernel(
-    cli: Option<NockchainCli>,
+    cli: Option<config::NockchainCli>,
     kernel_jam: &[u8],
     hot_state: &[HotEntry],
 ) -> Result<NockApp, Box<dyn Error>> {
@@ -380,7 +196,7 @@ pub async fn init_with_kernel(
     .await?;
 
     let keypair = {
-        let keypair_path = Path::new(IDENTITY_PATH);
+        let keypair_path = Path::new(config::IDENTITY_PATH);
         load_keypair(
             keypair_path,
             cli.as_ref().map(|c| c.new_peer_id).unwrap_or(false),
@@ -421,36 +237,38 @@ pub async fn init_with_kernel(
                 .collect()
         });
 
+    let libp2p_config = nockchain_libp2p_io::config::LibP2PConfig::from_env()?;
+    debug!("Using libp2p config: {:?}", libp2p_config);
     let limits = connection_limits::ConnectionLimits::default()
         .with_max_established_incoming(
             cli.as_ref()
                 .and_then(|c| c.max_established_incoming)
-                .or(Some(MAX_ESTABLISHED_INCOMING_CONNECTIONS)),
+                .or(Some(libp2p_config.max_established_incoming_connections)),
         )
         .with_max_established_outgoing(
             cli.as_ref()
                 .and_then(|c| c.max_established_outgoing)
-                .or(Some(MAX_ESTABLISHED_OUTGOING_CONNECTIONS)),
+                .or(Some(libp2p_config.max_established_outgoing_connections)),
         )
         .with_max_pending_incoming(
             cli.as_ref()
                 .and_then(|c| c.max_pending_incoming)
-                .or(Some(MAX_PENDING_INCOMING_CONNECTIONS)),
+                .or(Some(libp2p_config.max_pending_incoming_connections)),
         )
         .with_max_pending_outgoing(
             cli.as_ref()
                 .and_then(|c| c.max_pending_outgoing)
-                .or(Some(MAX_PENDING_OUTGOING_CONNECTIONS)),
+                .or(Some(libp2p_config.max_pending_outgoing_connections)),
         )
         .with_max_established(
             cli.as_ref()
                 .and_then(|c| c.max_established)
-                .or(Some(MAX_ESTABLISHED_CONNECTIONS)),
+                .or(Some(libp2p_config.max_established_connections)),
         )
         .with_max_established_per_peer(
             cli.as_ref()
                 .and_then(|c| c.max_established_per_peer)
-                .or(Some(MAX_ESTABLISHED_CONNECTIONS_PER_PEER)),
+                .or(Some(libp2p_config.max_established_connections_per_peer)),
         );
     let memory_limits = cli.as_ref().and_then(|c| {
         if c.max_system_memory_bytes.is_some() && c.max_system_memory_fraction.is_some() { panic!( "Must provide neither or one of --max-system-memory_bytes or --max-system-memory_percentage" )};
@@ -460,9 +278,9 @@ pub async fn init_with_kernel(
     });
 
     let default_backbone_peers = if cli.as_ref().map(|c| c.fakenet).unwrap_or(false) {
-        TESTNET_BACKBONE_NODES
+        config::TESTNET_BACKBONE_NODES
     } else {
-        REALNET_BACKBONE_NODES
+        config::REALNET_BACKBONE_NODES
     };
 
     let backbone_peers = default_backbone_peers
@@ -645,7 +463,10 @@ pub async fn init_with_kernel(
     );
     timer_slab.set_root(timer_noun);
     nockapp
-        .add_io_driver(nockapp::timer_driver(CHAIN_INTERVAL_SECS, timer_slab))
+        .add_io_driver(nockapp::timer_driver(
+            config::CHAIN_INTERVAL_SECS,
+            timer_slab,
+        ))
         .await;
 
     nockapp.add_io_driver(nockapp::exit_driver()).await;

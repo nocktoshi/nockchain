@@ -311,7 +311,12 @@ impl SerfThread {
 
 fn load_state_from_bytes(serf: &mut Serf, state_bytes: &[u8]) -> Result<()> {
     let noun = extract_state_from_bytes(serf.stack(), state_bytes)?;
-    serf.load(noun)?;
+    let arvo = serf.load(noun)?;
+    unsafe {
+        serf.event_update(serf.event_num.load(Ordering::SeqCst), arvo);
+        serf.preserve_event_update_leftovers();
+    }
+
     Ok(())
 }
 
@@ -503,8 +508,6 @@ fn extract_state_from_bytes(stack: &mut NockStack, state_bytes: &[u8]) -> Result
             Ok(noun)
         }
         Err(e1) => {
-            debug!("Failed to load as JammedCheckpoint: {}", e1);
-
             // Then try to decode as ExportedState
             match extract_from_exported_state(stack, state_bytes) {
                 Ok(noun) => {
@@ -512,6 +515,7 @@ fn extract_state_from_bytes(stack: &mut NockStack, state_bytes: &[u8]) -> Result
                     Ok(noun)
                 }
                 Err(e2) => {
+                    warn!("Failed to load as JammedCheckpoint: {}", e1);
                     warn!("Failed to load as ExportedState: {}", e2);
                     warn!("State bytes format is not recognized");
                     Err(CrownError::StateJamFormatError)

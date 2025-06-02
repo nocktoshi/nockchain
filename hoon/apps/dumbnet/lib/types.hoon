@@ -6,20 +6,37 @@
 /=  miner-kernel  /apps/dumbnet/miner
 |%
 +|  %state
-+$  kernel-state
-  $+  kernel-state
-  $%  $:  %0
-          c=consensus-state
-          p=pending-state
-          a=admin-state
-          m=mining-state
-        ::
-          d=derived-state
-          constants=blockchain-constants:dt
-  ==  ==
++$  load-kernel-state
+  $+  load-kernel-state
+  $%  kernel-state-0
+      kernel-state-1
+  ==
 ::
-+$  consensus-state
-  $+  consensus-state
++$  kernel-state-0
+  $:  %0
+      c=consensus-state-0
+      p=pending-state-0
+      a=admin-state-0
+      m=mining-state-0
+    ::
+      d=derived-state-0
+      constants=blockchain-constants:dt
+  ==
+::
++$  kernel-state-1
+  $:  %1
+      c=consensus-state-1
+      p=pending-state-1
+      a=admin-state-1
+      m=mining-state-1
+    ::
+      d=derived-state-1
+      constants=blockchain-constants:dt
+  ==
++$  kernel-state  kernel-state-1
+::
++$  consensus-state-0
+  $+  consensus-state-0
   $:  balance=(z-mip block-id:dt nname:dt nnote:dt)
       txs=(z-mip block-id:dt tx-id:dt tx:dt) ::  fully validated transactions
       blocks=(z-map block-id:dt local-page:dt)  ::  fully validated blocks
@@ -41,9 +58,13 @@
       =genesis-seal:dt  ::  desired seal for genesis block
   ==
 ::
++$  consensus-state-1  $+(consensus-state-1 consensus-state-0)
+::
++$  consensus-state  consensus-state-1
+::
 ::  you will not have lost any chain state if you lost pending state, you'd just have to
 ::  request data again from peers
-+$  pending-state
++$  pending-state-0
   $+  pending-state
   $:  pending-blocks=(z-map block-id:dt local-page:dt)  ::  blocks for which we are waiting on txs
     ::  data we need
@@ -55,8 +76,12 @@
       heard-at=(z-map tx-id:dt page-number:dt)  :: block height which a tx-id was first heard
   ==
 ::
-+$  admin-state
-  $+  admin-state
++$  pending-state-1  $+(pending-state-1 pending-state-0)
+::
++$  pending-state  pending-state-1
+::
++$  admin-state-0
+  $+  admin-state-0
   $:  desk-hash=(unit @uvI)               ::  hash of zkvm desk
       init=init-phase                     ::  boolean flag denoting whether kernel is in the init phase.
       retain=$~([~ 20] (unit @))          ::  how long to retain transactions before dropping
@@ -64,13 +89,25 @@
                                           ::  value of [~ 0] indicates drop everything every new block
   ==
 ::
-+$  derived-state
-  $+  derived-state
++$  admin-state-1  $+(admin-state-1 admin-state-0)
+::
++$  admin-state  admin-state-1
+::
++$  derived-state-0
+  $+  derived-state-0
   $:  heaviest-chain=(z-map page-number:dt block-id:dt)
   ==
 ::
-+$  mining-state
-  $+  mining-state
++$  derived-state-1
+  $+  derived-state-1
+  $:  highest-block-height=(unit page-number:dt)
+      heaviest-chain=(z-map page-number:dt block-id:dt)
+  ==
+::
++$  derived-state  derived-state-1
+::
++$  mining-state-0
+  $+  mining-state-0
   $:  mining=?                        ::  build candidate blocks?
       pubkeys=(z-set lock:dt)          ::  locks for coinbase in mined blocks
       shares=(z-map lock:dt @)         ::  shares of coinbase+fees among locks
@@ -78,6 +115,10 @@
       candidate-acc=tx-acc:dt           ::  accumulator for txs in candidate block
       next-nonce=noun-digest:tip5:zeke  :: nonce being mined
   ==
+::
++$  mining-state-1  $+(mining-state-1 mining-state-0)
+::
++$  mining-state  mining-state-1
 ::
 +$  init-phase  $~(%.y ?)
 ::

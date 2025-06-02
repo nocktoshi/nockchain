@@ -32,6 +32,7 @@ use tokio::sync::{mpsc, Mutex};
 use tokio::task::{AbortHandle, JoinError, JoinSet};
 use tracing::{debug, error, info, instrument, trace, warn};
 
+use crate::config::LibP2PConfig;
 use crate::metrics::NockchainP2PMetrics;
 use crate::p2p::*;
 use crate::p2p_util::{
@@ -78,7 +79,11 @@ impl Wire for Libp2pWire {
     const SOURCE: &'static str = "libp2p";
 
     fn to_wire(&self) -> WireRepr {
-        let tags = vec![self.verb().into(), "peer-id".into(), self.peer_id().to_base58().into()];
+        let tags = vec![
+            self.verb().into(),
+            "peer-id".into(),
+            self.peer_id().to_base58().into(),
+        ];
         WireRepr::new(Libp2pWire::SOURCE, Libp2pWire::VERSION, tags)
     }
 }
@@ -172,46 +177,62 @@ pub fn make_libp2p_driver(
 ) -> IODriverFn {
     let initial_peers = Vec::from(initial_peers);
     let force_peers = Vec::from(force_peers);
-    Box::new(|mut handle| {
+    Box::new(|handle| {
         let metrics = Arc::new(
             NockchainP2PMetrics::register(gnort::global_metrics_registry())
                 .expect("Failed to register metrics!"),
         );
 
         Box::pin(async move {
-            let mut swarm =
-                match crate::p2p::start_swarm(keypair, bind, allowed, limits, memory_limits) {
-                    Ok(swarm) => swarm,
-                    Err(e) => {
-                        error!("Could not create swarm: {}", e);
-                        let (_, handle_clone) = handle.dup();
-                        tokio::spawn(async move {
-                            if let Err(e) = handle_clone.exit.exit(1).await {
-                                error!("Failed to send exit signal: {}", e);
-                            }
-                        });
-                        return Err(NockAppError::OtherError);
-                    }
-                };
+            let libp2p_config = LibP2PConfig::from_env()?;
+            debug!("Libp2p config: {:?}", libp2p_config);
+            let kademlia_bootstrap_interval = libp2p_config.kademlia_bootstrap_interval();
+            let force_peer_dial_interval = libp2p_config.force_peer_dial_interval();
+            let request_high_reset = libp2p_config.request_high_reset();
+            let initial_peer_retries = libp2p_config.initial_peer_retries;
+            let request_high_threshold = libp2p_config.request_high_threshold;
+            let peer_status_log_interval = libp2p_config.peer_status_log_interval_secs();
+            let mut swarm = match crate::p2p::start_swarm(
+                libp2p_config,
+                keypair,
+                bind,
+                allowed,
+                limits,
+                memory_limits,
+            ) {
+                Ok(swarm) => swarm,
+                Err(e) => {
+                    error!("Could not create swarm: {}", e);
+                    let (_, handle_clone) = handle.dup();
+                    tokio::spawn(async move {
+                        if let Err(e) = handle_clone.exit.exit(1).await {
+                            error!("Failed to send exit signal: {}", e);
+                        }
+                    });
+                    return Err(NockAppError::OtherError);
+                }
+            };
             let (swarm_tx, mut swarm_rx) = mpsc::channel::<SwarmAction>(1000); // number needs to be high enough to send gossips to peers
             let mut join_set = TrackedJoinSet::<Result<(), NockAppError>>::new();
             let message_tracker = Arc::new(Mutex::new(MessageTracker::new(metrics.clone())));
-            let mut kad_bootstrap = tokio::time::interval(KADEMLIA_BOOTSTRAP_INTERVAL);
-            let mut force_peer_dial = tokio::time::interval(FORCE_PEER_DIAL_INTERVAL);
-            let mut reset_request_counts = tokio::time::interval(REQUEST_HIGH_RESET);
+            let mut kad_bootstrap = tokio::time::interval(kademlia_bootstrap_interval);
+            let mut force_peer_dial = tokio::time::interval(force_peer_dial_interval);
+            let mut reset_request_counts = tokio::time::interval(request_high_reset);
             let (traffic_handle, effect_handle) = handle.dup();
             let traffic_cop = traffic_cop::TrafficCop::new(traffic_handle, &mut join_set);
 
-            let mut initial_peer_retries_remaining = INITIAL_PEER_RETRIES;
+            let mut initial_peer_retries_remaining = initial_peer_retries;
             dial_peers(&mut swarm, &initial_peers)?;
-
             if let Some(tx) = init_complete_tx {
                 let _ = tx.send(());
                 debug!("libp2p driver initialization complete signal sent");
             }
-
+            let mut peer_status_log = tokio::time::interval(peer_status_log_interval);
             loop {
                 tokio::select! {
+                    _ = peer_status_log.tick() => {
+                        log_peer_status(&mut swarm, &metrics).await;
+                    },
                     Ok(noun_slab) = effect_handle.next_effect() => {
                         let _span = tracing::trace_span!("broadcast").entered();
                         let swarm_tx_clone = swarm_tx.clone();
@@ -228,6 +249,16 @@ pub fn make_libp2p_driver(
                         match event {
                             SwarmEvent::NewListenAddr { address, .. } => {
                                 info!("SEvent: Listening on {address:?}");
+                            },
+                            SwarmEvent::ListenerError { error, .. } => {
+                                error!("SEvent: Listener error: {error:?}");
+                            },
+                            SwarmEvent::ListenerClosed { addresses, reason, .. } => {
+                                if let Err(e) = reason {
+                                    error!("SEvent: Listener closed on {addresses:?} because of {e:?}");
+                                } else {
+                                    info!("SEvent: Listener closed on {addresses:?}");
+                                }
                             },
                             SwarmEvent::Behaviour(NockchainEvent::Identify(Received { connection_id: _, peer_id, info })) => {
                                 trace!("SEvent: identify_received");
@@ -259,7 +290,7 @@ pub fn make_libp2p_driver(
                                 let metrics = metrics.clone();
                                 let message_tracker_clone = Arc::clone(&message_tracker); // Clone the Arc, not the MessageTracker
                                 join_set.spawn("handle_request_response".to_string(), async move {
-                                    handle_request_response(peer, connection_id, message, swarm_tx_clone, &mut equix_builder_clone, local_peer_id, traffic_clone, metrics.clone(), message_tracker_clone).await
+                                    handle_request_response(peer, connection_id, message, swarm_tx_clone, &mut equix_builder_clone, local_peer_id, traffic_clone, metrics.clone(), message_tracker_clone, request_high_threshold).await
                                 });
                             },
                             SwarmEvent::OutgoingConnectionError { peer_id, error, .. } => {
@@ -334,7 +365,7 @@ pub fn make_libp2p_driver(
                                 initial_peer_retries_remaining -= 1;
                                 dial_peers(&mut swarm, &initial_peers)?;
                             } else {
-                                warn!("Failed to bootstrap after {} retries, will not attempt to redial initial peers.", INITIAL_PEER_RETRIES);
+                                warn!("Failed to bootstrap after {} retries, will not attempt to redial initial peers.", initial_peer_retries);
                             }
                         }
                     },
@@ -556,7 +587,10 @@ async fn handle_effect(
                 let local_peer_id_clone = local_peer_id;
                 let mut equix_builder_clone = equix_builder.clone();
                 let request = NockchainRequest::new_request(
-                    &mut equix_builder_clone, &local_peer_id_clone, &peer_id, &noun_slab,
+                    &mut equix_builder_clone,
+                    &local_peer_id_clone,
+                    &peer_id,
+                    &noun_slab,
                 );
                 swarm_tx
                     .send(SwarmAction::SendRequest { peer_id, request })
@@ -663,7 +697,10 @@ async fn handle_effect(
                     if tracker.first_negative <= block_height {
                         metrics.highest_block_height_seen.swap(block_height as f64);
                         tracker.first_negative = block_height + 1;
-                        trace!("Setting tracker.first_negative to {:?}", tracker.first_negative);
+                        trace!(
+                            "Setting tracker.first_negative to {:?}",
+                            tracker.first_negative
+                        );
                     }
                 }
             } else if seen_type.eq_bytes(b"tx") {
@@ -694,6 +731,7 @@ async fn handle_request_response(
     traffic: traffic_cop::TrafficCop,
     metrics: Arc<NockchainP2PMetrics>,
     message_tracker: Arc<Mutex<MessageTracker>>,
+    request_high_threshold: u64,
 ) -> Result<(), NockAppError> {
     trace!("handle_request_response peer: {peer}");
     match message {
@@ -729,7 +767,7 @@ async fn handle_request_response(
                     let threshold_exceeded = message_tracker
                         .lock()
                         .await
-                        .requested(ip4, REQUEST_HIGH_THRESHOLD);
+                        .requested(ip4, request_high_threshold);
                     if let Some(count) = threshold_exceeded {
                         warn!("IP address {ip4} exceeded the request-per-interval threshold with {count} requests");
                     }
@@ -1015,6 +1053,48 @@ async fn handle_request_response(
     Ok(())
 }
 
+async fn log_peer_status(swarm: &mut Swarm<NockchainBehaviour>, metrics: &NockchainP2PMetrics) {
+    {
+        info!("Logging current peer status...");
+        let connected_peers: Vec<_> = swarm.connected_peers().cloned().collect();
+        let peer_count = connected_peers.len();
+
+        if peer_count == 0 {
+            warn!(
+                connected_peers = peer_count,
+                peers = ?connected_peers.iter().map(|p| p.to_base58()).collect::<Vec<_>>(),
+                "No current peers connected!"
+            );
+        } else {
+            info!(
+                connected_peers = peer_count,
+                peers = ?connected_peers.iter().map(|p| p.to_base58()).collect::<Vec<_>>(),
+                "Current peer status"
+            );
+        }
+
+        let _ = metrics.active_peer_connections.swap(peer_count as f64);
+    }
+
+    // Count peers in the routing table by iterating through k-buckets
+    let mut routing_table_size = 0;
+    for bucket in swarm.behaviour_mut().kad.kbuckets() {
+        routing_table_size += bucket.num_entries();
+    }
+
+    if routing_table_size == 0 {
+        warn!(
+            routing_table_size = routing_table_size,
+            "Routing table is empty!"
+        );
+    } else {
+        info!(
+            routing_table_size = routing_table_size,
+            "Routing table has {} entries", routing_table_size
+        );
+    };
+}
+
 /// Converts a request noun into a scry path that can be used to query the Nockchain state.
 ///
 /// The request noun is expected to be in the format:
@@ -1042,6 +1122,7 @@ async fn handle_request_response(
 fn request_to_scry_slab(request: NockchainDataRequest) -> Result<NounSlab, NockAppError> {
     match request {
         NockchainDataRequest::BlockByHeight(height) => {
+            debug!("Requesting block by height: {}", height);
             let mut slab = NounSlab::new();
             let height_atom = Noun::from_atom(Atom::new(&mut slab, height));
             let noun = T(&mut slab, &[D(tas!(b"heavy-n")), height_atom, D(0)]);
@@ -1049,6 +1130,7 @@ fn request_to_scry_slab(request: NockchainDataRequest) -> Result<NounSlab, NockA
             Ok(slab)
         }
         NockchainDataRequest::EldersById(str, _, _) => {
+            debug!("Requesting elders by ID: {}", str);
             let mut slab = NounSlab::new();
             let id_atom = Atom::from_value(&mut slab, str)?;
             let noun = T(&mut slab, &[D(tas!(b"elders")), id_atom.as_noun(), D(0)]);
@@ -1056,6 +1138,7 @@ fn request_to_scry_slab(request: NockchainDataRequest) -> Result<NounSlab, NockA
             Ok(slab)
         }
         NockchainDataRequest::RawTransactionById(str, _) => {
+            debug!("Requesting raw transaction by ID: {}", str);
             let mut slab = NounSlab::new();
             let raw_tx_tag = make_tas(&mut slab, "raw-transaction").as_noun();
             let id_atom = Atom::from_value(&mut slab, str)?;
@@ -1391,7 +1474,8 @@ mod tests {
             } => {
                 // Test successful verification
                 let result = valid_request.verify_pow(
-                    &mut builder, &remote_peer_id, // Note: peers are swapped for verification
+                    &mut builder,
+                    &remote_peer_id, // Note: peers are swapped for verification
                     &local_peer_id,
                 );
                 assert!(result.is_ok(), "Valid PoW should verify successfully");
@@ -1408,7 +1492,8 @@ mod tests {
 
                 // Test failed verification with wrong peer order
                 let result = valid_request.verify_pow(
-                    &mut builder, &local_peer_id, // Wrong order - not swapped
+                    &mut builder,
+                    &local_peer_id, // Wrong order - not swapped
                     &remote_peer_id,
                 );
                 assert!(result.is_err(), "Wrong peer order should fail verification");
@@ -1958,10 +2043,11 @@ fn dial_peers(
 ) -> Result<(), NockAppError> {
     for peer in peers {
         let peer = peer.clone();
-        swarm.dial(peer.clone()).map_err(|e| {
+        debug!("Dialing peer: {}", peer);
+        let _ = swarm.dial(peer.clone()).map_err(|e| {
             error!("Failed to dial peer {}: {}", peer, e);
-            NockAppError::OtherError
-        })?;
+            ()
+        });
     }
     Ok(())
 }
@@ -1969,7 +2055,6 @@ fn dial_peers(
 mod traffic_cop {
     use tokio::select;
     use tokio::sync::oneshot;
-    use tokio::task::AbortHandle;
 
     use super::*;
 

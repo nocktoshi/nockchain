@@ -1,6 +1,5 @@
 use std::convert::Infallible;
 use std::error::Error;
-use std::time::Duration;
 
 use hickory_resolver::config::{ResolverConfig, ResolverOpts};
 use libp2p::identity::Keypair;
@@ -13,65 +12,10 @@ use libp2p::{
     Swarm,
 };
 use nockapp::NockAppError;
-use tracing::{debug, trace};
+use tracing::{debug, error, trace};
 
+use crate::config::LibP2PConfig;
 use crate::nc::*;
-
-// Kademlia constants
-/** How often we should run a kademlia bootstrap to keep our peer table fresh */
-pub const KADEMLIA_BOOTSTRAP_INTERVAL: Duration = Duration::from_secs(300);
-
-// If the --force-peer cli arg is passed, we will force dial it every FORCE_PEER_BOOT_INTERVAL
-pub const FORCE_PEER_DIAL_INTERVAL: Duration = Duration::from_secs(600);
-
-/** How long we should keep a peer connection alive with no traffic */
-pub const SWARM_IDLE_TIMEOUT: Duration = Duration::from_secs(30);
-
-// Core protocol (QUIC/ping/etc) constants
-/** How many times we should retry dialing our initial peers if we can't get Kademlia initialized */
-// TODO: Make command-line configurable
-pub const INITIAL_PEER_RETRIES: u32 = 5;
-/** How often we should send a keep-alive message to a peer */
-pub const KEEP_ALIVE_INTERVAL: Duration = Duration::from_secs(15);
-/** How long should we wait before timing out the connection */
-pub const CONNECTION_TIMEOUT: Duration = SWARM_IDLE_TIMEOUT;
-/** How long should we wait before timing out the handshake */
-pub const HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(15);
-/** How long QUIC should wait before timing out an idle connection */
-pub const MAX_IDLE_TIMEOUT_MILLISECS: u32 = CONNECTION_TIMEOUT.as_millis() as u32;
-/** How often we should send an identify message to a peer */
-pub const IDENTIFY_INTERVAL: Duration = KADEMLIA_BOOTSTRAP_INTERVAL;
-
-/** Maximum number of established *incoming* connections */
-pub const MAX_ESTABLISHED_INCOMING_CONNECTIONS: u32 = 32;
-
-/** Maximum number of established *incoming* connections */
-pub const MAX_ESTABLISHED_OUTGOING_CONNECTIONS: u32 = 32;
-
-/** Maximum number of established connections */
-pub const MAX_ESTABLISHED_CONNECTIONS: u32 = 64;
-
-/** Maximum number of established connections with a single peer ID */
-pub const MAX_ESTABLISHED_CONNECTIONS_PER_PEER: u32 = 2;
-
-/** Maximum pending incoming connections */
-pub const MAX_PENDING_INCOMING_CONNECTIONS: u32 = 16;
-
-/** Maximum pending outcoing connections */
-pub const MAX_PENDING_OUTGOING_CONNECTIONS: u32 = 16;
-
-// Request/response constants
-pub const REQUEST_RESPONSE_MAX_CONCURRENT_STREAMS: usize = MAX_ESTABLISHED_CONNECTIONS as usize * 2;
-pub const REQUEST_RESPONSE_TIMEOUT: Duration = Duration::from_secs(20);
-pub const REQUEST_HIGH_THRESHOLD: u64 = 60;
-pub const REQUEST_HIGH_RESET: Duration = Duration::from_secs(60);
-
-// ALL PROTOCOLS MUST HAVE UNIQUE VERSIONS
-pub const REQ_RES_PROTOCOL_VERSION: &str = "/nockchain-1-req-res";
-pub const KAD_PROTOCOL_VERSION: &str = "/nockchain-1-kad";
-pub const IDENTIFY_PROTOCOL_VERSION: &str = "/nockchain-1-identify";
-
-const PEER_STORE_RECORD_CAPACITY: usize = 10 * 1024;
 
 #[derive(Debug)]
 pub enum SwarmAction {
@@ -114,31 +58,38 @@ pub struct NockchainBehaviour {
 
 impl NockchainBehaviour {
     fn pre_new(
+        libp2p_config: LibP2PConfig,
         allowed: Option<allow_block_list::Behaviour<allow_block_list::AllowedPeers>>,
         limits: connection_limits::ConnectionLimits,
         memory_limits: Option<memory_connection_limits::Behaviour>,
     ) -> impl FnOnce(&libp2p::identity::Keypair) -> Self {
-        |keypair: &libp2p::identity::Keypair| {
+        move |keypair: &libp2p::identity::Keypair| {
             let peer_id = libp2p::identity::PeerId::from_public_key(&keypair.public());
 
-            let identify_config =
-                identify::Config::new(IDENTIFY_PROTOCOL_VERSION.to_string(), keypair.public())
-                    .with_interval(IDENTIFY_INTERVAL)
-                    .with_hide_listen_addrs(true); // Only send externally confirmed addresses so we don't send loopback addresses
+            let identify_config = identify::Config::new(
+                libp2p_config.identify_protocol_version.clone(),
+                keypair.public(),
+            )
+            .with_interval(libp2p_config.identify_interval())
+            .with_hide_listen_addrs(true); // Only send externally confirmed addresses so we don't send loopback addresses
             let identify_behaviour = identify::Behaviour::new(identify_config);
 
             let memory_store = kad::store::MemoryStore::new(peer_id);
 
-            let kad_config = kad::Config::new(libp2p::StreamProtocol::new(KAD_PROTOCOL_VERSION));
+            let kad_config = kad::Config::new(libp2p::StreamProtocol::new(
+                LibP2PConfig::kad_protocol_version(),
+            ));
             let kad_behaviour = kad::Behaviour::with_config(peer_id, memory_store, kad_config);
 
             let request_response_config = request_response::Config::default()
-                .with_max_concurrent_streams(REQUEST_RESPONSE_MAX_CONCURRENT_STREAMS)
-                .with_request_timeout(REQUEST_RESPONSE_TIMEOUT);
+                .with_max_concurrent_streams(
+                    libp2p_config.request_response_max_concurrent_streams(),
+                )
+                .with_request_timeout(libp2p_config.request_response_timeout());
 
             let request_response_behaviour = cbor::Behaviour::new(
                 [(
-                    libp2p::StreamProtocol::new(REQ_RES_PROTOCOL_VERSION),
+                    libp2p::StreamProtocol::new(LibP2PConfig::req_res_protocol_version()),
                     request_response::ProtocolSupport::Full,
                 )],
                 request_response_config,
@@ -152,7 +103,7 @@ impl NockchainBehaviour {
                     allowed,
                 );
             let peer_store_config = libp2p::peer_store::memory_store::Config::default();
-            let record_capacity = PEER_STORE_RECORD_CAPACITY.try_into().unwrap();
+            let record_capacity = libp2p_config.peer_store_record_capacity;
             let peer_store_config = peer_store_config.set_record_capacity(record_capacity);
             let peer_store_memory =
                 libp2p::peer_store::memory_store::MemoryStore::new(peer_store_config);
@@ -185,6 +136,7 @@ impl NockchainBehaviour {
 /// # Returns
 /// A Result containing the Swarm instance or an error if any operation fails
 pub fn start_swarm(
+    libp2p_config: LibP2PConfig,
     keypair: Keypair,
     bind: Vec<Multiaddr>,
     allowed: Option<allow_block_list::Behaviour<allow_block_list::AllowedPeers>>,
@@ -199,22 +151,35 @@ pub fn start_swarm(
             (ResolverConfig::cloudflare(), ResolverOpts::default())
         };
 
+    let max_idle_timeout_millisecs = libp2p_config.max_idle_timeout_millisecs();
+    let keep_alive_interval = libp2p_config.keep_alive_interval();
+    let handshake_timeout = libp2p_config.handshake_timeout();
+    let connection_timeout = libp2p_config.connection_timeout();
+    let swarm_idle_timeout = libp2p_config.swarm_idle_timeout();
     let mut swarm = libp2p::SwarmBuilder::with_existing_identity(keypair)
         .with_tokio()
         .with_quic_config(|mut cfg| {
-            cfg.max_idle_timeout = MAX_IDLE_TIMEOUT_MILLISECS;
-            cfg.keep_alive_interval = KEEP_ALIVE_INTERVAL;
-            cfg.handshake_timeout = HANDSHAKE_TIMEOUT;
+            cfg.max_idle_timeout = max_idle_timeout_millisecs;
+            cfg.keep_alive_interval = keep_alive_interval;
+            cfg.handshake_timeout = handshake_timeout;
             cfg
         })
         .with_dns_config(resolver_config, resolver_opts)
-        .with_behaviour(NockchainBehaviour::pre_new(allowed, limits, memory_limits))?
-        .with_swarm_config(|cfg| cfg.with_idle_connection_timeout(SWARM_IDLE_TIMEOUT))
-        .with_connection_timeout(CONNECTION_TIMEOUT)
+        .with_behaviour(NockchainBehaviour::pre_new(
+            libp2p_config,
+            allowed,
+            limits,
+            memory_limits,
+        ))?
+        .with_swarm_config(|cfg| cfg.with_idle_connection_timeout(swarm_idle_timeout))
+        .with_connection_timeout(connection_timeout)
         .build();
 
     for bind_addr in bind {
-        swarm.listen_on(bind_addr)?;
+        swarm.listen_on(bind_addr.clone()).map_err(|e| {
+            error!("Failed to listen on {bind_addr:?}: {e}");
+            e
+        })?;
     }
     Ok(swarm)
 }

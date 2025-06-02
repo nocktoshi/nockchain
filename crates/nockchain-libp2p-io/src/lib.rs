@@ -1,3 +1,4 @@
+pub mod config;
 pub mod metrics;
 pub mod nc;
 pub mod p2p;

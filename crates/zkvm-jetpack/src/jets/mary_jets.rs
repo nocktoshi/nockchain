@@ -79,7 +79,10 @@ pub fn mary_transpose_jet(context: &mut Context, subject: Noun) -> Result<Noun, 
     mary_transpose(mary, offset, &mut res_poly);
 
     let res_cell = finalize_mary(
-        &mut context.stack, res_poly.step as usize, res_poly.len as usize, res,
+        &mut context.stack,
+        res_poly.step as usize,
+        res_poly.len as usize,
+        res,
     );
 
     Ok(res_cell)

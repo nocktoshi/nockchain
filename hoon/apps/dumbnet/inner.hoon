@@ -27,8 +27,50 @@
   ::
   ::  We should be calling the inner kernel load in case of update
   ++  load
-    |=  arg=kernel-state:dk
-    |^  (check-checkpoints arg)
+    ::  use the below for validation of new state upgrades
+    ::  |=  untyped-arg=*
+    ::  ~>  %slog.[0 leaf+"typing kernel state"]
+    ::  =/  arg  ~>  %bout  ;;(load-kernel-state:dk untyped-arg)
+    ::  ~>  %slog.[0 leaf+"loading kernel state"]
+    ::
+    ::  use this for production
+    |=  arg=load-kernel-state:dk
+    ::  cut
+    |^  ~>  %bout  (check-checkpoints (state-n-to-1 arg))
+    ::  this arm should be renamed each state upgrade to state-n-to-[latest] and extended to loop through all upgrades
+    ++  state-n-to-1
+      |=  arg=load-kernel-state:dk
+      ^-  kernel-state:dk
+      ?.  ?=(%1 -.arg)
+        ~>  %slog.[0 leaf+"state upgrade required"]
+        ?-  -.arg
+            ::
+          %0  $(arg (state-0-to-1 arg))
+        ==
+      arg
+    ::  upgrade kernel-state-0 to kernel-state-1
+    ++  state-0-to-1
+      |=  arg=kernel-state-0:dk
+      ^-  kernel-state-1:dk
+      ~>  %slog.[0 leaf+"state version 0 to version 1"]
+      =/  d  [*(unit page-number:t) heaviest-chain.d.arg]
+      =.  d  (compute-highest blocks.c.arg pending-blocks.p.arg d constants.arg)
+      [%1 c.arg p.arg a.arg m.arg d constants.arg]
+    ::  compute the highest block (for the 0-1 upgrade)
+    ++  compute-highest
+      |=  $:  blocks=(z-map block-id:t local-page:t)
+              pending=(z-map block-id:t local-page:t)
+              derived-state=derived-state-1:dk
+              constants=blockchain-constants:t
+          ==
+      =/  both  (~(uni z-by blocks) pending)
+      =/  list  ~(tap z-by both)
+      |-  ^-  derived-state-1:dk
+      ?~  list  derived-state
+      %=  $
+        derived-state  (~(update-highest dumb-derived derived-state constants) height.q.i.list)
+        list  t.list
+      ==
     ++  check-checkpoints
       |=  arg=kernel-state:dk
       =/  checkpoints  ~(tap z-by checkpointed-digests:con)
@@ -214,9 +256,8 @@
         ?~  peer-id
           ::  received block before genesis from source other than libp2p
           `k
-        ~>  %slog.[0 [%leaf "no genesis block yet, requesting elders"]]
         :_  k
-        [%request %block %elders digest.pag u.peer-id]~
+        (missing-parent-effects digest.pag height.pag u.peer-id)
       ::  if we don't have parent and block claims to be heaviest
       ::  request ancestors to catch up or handle reorg
       ?.  (~(has z-by blocks.c.k) parent.pag)
@@ -225,15 +266,8 @@
           =/  peer-id=(unit @)  (get-peer-id wir)
           ?~  peer-id
             ~|("unsupported wire: {<wir>}" !!)
-          =/  print-var
-            %-  trip
-            ^-  @t
-            %^  cat  3
-              'potential reorg: requesting elders for heavier block: '
-            (to-b58:hash:t digest.pag)
-          ~>  %slog.[0 [%leaf print-var]]
           :_  k
-          [%request %block %elders digest.pag u.peer-id]~
+          (missing-parent-effects digest.pag height.pag u.peer-id)
         ::  received block, don't have parent, isn't heaviest, ignore.
         `k
       ::  yes, we have its parent
@@ -297,6 +331,7 @@
         [%track %remove digest.pag]
       =^  missing-txs=(list tx-id:t)  p.k
         (add-pending-block:pen pag)
+      =.  d.k  (update-highest:der height.pag)
       ?:  !=(missing-txs *(list tx-id:t))
         ~>  %slog.[0 leaf+"missing txs"]
         ::  block has missing txs
@@ -337,6 +372,13 @@
         ::  either oldest is genesis OR we must have received exactly 24 ids
         :_  k
         [[%liar-peer u.peer-id %less-than-24-parent-hashes]~]
+      ::  log
+      =/  log-message
+        %-  trip
+        %^  cat  3
+          'heard elders starting at height '
+        (scot %ud oldest)
+      ~>  %slog.[0 leaf+log-message]
       ::  find highest block we have in the ancestor list
       =/  latest-known=(unit [=block-id:t =page-number:t])
         =/  height  (dec (add oldest ids-lent))
@@ -358,11 +400,20 @@
           [[%liar-peer u.peer-id %differing-genesis]~]
         ::  request elders of oldest ancestor to catch up faster
         ::  hashes are ordered newest>oldest
-        =/  print-var
-          "processed elders and asking for oldest: requesting elders"
-        ~>  %slog.[0 %leaf^print-var]
+        =/  last-id  (rear ids)
+        :: extra log to clarify that this is a deep re-org.
+        :: we need to handle this case but we hope to never see this
+        =/  log-message
+          %-  trip
+          %+  rap  3
+          :~  'DEEP REORG: processed elders and asking for oldest: requesting elders for block '
+              (to-b58:hash:t last-id)
+              ' at height '
+              (scot %ud oldest)
+          ==
+        ~>  %slog.[0 %leaf^log-message]
         :_  k
-        [%request %block %elders (rear ids) u.peer-id]~
+        (missing-parent-effects last-id oldest u.peer-id)
       =/  print-var
         %-  trip
         %^  cat  3
@@ -943,6 +994,49 @@
         ~&  mining-on+nonce
         :_  k
         [%mine pow-len:zeke commit nonce]~
+      ::
+      ::  only send a %elders request for reasonable heights
+      ++  missing-parent-effects
+        |=  [=block-id:t block-height=page-number:t peer-id=@]
+        ^-  (list effect:dk)
+        ?~  highest-block-height.d.k
+          ~|  %missing-parent-genesis-case :: below assertion should never trip
+          ?>  ?=(~ heaviest-block.c.k)
+          =/  log-message
+            %-  trip
+            %+  rap  3
+            :~  'no genesis block but heard block with id '
+               (to-b58:hash:t block-id)
+               ': requesting genesis block'
+            ==
+          ~>  %slog.[0 leaf+log-message]
+          [%request %block %by-height 0]~ :: ask for the genesis block, we don't have it
+        ?:  (gth block-height +(u.highest-block-height.d.k))
+          ::  ask for next-heaviest block, too far up for elders
+          =/  log-message
+            %-  trip
+            %+  rap  3
+            :~  'heard block '
+                (to-b58:hash:t block-id)
+                ' at height '
+                (scot %ud block-height)
+                ' but we only have blocks up to height '
+                (scot %ud u.highest-block-height.d.k)
+                ': requesting next highest block.'
+            ==
+          ~>  %slog.[0 leaf+log-message]
+          [%request %block %by-height +(u.highest-block-height.d.k)]~ :: ask for the next block by height
+        :: ask for elders
+        =/  log-message
+          %-  trip
+          %+  rap  3
+          :~  'potential reorg: requesting elders for block '
+              (to-b58:hash:t block-id)
+              ' at height '
+              (scot %ud block-height)
+          ==
+        ~>  %slog.[0 leaf+log-message]
+        [%request %block %elders block-id peer-id]~ :: ask for elders
     --::  +poke
   --::  +kernel
 --

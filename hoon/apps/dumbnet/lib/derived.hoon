@@ -8,6 +8,9 @@
 ++  update
   |=  [c=consensus-state:dk pag=page:t]
   ^-  derived-state:dk
+  ::  update highest height
+  =.  d  (update-highest height.pag)
+  :: update view of heaviest chain
   =/  heaviest-page=page:t
     ?:  =(~ heaviest-block.c)
       pag  :: genesis block
@@ -30,4 +33,13 @@
     next-height   (dec next-height)
     next-parent  parent:(~(got z-by blocks.c) next-parent)
   ==
+++  update-highest
+  |=  height=page-number:t
+  =/  new-highest
+    ?~  highest-block-height.d  height
+    ?:  (gth height u.highest-block-height.d)
+      height
+    u.highest-block-height.d
+  =.  highest-block-height.d  `new-highest
+  d
 --

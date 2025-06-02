@@ -8,8 +8,7 @@ use libp2p::{Multiaddr, PeerId};
 use nockapp::noun::slab::NounSlab;
 use nockapp::{AtomExt, NockAppError, NounExt};
 use nockvm::noun::Noun;
-use nockvm_macros::tas;
-use tracing::{trace, warn};
+use tracing::{info, trace, warn};
 
 use crate::metrics::NockchainP2PMetrics;
 use crate::tip5_util::tip5_hash_to_base58;
@@ -177,6 +176,7 @@ impl MessageTracker {
     /// Removes a peer from the tracker.
     /// done if a peer disconnects or is banned.
     pub fn remove_peer(&mut self, peer_id: &PeerId) {
+        info!("Removing peer: {}", peer_id);
         let Some(block_ids) = self.peer_to_block_ids.remove(peer_id) else {
             return;
         };
@@ -290,7 +290,10 @@ impl MessageTracker {
             NockchainDataRequest::BlockByHeight(height) => {
                 if height >= self.first_negative {
                     metrics.block_request_cache_negative.increment();
-                    trace!("Request for block height not yet seen by cache, height = {:?}", height);
+                    trace!(
+                        "Request for block height not yet seen by cache, height = {:?}",
+                        height
+                    );
                     Ok(CacheResponse::NegativeCached)
                 } else if let Some(cached_block) = self.block_cache.get(&height) {
                     trace!("found cached block request by height={:?}", height);
