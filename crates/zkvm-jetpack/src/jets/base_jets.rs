@@ -1,7 +1,9 @@
 use nockvm::interpreter::Context;
-use nockvm::jets::util::slot;
+use nockvm::jets::bits::util::rip;
+use nockvm::jets::util::{bite, slot};
 use nockvm::jets::Result;
-use nockvm::noun::{Atom, Noun};
+use nockvm::mem::NockStack;
+use nockvm::noun::{Atom, Noun, D, NO, T, YES};
 use tracing::debug;
 
 use crate::form::math::base::*;

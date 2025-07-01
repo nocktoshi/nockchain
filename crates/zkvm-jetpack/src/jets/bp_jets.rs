@@ -237,7 +237,7 @@ pub fn init_bpoly_jet(context: &mut Context, subject: Noun) -> Result {
         new_handle_mut_slice(&mut context.stack, Some(count as usize));
     init_bpoly(list_belt, res_poly)?;
 
-    let res_cell = finalize_poly(stack, Some(res_poly.len()), res);
+    let res_cell = finalize_poly(&mut context.stack, Some(res_poly.len()), res);
     Ok(res_cell)
 }
 
@@ -249,7 +249,5 @@ pub fn init_bpoly(list_belt: HoonList, res_poly: &mut [Belt]) -> std::result::Re
         res_poly[i] = belt;
     }
 
-    let res_cell = finalize_poly(&mut context.stack, Some(res_poly.len()), res);
-
-    Ok(res_cell)
+    Ok(())
 }
