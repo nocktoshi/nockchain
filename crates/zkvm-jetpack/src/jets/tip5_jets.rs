@@ -315,19 +315,7 @@ mod tests {
         let b11490077061305916457 = belt_as_noun(&mut c.stack, Belt(11490077061305916457));
         let sam = T(
             &mut c.stack,
-            &[
-                D(1),
-                D(2448),
-                D(1),
-                D(0),
-                D(0),
-                D(0),
-                D(0),
-                D(0),
-                D(0),
-                D(0),
-                D(0),
-            ],
+            &[D(1), D(2448), D(1), D(0), D(0), D(0), D(0), D(0), D(0), D(0), D(0)],
         );
         let res = T(
             &mut c.stack,

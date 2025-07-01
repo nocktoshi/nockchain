@@ -1,8 +1,11 @@
 #![allow(dead_code)]
-use crate::metrics::NockAppMetrics;
+use std::any::Any;
+use std::fs::File;
+use std::future::Future;
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::Arc;
+use std::time::Instant;
 
-use crate::noun::slab::NounSlab;
-use crate::save::SaveableCheckpoint;
 use blake3::{Hash, Hasher};
 use byteorder::{LittleEndian, WriteBytesExt};
 use nockvm::hamt::Hamt;
@@ -15,24 +18,19 @@ use nockvm::mug::met3_usize;
 use nockvm::noun::{Atom, Cell, DirectAtom, IndirectAtom, Noun, Slots, D, T};
 use nockvm::trace::{path_to_cord, write_serf_trace_safe, TraceInfo};
 use nockvm_macros::tas;
-
-use std::any::Any;
-use std::fs::File;
-use std::future::Future;
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
-use std::sync::Arc;
-use std::time::Instant;
+use tokio::sync::{mpsc, oneshot};
+use tokio::time::Duration;
 use tracing::{debug, warn};
 
+use crate::metrics::NockAppMetrics;
 use crate::nockapp::wire::{wire_to_noun, WireRepr};
+use crate::noun::slab::NounSlab;
 use crate::noun::slam;
+use crate::save::SaveableCheckpoint;
 use crate::utils::{
     create_context, current_da, NOCK_STACK_SIZE, NOCK_STACK_SIZE_BIG, NOCK_STACK_SIZE_HUGE,
 };
 use crate::{AtomExt, CrownError, NounExt, Result, ToBytesExt};
-
-use tokio::sync::{mpsc, oneshot};
-use tokio::time::Duration;
 
 pub(crate) const STATE_AXIS: u64 = 6;
 const LOAD_AXIS: u64 = 4;
@@ -1189,9 +1187,10 @@ fn slot(noun: Noun, axis: u64) -> Result<Noun> {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use std::fs;
     use std::path::Path;
+
+    use super::*;
 
     async fn setup_kernel(jam: &str) -> Kernel<SaveableCheckpoint> {
         let jam_path = Path::new(env!("CARGO_MANIFEST_DIR"))

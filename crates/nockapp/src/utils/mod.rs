@@ -3,6 +3,12 @@ pub mod error;
 pub mod scry;
 pub mod slogger;
 
+use std::ptr::copy_nonoverlapping;
+use std::slice::from_raw_parts_mut;
+use std::sync::atomic::AtomicIsize;
+use std::sync::Arc;
+use std::time::{SystemTime, UNIX_EPOCH};
+
 use byteorder::{LittleEndian, ReadBytesExt};
 pub use bytes::ToBytes;
 use either::Either;
@@ -17,11 +23,6 @@ use nockvm::noun::{Atom, IndirectAtom, Noun, NounAllocator, D};
 use nockvm::serialization::jam;
 use nockvm::trace::TraceInfo;
 use slogger::CrownSlogger;
-use std::ptr::copy_nonoverlapping;
-use std::slice::from_raw_parts_mut;
-use std::sync::atomic::AtomicIsize;
-use std::sync::Arc;
-use std::time::{SystemTime, UNIX_EPOCH};
 
 use crate::noun::slab::NounSlab;
 

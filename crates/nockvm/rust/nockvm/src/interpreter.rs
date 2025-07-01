@@ -1,3 +1,15 @@
+use std::ops::{DerefMut, Neg};
+use std::pin::Pin;
+use std::result;
+use std::sync::atomic::{AtomicIsize, Ordering};
+use std::sync::Arc;
+use std::time::Instant;
+
+use bitvec::prelude::{BitSlice, Lsb0};
+use either::*;
+use nockvm_macros::tas;
+use tracing::trace;
+
 use crate::hamt::Hamt;
 use crate::jets::cold::Cold;
 use crate::jets::hot::Hot;
@@ -9,16 +21,6 @@ use crate::noun::{Atom, Cell, IndirectAtom, Noun, Slots, D, T};
 use crate::trace::{write_nock_trace, TraceInfo, TraceStack};
 use crate::unifying_equality::unifying_equality;
 use crate::{assert_acyclic, assert_no_forwarding_pointers, assert_no_junior_pointers, flog, noun};
-use bitvec::prelude::{BitSlice, Lsb0};
-use either::*;
-use nockvm_macros::tas;
-use std::ops::{DerefMut, Neg};
-use std::pin::Pin;
-use std::result;
-use std::sync::atomic::{AtomicIsize, Ordering};
-use std::sync::Arc;
-use std::time::Instant;
-use tracing::trace;
 
 crate::gdb!();
 
@@ -1444,13 +1446,14 @@ unsafe fn write_trace(context: &mut Context) {
 }
 
 mod hint {
+    use nockvm_macros::tas;
+
     use super::*;
     use crate::jets;
     use crate::jets::cold;
     use crate::jets::nock::util::{mook, LEAF};
     use crate::noun::{tape, Atom, Cell, Noun, D, T};
     use crate::unifying_equality::unifying_equality;
-    use nockvm_macros::tas;
 
     pub(super) fn is_tail(tag: Atom) -> bool {
         //  XX: handle IndirectAtom tags
@@ -1745,8 +1748,9 @@ mod hint {
 }
 
 mod debug {
-    use crate::noun::Noun;
     use either::Either::*;
+
+    use crate::noun::Noun;
 
     #[allow(dead_code)]
     pub(super) fn assert_normalized(noun: Noun, path: Noun) {

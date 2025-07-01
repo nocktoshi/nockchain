@@ -1,14 +1,13 @@
 // Utility functions and commonly used re-exports
+use bitvec::prelude::{BitSlice, Lsb0};
+use ibig::UBig;
 use nockvm::interpreter::Context;
 use nockvm::jets::JetErr;
 use nockvm::mem::NockStack;
 use nockvm::noun::{Atom, IndirectAtom, Noun, D, DIRECT_MAX, T};
+pub use tracing::{debug, trace};
 
 use crate::form::Belt;
-
-use bitvec::prelude::{BitSlice, Lsb0};
-use ibig::UBig;
-pub use tracing::{debug, trace};
 
 // tests whether a felt atom has the leading 1. we cannot actually test
 // Felt, because it doesn't include the leading 1.

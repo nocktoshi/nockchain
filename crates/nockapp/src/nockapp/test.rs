@@ -1,10 +1,10 @@
 use std::fs;
 use std::path::Path;
+
 use tempfile::TempDir;
 
-use crate::kernel::form::Kernel;
-
 use super::NockApp;
+use crate::kernel::form::Kernel;
 
 pub async fn setup_nockapp(jam: &str) -> (TempDir, NockApp) {
     let temp_dir = TempDir::new().expect("Failed to create temp directory");
@@ -34,25 +34,25 @@ pub async fn setup_nockapp(jam: &str) -> (TempDir, NockApp) {
 
 #[cfg(test)]
 pub mod tests {
+    use std::sync::atomic::Ordering;
+    use std::time::Duration;
+
+    use bytes::Bytes;
+    use nockvm::jets::util::slot;
+    use nockvm::mem::NockStack;
+    use nockvm::noun::{Noun, D, T};
+    use nockvm::serialization::{cue, jam};
+    use nockvm::unifying_equality::unifying_equality;
+    use nockvm_macros::tas;
+    use tracing::info;
+    use tracing_test::traced_test;
+
     use super::setup_nockapp;
     use crate::nockapp::wire::{SystemWire, Wire};
     use crate::noun::slab::{slab_equality, slab_noun_equality, NockJammer, NounSlab};
     use crate::save::{SaveableCheckpoint, Saver};
     use crate::utils::NOCK_STACK_SIZE;
     use crate::{NockApp, NounExt};
-    use bytes::Bytes;
-    use nockvm::mem::NockStack;
-    use tracing::info;
-
-    use nockvm::jets::util::slot;
-    use nockvm::noun::{Noun, D, T};
-    use nockvm::serialization::{cue, jam};
-    use nockvm::unifying_equality::unifying_equality;
-    use nockvm_macros::tas;
-    use std::sync::atomic::Ordering;
-    use std::time::Duration;
-
-    use tracing_test::traced_test;
 
     async fn save_nockapp(nockapp: &mut NockApp) {
         nockapp.tasks.close();

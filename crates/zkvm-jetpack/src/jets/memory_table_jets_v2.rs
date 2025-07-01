@@ -37,9 +37,7 @@ pub fn memory_v2_extend_jet(context: &mut Context, subject: Noun) -> Result<Noun
     };
 
     let (res, mut res_mary): (IndirectAtom, MarySliceMut) = new_handle_mut_mary(
-        &mut context.stack,
-        NUM_EXT_COLS as usize,
-        table.len as usize,
+        &mut context.stack, NUM_EXT_COLS as usize, table.len as usize,
     );
 
     let build_and_bft = add_ions(
@@ -126,10 +124,7 @@ pub fn memory_v2_extend_jet(context: &mut Context, subject: Noun) -> Result<Noun
     }
 
     let res_cell = finalize_mary(
-        &mut context.stack,
-        NUM_EXT_COLS as usize,
-        table.len as usize,
-        res,
+        &mut context.stack, NUM_EXT_COLS as usize, table.len as usize, res,
     );
     let header = header(context);
     Ok(T(&mut context.stack, &[header, res_cell]))
@@ -275,9 +270,7 @@ pub fn memory_v2_mega_extend_jet(context: &mut Context, subject: Noun) -> Result
     };
 
     let (res, mut res_mary): (IndirectAtom, MarySliceMut) = new_handle_mut_mary(
-        &mut context.stack,
-        NUM_MEGA_EXT_COLS as usize,
-        table.len as usize,
+        &mut context.stack, NUM_MEGA_EXT_COLS as usize, table.len as usize,
     );
 
     let first_row = get_row(&table, 0);
@@ -530,10 +523,7 @@ pub fn memory_v2_mega_extend_jet(context: &mut Context, subject: Noun) -> Result
     }
 
     let res_cell = finalize_mary(
-        &mut context.stack,
-        NUM_MEGA_EXT_COLS as usize,
-        table.len as usize,
-        res,
+        &mut context.stack, NUM_MEGA_EXT_COLS as usize, table.len as usize, res,
     );
     let header = header(context);
     Ok(T(&mut context.stack, &[header, res_cell]))

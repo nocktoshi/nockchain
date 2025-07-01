@@ -1,10 +1,11 @@
+use std::ptr::{copy_nonoverlapping, null_mut};
+
 use crate::hamt::Hamt;
 use crate::jets::cold::{Batteries, Cold};
 use crate::jets::hot::Hot;
 use crate::jets::Jet;
 use crate::mem::{NockStack, Preserve};
 use crate::noun::{Noun, Slots};
-use std::ptr::{copy_nonoverlapping, null_mut};
 
 /// key = formula
 #[derive(Copy, Clone)]

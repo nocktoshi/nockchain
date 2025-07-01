@@ -34,9 +34,7 @@ pub fn compute_v2_mega_extend_jet(context: &mut Context, subject: Noun) -> Resul
     };
 
     let (res, mut res_mary): (IndirectAtom, MarySliceMut) = new_handle_mut_mary(
-        &mut context.stack,
-        NUM_MEGA_EXT_COLS as usize,
-        table.len as usize,
+        &mut context.stack, NUM_MEGA_EXT_COLS as usize, table.len as usize,
     );
 
     let mut state: StateData = StateData::new();
@@ -255,10 +253,7 @@ pub fn compute_v2_mega_extend_jet(context: &mut Context, subject: Noun) -> Resul
     }
 
     let res_cell = finalize_mary(
-        &mut context.stack,
-        NUM_MEGA_EXT_COLS as usize,
-        table.len as usize,
-        res,
+        &mut context.stack, NUM_MEGA_EXT_COLS as usize, table.len as usize, res,
     );
     let header = header(context);
     Ok(T(&mut context.stack, &[header, res_cell]))
@@ -520,9 +515,7 @@ pub fn compute_v2_extend_jet(context: &mut Context, subject: Noun) -> Result<Nou
     };
 
     let (res, mut res_mary): (IndirectAtom, MarySliceMut) = new_handle_mut_mary(
-        &mut context.stack,
-        NUM_EXT_COLS as usize,
-        table.len as usize,
+        &mut context.stack, NUM_EXT_COLS as usize, table.len as usize,
     );
 
     let stack: Vec<TreeData> = build_compute_queue(queue, &chals.alf)?;
@@ -667,10 +660,7 @@ pub fn compute_v2_extend_jet(context: &mut Context, subject: Noun) -> Result<Nou
     }
 
     let res_cell = finalize_mary(
-        &mut context.stack,
-        NUM_EXT_COLS as usize,
-        table.len as usize,
-        res,
+        &mut context.stack, NUM_EXT_COLS as usize, table.len as usize, res,
     );
     let header = header(context);
     Ok(T(&mut context.stack, &[header, res_cell]))

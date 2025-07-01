@@ -114,15 +114,14 @@ pub fn jet_levy(context: &mut Context, subject: Noun) -> Result {
     util::levy(context, a_noun, b_noun)
 }
 
-
-
 pub mod util {
+    use std::result;
+
+    use crate::interpreter::Context;
     use crate::jets::util::{slam, BAIL_EXIT};
     use crate::jets::{JetErr, Result};
     use crate::mem::NockStack;
     use crate::noun::{Cell, Noun, D, NO, T, YES};
-    use std::result;
-    use crate::interpreter::Context;
 
     /// Reverse order of list
     pub fn flop(stack: &mut NockStack, noun: Noun) -> Result {
@@ -258,11 +257,13 @@ pub mod util {
         }
     }
 
-    pub fn reap(stack: &mut NockStack, a: u64, b_noun: Noun ) -> Result {
+    pub fn reap(stack: &mut NockStack, a: u64, b_noun: Noun) -> Result {
         let mut tsil = D(0);
         let mut a_mut = a;
         loop {
-            if a_mut == 0 { break; }
+            if a_mut == 0 {
+                break;
+            }
             tsil = T(stack, &[b_noun, tsil]);
             a_mut = a_mut - 1;
         }
