@@ -99,3 +99,57 @@ pub fn bpow_jet(context: &mut Context, subject: Noun) -> Result {
 
     Ok(Atom::new(&mut context.stack, bpow(x_belt, n_belt)).as_noun())
 }
+
+pub fn rip_correct_jet(context: &mut Context, subject: Noun) -> Result {
+    let stack = &mut context.stack;
+    let sam = slot(subject, 6)?;
+    let a_noun = slot(sam, 2)?;
+    let b_noun = slot(sam, 3)?;
+
+    let b = b_noun.as_atom()?;
+    let (bloq, step) = bite(a_noun)?;
+    rip_correct(stack, bloq, step, b)
+}
+
+pub fn rip_correct(stack: &mut NockStack, bloq: usize, step: usize, b: Atom) -> Result {
+    if b.is_direct() && b.as_u64()? == 0 {
+        return Ok(T(stack, &[D(0), D(0)]));
+    }
+    rip(stack, bloq, step, b)
+}
+
+pub fn levy_based(a_noun: Noun) -> bool {
+    let mut list = a_noun;
+    loop {
+        if unsafe { list.raw_equals(&D(0)) } {
+            return true;
+        }
+        let cell = list.as_cell().expect("cell not found");
+        let based_res = based(cell.head());
+        if !based_res {
+            return false;
+        }
+
+        list = cell.tail();
+    }
+}
+
+pub fn based_jet(_context: &mut Context, subject: Noun) -> Result {
+    let sam = slot(subject, 6)?;
+    if based(sam) {
+        Ok(YES)
+    } else {
+        Ok(NO)
+    }
+}
+
+fn based(a_noun: Noun) -> bool {
+    let Ok(a_atom) = a_noun.as_atom() else {
+        return false; // no atom
+    };
+    let Ok(a_u64) = a_atom.as_u64() else {
+        return false; // no u64
+    };
+
+    a_u64 < PRIME
+}
