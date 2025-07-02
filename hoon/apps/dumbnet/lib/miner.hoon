@@ -156,5 +156,6 @@
   ::  roll over the pending txs and try to include them in the new candidate block
   %+  roll  ~(val z-by raw-txs.p)
   |=  [raw=raw-tx:t min=_m]
+  =.  m  min
   (heard-new-tx raw)
 --

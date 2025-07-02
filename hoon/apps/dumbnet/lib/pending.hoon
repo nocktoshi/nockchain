@@ -88,6 +88,7 @@
   =.  p
     %+  roll  d.keep-drop
     |=  [raw=raw-tx:t pen=_p]
+    =.  p  pen
     (remove-inputs-from-spent-by raw)
   ::
   ::  remove d.keep-drop from raw-txs map. we cannot just
@@ -96,6 +97,7 @@
   =.  p
     %+  roll  d.keep-drop
     |=  [raw=raw-tx:t pen=_p]
+    =.  p  pen
     (remove-raw-tx id.raw)
   ::
   p
@@ -207,12 +209,13 @@
   %+  roll  missing-txs
   |=  [tid=tx-id:t pen=_p]
   ::  block requires these txs to be complete
-  =.  block-tx.pen
-    (~(put z-ju block-tx.pen) digest.pag tid)
+  =.  p  pen
+  =.  block-tx.p
+    (~(put z-ju block-tx.p) digest.pag tid)
   ::  add block to set of blocks that require this tx
-  =.  tx-block.pen
-    (~(put z-ju tx-block.pen) tid digest.pag)
-  pen
+  =.  tx-block.p
+    (~(put z-ju tx-block.p) tid digest.pag)
+  p
 ::
 ++  remove-pending-block
   |=  bid=block-id:t

@@ -610,6 +610,7 @@
           =.  p.k
             %+  roll  tx-pending-blocks
             |=  [id=block-id:t pend=_p.k]
+            =.  p.k  pend
             (remove-pending-block:pen id)
           ::
           ~>  %slog.[3 leaf+"page-pending-raw-tx-invalid"]
@@ -662,6 +663,7 @@
       =^  eff  k
         %+  roll  ~(tap z-in work)
         |=  [bid=block-id:t effs=(list effect:dk) k=_k]
+        =.  ^k  k
         ::  process the block, skipping the steps that we know its already
         ::  done by the fact that it was in pending-blocks.p.k
         =^  new-effs  k
@@ -674,6 +676,7 @@
           ==
         ::  remove the block from pending blocks. at this point, its either
         ::  been discarded by the kernel or lives in the consensus state
+        =.  p.^k  p.k
         =.  p.k  (remove-pending-block:pen bid)
         ::  add the effects onto the list and return the updated kernel state
         [(weld new-effs effs) k]
