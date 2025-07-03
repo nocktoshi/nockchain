@@ -114,6 +114,22 @@ pub fn jet_levy(context: &mut Context, subject: Noun) -> Result {
     util::levy(context, a_noun, b_noun)
 }
 
+pub fn jet_find(context: &mut Context, subject: Noun) -> Result {
+    let sam = slot(subject, 6)?;
+    let nedl = slot(sam, 2)?;
+    let hstk = slot(sam, 3)?;
+
+    util::find(context, nedl, hstk)
+}
+
+pub fn jet_scag(context: &mut Context, subject: Noun) -> Result {
+    let sam = slot(subject, 6)?;
+    let a = sam.as_cell()?.head().as_atom()?;
+    let b = sam.as_cell()?.tail();
+
+    util::scag(context, a, b)
+}
+
 pub mod util {
     use std::result;
 
@@ -121,7 +137,7 @@ pub mod util {
     use crate::jets::util::BAIL_EXIT;
     use crate::jets::{JetErr, Result};
     use crate::mem::NockStack;
-    use crate::noun::{Cell, Noun, D, NO, T, YES};
+    use crate::noun::{Atom, Cell, Noun, D, NO, T, YES};
     use crate::site::{site_slam, Site};
 
     /// Reverse order of list
@@ -270,7 +286,6 @@ pub mod util {
         }
         Ok(tsil)
     }
-
     pub fn levy(context: &mut Context, a_noun: Noun, mut b_noun: Noun) -> Result {
         let site = Site::new(context, &mut b_noun);
         let mut list = a_noun;
@@ -287,6 +302,63 @@ pub mod util {
             }
             list = cell.tail();
         }
+    }
+
+    pub fn find(context: &mut Context, nedl: Noun, hstk: Noun) -> Result {
+        let mut hstk = hstk;
+        let mut i = 0;
+        loop {
+            let mut n = nedl;
+            let mut h = hstk;
+            loop {
+                if unsafe { n.raw_equals(&D(0)) || h.raw_equals(&D(0)) } {
+                    // not found
+                    return Ok(D(0)); // (unit @ud)  ~
+                }
+
+                if unsafe { n.as_cell()?.head().raw_equals(&h.as_cell()?.head()) } {
+                    if unsafe { n.as_cell()?.tail().raw_equals(&D(0)) } {
+                        // match found
+                        return Ok(T(&mut context.stack, &[D(0), D(i)])); // (unit @ud)  i
+                    }
+
+                    n = n.as_cell()?.tail();
+                    h = h.as_cell()?.tail();
+                    continue;
+                }
+
+                // try next position
+                hstk = hstk.as_cell()?.tail();
+                i = i + 1;
+                break;
+            }
+        }
+    }
+
+    pub fn scag(context: &mut Context, a: Atom, b: Noun) -> Result {
+        // Accepts an atom a and list b, producing the first a elements of the front of the list.
+        let a = a.as_u64()?;
+        let mut res: Vec<Noun> = vec![];
+        let mut list = b;
+        let mut pos = 0;
+        loop {
+            if unsafe { list.raw_equals(&D(0)) } {
+                break;
+            }
+            let current_cell = list.as_cell()?;
+            if pos >= a {
+                break;
+            }
+            res.push(current_cell.head());
+            list = current_cell.tail();
+            pos = pos + 1
+        }
+
+        let mut res_cell = D(0);
+        while let Some(n) = res.pop() {
+            res_cell = T(&mut context.stack, &[n, res_cell]);
+        }
+        Ok(res_cell)
     }
 }
 
@@ -450,5 +522,92 @@ mod tests {
         let sam = T(&mut c.stack, &[D(2), c34]);
         let res = T(&mut c.stack, &[c34, c34, D(0)]);
         assert_jet(c, jet_reap, sam, res);
+    }
+
+    #[test]
+    fn test_find() {
+        let c = &mut init_context();
+
+        let c3 = T(&mut c.stack, &[D(3), D(0)]);
+        let c33 = T(&mut c.stack, &[D(3), D(3), D(0)]);
+        let c41 = T(&mut c.stack, &[D(4), D(1), D(0)]);
+        let c123 = T(&mut c.stack, &[D(1), D(2), D(3), D(0)]);
+        let c13413 = T(&mut c.stack, &[D(1), D(3), D(4), D(1), D(3), D(0)]);
+        let c13313 = T(&mut c.stack, &[D(1), D(3), D(3), D(1), D(3), D(0)]);
+        let c1341342 = T(
+            &mut c.stack,
+            &[D(1), D(3), D(4), D(1), D(3), D(4), D(2), D(0)],
+        );
+
+        let sam = T(&mut c.stack, &[D(0), D(0)]);
+        let res = D(0);
+        assert_jet(c, jet_find, sam, res);
+
+        let sam = T(&mut c.stack, &[D(0), c123]);
+        let res = D(0);
+        assert_jet(c, jet_find, sam, res);
+
+        let sam = T(&mut c.stack, &[c123, D(0)]);
+        let res = D(0);
+        assert_jet(c, jet_find, sam, res);
+
+        let sam = T(&mut c.stack, &[c3, c123]);
+        let res = T(&mut c.stack, &[D(0), D(2)]);
+        assert_jet(c, jet_find, sam, res);
+
+        let sam = T(&mut c.stack, &[c3, c33]);
+        let res = T(&mut c.stack, &[D(0), D(0)]);
+        assert_jet(c, jet_find, sam, res);
+
+        let sam = T(&mut c.stack, &[c3, c13413]);
+        let res = T(&mut c.stack, &[D(0), D(1)]);
+        assert_jet(c, jet_find, sam, res);
+
+        let sam = T(&mut c.stack, &[c3, c13313]);
+        let res = T(&mut c.stack, &[D(0), D(1)]);
+        assert_jet(c, jet_find, sam, res);
+
+        let sam = T(&mut c.stack, &[c33, c13313]);
+        let res = T(&mut c.stack, &[D(0), D(1)]);
+        assert_jet(c, jet_find, sam, res);
+
+        let sam = T(&mut c.stack, &[c41, c1341342]);
+        let res = T(&mut c.stack, &[D(0), D(2)]);
+        assert_jet(c, jet_find, sam, res);
+    }
+
+    #[test]
+    fn test_scag() {
+        let c = &mut init_context();
+
+        let ab00 = T(&mut c.stack, &[D(0), D(0)]);
+        let ab01 = T(&mut c.stack, &[D(0), D(1)]);
+        let ab02 = T(&mut c.stack, &[D(0), D(2)]);
+        let ab21 = T(&mut c.stack, &[D(2), D(1)]);
+        let ab32 = T(&mut c.stack, &[D(3), D(2)]);
+        let c1341342 = T(
+            &mut c.stack,
+            &[D(1), D(3), D(4), D(1), D(3), D(4), D(2), D(0)],
+        );
+
+        let sam = T(&mut c.stack, &[D(0), c1341342]);
+        let res = D(0);
+        assert_jet(c, jet_scag, sam, res);
+
+        let sam = T(&mut c.stack, &[D(1), c1341342]);
+        let res = T(&mut c.stack, &[D(1), D(0)]);
+        assert_jet(c, jet_scag, sam, res);
+
+        let sam = T(&mut c.stack, &[D(2), c1341342]);
+        let res = T(&mut c.stack, &[D(1), D(3), D(0)]);
+        assert_jet(c, jet_scag, sam, res);
+
+        let sam = T(&mut c.stack, &[D(3), c1341342]);
+        let res = T(&mut c.stack, &[D(1), D(3), D(4), D(0)]);
+        assert_jet(c, jet_scag, sam, res);
+
+        let sam = T(&mut c.stack, &[D(99), c1341342]);
+        let res = c1341342;
+        assert_jet(c, jet_scag, sam, res);
     }
 }

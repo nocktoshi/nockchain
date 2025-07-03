@@ -230,7 +230,6 @@ pub fn bp_coseword_jet(context: &mut Context, subject: Noun) -> Result {
 
 pub fn init_bpoly_jet(context: &mut Context, subject: Noun) -> Result {
     let poly = slot(subject, 6)?;
-
     let list_belt = HoonList::try_from(poly)?.into_iter();
     let count = list_belt.count();
     let (res, res_poly): (IndirectAtom, &mut [Belt]) =

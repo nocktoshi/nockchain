@@ -96,45 +96,6 @@ pub fn mary_transpose_jet(context: &mut Context, subject: Noun) -> Result<Noun, 
     Ok(res_cell)
 }
 
-pub fn lift_elt_jet(context: &mut Context, subject: Noun) -> Result<Noun, JetErr> {
-    let stack = &mut context.stack;
-    let door = slot(subject, 7)?;
-    let step = slot(door, 6)?.as_atom()?.as_u64()?;
-    let a = slot(subject, 6)?;
-
-    if step == 1u64 {
-        Ok(a)
-    } else {
-        let reap_res = reap(stack, step - 1, D(0))?;
-        let init_bpoly_arg = T(stack, &[a, reap_res]);
-        let init_bpoly_arg_list = HoonList::try_from(init_bpoly_arg)?;
-
-        let count = init_bpoly_arg_list.count();
-        let (res, res_poly): (IndirectAtom, &mut [Belt]) = new_handle_mut_slice(stack, Some(count));
-        init_bpoly(init_bpoly_arg_list, res_poly)?;
-
-        let res_cell = finalize_poly(stack, Some(res_poly.len()), res);
-        Ok(res_cell.as_cell()?.tail())
-    }
-}
-
-pub fn fet_jet(context: &mut Context, subject: Noun) -> Result<Noun, JetErr> {
-    let stack = &mut context.stack;
-    let door = slot(subject, 7)?;
-    let step = slot(door, 6)?.as_atom()?.as_u64()?;
-    let a = slot(subject, 6)?.as_atom()?;
-
-    let v = rip_correct(stack, 6, 1, a)?;
-
-    let lent_v = lent(v)? as u64;
-
-    if ((lent_v == 1) && (step == 1)) || (lent_v == (step + 1)) && levy_based(v) {
-        Ok(YES)
-    } else {
-        Ok(NO)
-    }
-}
-
 pub fn transpose_bpolys_jet(context: &mut Context, subject: Noun) -> Result<Noun, JetErr> {
     let sam = slot(subject, 6)?;
     let bpolys = MarySlice::try_from(sam).expect("cannot convert bpolys arg");
@@ -235,4 +196,43 @@ fn snag_as_bpoly(stack: &mut NockStack, mary_noun: Noun, i: usize) -> Result<Nou
     }
 
     Ok(T(stack, &[D(ma_step as u64), dat]))
+}
+
+pub fn lift_elt_jet(context: &mut Context, subject: Noun) -> Result<Noun, JetErr> {
+    let stack = &mut context.stack;
+    let door = slot(subject, 7)?;
+    let step = slot(door, 6)?.as_atom()?.as_u64()?;
+    let a = slot(subject, 6)?;
+
+    if step == 1u64 {
+        Ok(a)
+    } else {
+        let reap_res = reap(stack, step - 1, D(0))?;
+        let init_bpoly_arg = T(stack, &[a, reap_res]);
+        let init_bpoly_arg_list = HoonList::try_from(init_bpoly_arg)?;
+
+        let count = init_bpoly_arg_list.count();
+        let (res, res_poly): (IndirectAtom, &mut [Belt]) = new_handle_mut_slice(stack, Some(count));
+        init_bpoly(init_bpoly_arg_list, res_poly)?;
+
+        let res_cell = finalize_poly(stack, Some(res_poly.len()), res);
+        Ok(res_cell.as_cell()?.tail())
+    }
+}
+
+pub fn fet_jet(context: &mut Context, subject: Noun) -> Result<Noun, JetErr> {
+    let stack = &mut context.stack;
+    let door = slot(subject, 7)?;
+    let step = slot(door, 6)?.as_atom()?.as_u64()?;
+    let a = slot(subject, 6)?.as_atom()?;
+
+    let v = rip_correct(stack, 6, 1, a)?;
+
+    let lent_v = lent(v)? as u64;
+
+    if ((lent_v == 1) && (step == 1)) || (lent_v == (step + 1)) && levy_based(v) {
+        Ok(YES)
+    } else {
+        Ok(NO)
+    }
 }

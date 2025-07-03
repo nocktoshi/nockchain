@@ -7,9 +7,11 @@ use crate::jets::cheetah_jets::*;
 use crate::jets::compute_table_jets_v2::*;
 use crate::jets::crypto_jets::*;
 use crate::jets::fext_jets::*;
+use crate::jets::fpntt_jets::*;
 use crate::jets::mary_jets::*;
 use crate::jets::mega_jets::*;
 use crate::jets::memory_table_jets_v2::*;
+use crate::jets::shape_jets::*;
 use crate::jets::tip5_jets::*;
 use crate::jets::verifier_jets::*;
 
@@ -201,6 +203,50 @@ pub const XTRA_JETS: &[HotEntry] = &[
             Left(b"qua"),
             Left(b"pen"),
             Left(b"zeke"),
+            Left(b"transpose-bpolys"),
+        ],
+        1,
+        transpose_bpolys_jet,
+    ),
+    (
+        &[
+            K_138,
+            Left(b"one"),
+            Left(b"two"),
+            Left(b"tri"),
+            Left(b"qua"),
+            Left(b"pen"),
+            Left(b"zeke"),
+            Left(b"ave"),
+            Left(b"snag"),
+        ],
+        1,
+        snag_one_jet,
+    ),
+    (
+        &[
+            K_138,
+            Left(b"one"),
+            Left(b"two"),
+            Left(b"tri"),
+            Left(b"qua"),
+            Left(b"pen"),
+            Left(b"zeke"),
+            Left(b"ave"),
+            Left(b"snag-as-bpoly"),
+        ],
+        1,
+        snag_as_bpoly_jet,
+    ),
+    (
+        &[
+            K_138,
+            Left(b"one"),
+            Left(b"two"),
+            Left(b"tri"),
+            Left(b"qua"),
+            Left(b"pen"),
+            Left(b"zeke"),
             Left(b"rip-correct"),
         ],
         1,
@@ -253,50 +299,6 @@ pub const XTRA_JETS: &[HotEntry] = &[
 ];
 
 pub const EXTENSION_FIELD_JETS: &[HotEntry] = &[
-    (
-        &[
-            K_138,
-            Left(b"one"),
-            Left(b"two"),
-            Left(b"tri"),
-            Left(b"qua"),
-            Left(b"pen"),
-            Left(b"zeke"),
-            Left(b"transpose-bpolys"),
-        ],
-        1,
-        transpose_bpolys_jet,
-    ),
-    (
-        &[
-            K_138,
-            Left(b"one"),
-            Left(b"two"),
-            Left(b"tri"),
-            Left(b"qua"),
-            Left(b"pen"),
-            Left(b"zeke"),
-            Left(b"ave"),
-            Left(b"snag"),
-        ],
-        1,
-        snag_one_jet,
-    ),
-    (
-        &[
-            K_138,
-            Left(b"one"),
-            Left(b"two"),
-            Left(b"tri"),
-            Left(b"qua"),
-            Left(b"pen"),
-            Left(b"zeke"),
-            Left(b"ave"),
-            Left(b"snag-as-bpoly"),
-        ],
-        1,
-        snag_as_bpoly_jet,
-    ),
     (
         &[
             K_138,
@@ -431,6 +433,36 @@ pub const EXTENSION_FIELD_JETS: &[HotEntry] = &[
         ],
         1,
         fpow_jet,
+    ),
+    (
+        &[
+            K_138,
+            Left(b"one"),
+            Left(b"two"),
+            Left(b"tri"),
+            Left(b"qua"),
+            Left(b"pen"),
+            Left(b"zeke"),
+            Left(b"ext-field"),
+            Left(b"frep"),
+        ],
+        1,
+        frep_jet,
+    ),
+    (
+        &[
+            K_138,
+            Left(b"one"),
+            Left(b"two"),
+            Left(b"tri"),
+            Left(b"qua"),
+            Left(b"pen"),
+            Left(b"zeke"),
+            Left(b"ext-field"),
+            Left(b"fp-ntt"),
+        ],
+        1,
+        fp_ntt_jet,
     ),
 ];
 
@@ -728,6 +760,40 @@ pub const ZTD_JETS: &[HotEntry] = &[
         ],
         1,
         hash_varlen_jet,
+    ),
+    (
+        &[
+            K_138,
+            Left(b"one"),
+            Left(b"two"),
+            Left(b"tri"),
+            Left(b"qua"),
+            Left(b"pen"),
+            Left(b"zeke"),
+            Left(b"ext-field"),
+            Left(b"misc-lib"),
+            Left(b"shape"),
+            Left(b"leaf-sequence"),
+        ],
+        1,
+        leaf_sequence_jet,
+    ),
+    (
+        &[
+            K_138,
+            Left(b"one"),
+            Left(b"two"),
+            Left(b"tri"),
+            Left(b"qua"),
+            Left(b"pen"),
+            Left(b"zeke"),
+            Left(b"ext-field"),
+            Left(b"misc-lib"),
+            Left(b"shape"),
+            Left(b"dyck"),
+        ],
+        1,
+        dyck_jet,
     ),
 ];
 
