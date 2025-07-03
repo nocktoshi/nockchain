@@ -12,6 +12,7 @@
       kernel-state-1
       kernel-state-2
       kernel-state-3
+      kernel-state-4
   ==
 ::
 +$  kernel-state-0
@@ -55,7 +56,19 @@
       d=derived-state-3
       constants=blockchain-constants:dt
   ==
-+$  kernel-state  kernel-state-3
+::
++$  kernel-state-4
+  $:  %4
+      c=consensus-state-4
+      p=pending-state-4
+      a=admin-state-4
+      m=mining-state-4
+    ::
+      d=derived-state-4
+      constants=blockchain-constants:dt
+  ==
+::
++$  kernel-state  kernel-state-4
 ::
 +$  consensus-state-0
   $+  consensus-state-0
@@ -108,10 +121,12 @@
       =genesis-seal:dt  ::  desired seal for genesis block
   ==
 ::
-+$  consensus-state  consensus-state-3
++$  consensus-state-4  $+(consensus-state-4 consensus-state-3)
+::
++$  consensus-state  consensus-state-4
 ::
 ::  you will not have lost any chain state if you lost pending state, you'd just have to
-::  request data again from peers
+::  request data again from peers and reset your mining state
 +$  pending-state-0
   $+  pending-state
   $:  pending-blocks=(z-map block-id:dt local-page:dt)  ::  blocks for which we are waiting on txs
@@ -130,7 +145,9 @@
 ::
 +$  pending-state-3  $+(pending-state-3 pending-state-2)
 ::
-+$  pending-state  pending-state-3
++$  pending-state-4  $+(pending-state-4 pending-state-3)
+::
++$  pending-state  pending-state-4
 ::
 +$  admin-state-0
   $+  admin-state-0
@@ -147,7 +164,9 @@
 ::
 +$  admin-state-3  $+(admin-state-3 admin-state-2)
 ::
-+$  admin-state  admin-state-3
++$  admin-state-4  $+(admin-state-4 admin-state-3)
+::
++$  admin-state  admin-state-4
 ::
 +$  derived-state-0
   $+  derived-state-0
@@ -164,7 +183,9 @@
 ::
 +$  derived-state-3  $+(derived-state-3 derived-state-2)
 ::
-+$  derived-state  derived-state-3
++$  derived-state-4  $+(derived-state-4 derived-state-3)
+::
++$  derived-state  derived-state-4
 ::
 +$  mining-state-0
   $+  mining-state-0
@@ -180,9 +201,11 @@
 ::
 +$  mining-state-2  $+(mining-state-2 mining-state-1)
 ::
-+$  mining-state-3  $+(mining-state-2 mining-state-2)
++$  mining-state-3  $+(mining-state-3 mining-state-2)
 ::
-+$  mining-state  mining-state-3
++$  mining-state-4  $+(mining-state-4 mining-state-3)
+::
++$  mining-state  mining-state-4
 ::
 +$  init-phase  $~(%.y ?)
 ::
