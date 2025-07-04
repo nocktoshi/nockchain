@@ -1,12 +1,12 @@
-use std::cmp;
-use std::cmp::{max, min};
-
 /** Bit arithmetic & logic jets
  */
 use crate::interpreter::Context;
 use crate::jets::util::*;
 use crate::jets::Result;
 use crate::noun::{IndirectAtom, Noun, D};
+use std::cmp;
+use std::cmp::{max, min};
+use crate::mem::NockStack;
 
 crate::gdb!();
 
@@ -147,9 +147,18 @@ pub fn jet_rap(context: &mut Context, subject: Noun) -> Result {
 }
 
 pub fn jet_rep(context: &mut Context, subject: Noun) -> Result {
+    let stack = &mut context.stack;
+
     let arg = slot(subject, 6)?;
-    let (bloq, step) = bite(slot(arg, 2)?)?;
-    let original_list = slot(arg, 3)?;
+    let arg2 = slot(arg, 2)?;
+    let arg3 = slot(arg, 3)?;
+
+    rep(stack, arg2, arg3)
+}
+
+pub fn rep(stack: &mut NockStack, a: Noun, b: Noun) -> Result {
+    let (bloq, step) = bite(a)?;
+    let original_list = b;
 
     let mut len = 0usize;
     let mut list = original_list;
@@ -169,7 +178,7 @@ pub fn jet_rep(context: &mut Context, subject: Noun) -> Result {
     } else {
         unsafe {
             let (mut new_indirect, new_slice) =
-                IndirectAtom::new_raw_mut_bitslice(&mut context.stack, bite_to_word(bloq, len)?);
+                IndirectAtom::new_raw_mut_bitslice(stack, bite_to_word(bloq, len)?);
             let mut pos = 0;
             let mut list = original_list;
             loop {
@@ -295,12 +304,11 @@ pub fn jet_mix(context: &mut Context, subject: Noun) -> Result {
 }
 
 pub mod util {
-    use std::{cmp, result};
-
     use crate::jets::util::*;
     use crate::jets::{JetErr, Result};
     use crate::mem::NockStack;
     use crate::noun::{Atom, Cell, DirectAtom, IndirectAtom, Noun, D};
+    use std::{cmp, result};
 
     /// Binary exponent
     pub fn bex(stack: &mut NockStack, arg: usize) -> Atom {
@@ -461,11 +469,10 @@ pub mod util {
 
     #[cfg(test)]
     mod tests {
-        use ibig::ubig;
-
         use super::*;
         use crate::jets::util::test::A;
         use crate::noun::D;
+        use ibig::ubig;
 
         fn init_stack() -> NockStack {
             NockStack::new(8 << 10 << 10, 0)
@@ -518,12 +525,11 @@ pub mod util {
 
 #[cfg(test)]
 mod tests {
-    use ibig::ubig;
-
     use super::*;
     use crate::jets::util::test::*;
     use crate::mem::NockStack;
     use crate::noun::{Noun, D, T};
+    use ibig::ubig;
 
     fn atoms(s: &mut NockStack) -> (Noun, Noun, Noun, Noun, Noun) {
         (atom_0(s), atom_24(s), atom_63(s), atom_96(s), atom_128(s))

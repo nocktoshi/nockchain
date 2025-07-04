@@ -9,13 +9,13 @@ use crate::utils::vec_to_hoon_list;
 
 pub fn leaf_sequence_jet(context: &mut Context, subject: Noun) -> Result<Noun, JetErr> {
     let t = slot(subject, 6)?;
-    leaf_sequence(context, t)
+    leaf_sequence(&mut context.stack, t)
 }
 
-pub fn leaf_sequence(context: &mut Context, t: Noun) -> Result<Noun, JetErr> {
+pub fn leaf_sequence(stack: &mut NockStack, t: Noun) -> Result<Noun, JetErr> {
     let mut leaf: Vec<u64> = Vec::<u64>::new();
     do_leaf_sequence(t, &mut leaf)?;
-    Ok(vec_to_hoon_list(context, &leaf))
+    Ok(vec_to_hoon_list(stack, &leaf))
 }
 
 pub fn do_leaf_sequence(noun: Noun, vec: &mut Vec<u64>) -> Result<(), JetErr> {

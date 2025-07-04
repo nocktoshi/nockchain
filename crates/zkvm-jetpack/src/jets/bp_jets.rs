@@ -1,21 +1,28 @@
 use nockvm::interpreter::Context;
+use nockvm::jets::list::util::flop;
 use nockvm::jets::util::slot;
 use nockvm::jets::{JetErr, Result};
-use nockvm::noun::{Atom, IndirectAtom, Noun, D, T};
+use nockvm::mem::NockStack;
+use nockvm::noun::{Atom, IndirectAtom, Noun, D, NO, T, YES};
 
+use crate::form::fext::{fadd, fmul};
 use crate::form::math::bpoly::*;
 use crate::form::poly::*;
 use crate::hand::handle::*;
 use crate::hand::structs::HoonList;
+use crate::jets::fpntt_jets::{felt_as_noun, felt_from_u64s};
+use crate::jets::mary_jets::{mary_to_list_fields, snag_one_fields};
 use crate::jets::utils::jet_err;
 use crate::noun::noun_ext::{AtomExt, NounExt};
+use crate::utils::is_hoon_list_end;
 
 pub fn bpoly_to_list_jet(context: &mut Context, subject: Noun) -> Result {
+    let stack = &mut context.stack;
     let sam = slot(subject, 6)?;
-    bpoly_to_list(context, sam)
+    bpoly_to_list(stack, sam)
 }
 
-pub fn bpoly_to_list(context: &mut Context, sam: Noun) -> Result {
+pub fn bpoly_to_list(stack: &mut NockStack, sam: Noun) -> Result {
     let Ok(sam_bpoly) = BPolySlice::try_from(sam) else {
         return jet_err();
     };
@@ -30,8 +37,8 @@ pub fn bpoly_to_list(context: &mut Context, sam: Noun) -> Result {
     }
 
     for i in (0..len).rev() {
-        let res_atom = Atom::new(&mut context.stack, sam_bpoly.0[i].into());
-        res_list = T(&mut context.stack, &[res_atom.as_noun(), res_list]);
+        let res_atom = Atom::new(stack, sam_bpoly.0[i].into());
+        res_list = T(stack, &[res_atom.as_noun(), res_list]);
     }
 
     Ok(res_list)
@@ -229,24 +236,92 @@ pub fn bp_coseword_jet(context: &mut Context, subject: Noun) -> Result {
 }
 
 pub fn init_bpoly_jet(context: &mut Context, subject: Noun) -> Result {
+    let stack = &mut context.stack;
     let poly = slot(subject, 6)?;
+
     let list_belt = HoonList::try_from(poly)?.into_iter();
     let count = list_belt.count();
-    let (res, res_poly): (IndirectAtom, &mut [Belt]) =
-        new_handle_mut_slice(&mut context.stack, Some(count as usize));
-    init_bpoly(list_belt, res_poly)?;
+    let (res, res_poly): (IndirectAtom, &mut [Belt]) = new_handle_mut_slice(stack, Some(count));
+    init_bpoly(list_belt, res_poly);
 
-    let res_cell = finalize_poly(&mut context.stack, Some(res_poly.len()), res);
+    let res_cell = finalize_poly(stack, Some(res_poly.len()), res);
     Ok(res_cell)
 }
 
-pub fn init_bpoly(list_belt: HoonList, res_poly: &mut [Belt]) -> std::result::Result<(), JetErr> {
+pub fn init_bpoly(list_belt: HoonList, res_poly: &mut [Belt]) {
     for (i, belt_noun) in list_belt.enumerate() {
-        let Ok(belt) = belt_noun.as_belt() else {
-            return jet_err();
-        };
+        let belt = belt_noun.as_belt().expect("error at as_belt");
         res_poly[i] = belt;
     }
+}
 
-    Ok(())
+//-------------------------------------------------------------------------
+//
+
+pub fn bp_is_zero_jet(_context: &mut Context, subject: Noun) -> Result {
+    let p = slot(subject, 6)?;
+
+    if bp_is_zero(p) {
+        Ok(YES)
+    } else {
+        Ok(NO)
+    }
+}
+
+pub fn bp_is_zero(p: Noun) -> bool {
+    let p_slice = BPolySlice::try_from(p).expect("invalid p");
+    p_slice.is_zero()
+}
+
+// lift: the unique lift of a base field element into an extension field (Belt -> Felt)
+fn lift(belt: Belt) -> Felt {
+    felt_from_u64s(belt.0, 0, 0)
+}
+
+pub fn get_bpoly_fields(bpoly: Noun) -> std::result::Result<(Atom, Atom), JetErr> {
+    let [bpoly_len, bpoly_dat] = bpoly.uncell()?; // +$  bpoly  [len=@ dat=@ux]
+    Ok((bpoly_len.as_atom()?, bpoly_dat.as_atom()?))
+}
+
+// bpeval-lift: evaluate a bpoly at a felt
+pub fn bpeval_lift_jet(context: &mut Context, subject: Noun) -> Result {
+    let stack = &mut context.stack;
+    let sam = slot(subject, 6)?;
+    let [bp, x_noun] = sam.uncell()?; // TODO defaults? [bp=`bpoly`one-bpoly x=`felt`(lift 1)]
+    let x = x_noun.as_felt()?;
+
+    let lift0 = lift(Belt(0));
+
+    if bp_is_zero(bp) {
+        return felt_as_noun(context, lift0);
+    }
+
+    let (bp_len, bp_dat) = get_bpoly_fields(bp)?;
+
+    if bp_len.as_u64()? == 1 {
+        return snag_one_fields(stack, 0, 1, bp_dat);
+    }
+
+    let p = mary_to_list_fields(stack, bp_len, bp_dat.as_noun(), 1)?;
+    let mut p = flop(stack, p)?;
+    let mut res = lift0;
+    loop {
+        if is_hoon_list_end(&p) {
+            return jet_err();
+        }
+
+        let p_cell = p.as_cell()?;
+        let res_lift = lift(p_cell.head().as_belt()?);
+        let mut res_fmul = Felt::zero();
+        fmul(&res, &x, &mut res_fmul);
+        let mut res_add = Felt::zero();
+        fadd(&res_fmul, &res_lift, &mut res_add);
+
+        if is_hoon_list_end(&p_cell.tail()) {
+            return felt_as_noun(context, res_add);
+        }
+
+        res = res_add;
+        p = p_cell.tail();
+    }
 }

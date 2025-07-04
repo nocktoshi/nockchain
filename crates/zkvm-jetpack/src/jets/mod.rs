@@ -11,5 +11,6 @@ pub mod memory_table_jets_v2;
 pub mod shape_jets;
 pub mod table_utils;
 pub mod tip5_jets;
+pub mod tip5_sponge;
 pub mod utils;
 pub mod verifier_jets;

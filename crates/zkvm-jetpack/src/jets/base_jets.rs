@@ -155,3 +155,26 @@ fn based(a_noun: Noun) -> bool {
 
     a_u64 < PRIME
 }
+
+pub fn based_noun_jet(_context: &mut Context, subject: Noun) -> Result {
+    let n = slot(subject, 6)?;
+    if based_noun(n) {
+        Ok(YES)
+    } else {
+        Ok(NO)
+    }
+}
+
+pub fn based_noun(n: Noun) -> bool {
+    if n.is_atom() {
+        return based(n);
+    }
+
+    let n_cell = n.as_cell().unwrap();
+    let res1 = based_noun(n_cell.head());
+    if !res1 {
+        return false;
+    }
+
+    based_noun(n_cell.tail())
+}

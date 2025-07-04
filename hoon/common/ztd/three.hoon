@@ -1905,12 +1905,6 @@
     --
   ::
   ++  bp-build-merk-heap
-    ~/  %bp-build-merk-heap-hoon
-    |=  m=mary
-    ^-  (pair @ merk-heap)
-    (do-bp-build-merk-heap +<)
-  ::
-  ++  do-bp-build-merk-heap
     ~/  %bp-build-merk-heap
     |=  m=mary
     ^-  (pair @ merk-heap)

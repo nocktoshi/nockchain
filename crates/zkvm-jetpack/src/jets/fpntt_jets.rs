@@ -25,13 +25,13 @@ fn frep(x: Vec<Belt>) -> Result<Felt, JetErr> {
 }
 
 // build felt from 3 given u64s
-fn felt_from_u64s(x0: u64, x1: u64, x2: u64) -> Felt {
+pub fn felt_from_u64s(x0: u64, x1: u64, x2: u64) -> Felt {
     let data: [u64; 3] = [x0, x1, x2];
     Felt::from(data)
 }
 
 // create a noun of a felt
-fn felt_as_noun(context: &mut Context, felt: Felt) -> Result<Noun, JetErr> {
+pub fn felt_as_noun(context: &mut Context, felt: Felt) -> Result<Noun, JetErr> {
     let res_big = UBig::from(felt[0].0)
         .shl(0)
         .bitor(UBig::from(felt[1].0).shl(64))
