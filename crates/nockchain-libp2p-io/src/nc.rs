@@ -190,6 +190,7 @@ pub fn make_libp2p_driver(
             let request_high_threshold = libp2p_config.request_high_threshold;
             let peer_status_log_interval = libp2p_config.peer_status_log_interval_secs();
             let elders_debounce_reset = libp2p_config.elders_debounce_reset();
+            let seen_tx_clear_interval = libp2p_config.seen_tx_clear_interval();
             let mut swarm = match crate::p2p::start_swarm(
                 libp2p_config, keypair, bind, allowed, limits, memory_limits,
             ) {
@@ -207,7 +208,10 @@ pub fn make_libp2p_driver(
             };
             let (swarm_tx, mut swarm_rx) = mpsc::channel::<SwarmAction>(1000); // number needs to be high enough to send gossips to peers
             let mut join_set = TrackedJoinSet::<Result<(), NockAppError>>::new();
-            let message_tracker = Arc::new(Mutex::new(MessageTracker::new(metrics.clone())));
+            let message_tracker = Arc::new(Mutex::new(MessageTracker::new(
+                metrics.clone(),
+                seen_tx_clear_interval,
+            )));
             let mut kad_bootstrap = tokio::time::interval(kademlia_bootstrap_interval);
             kad_bootstrap.set_missed_tick_behavior(MissedTickBehavior::Skip);
             let mut force_peer_dial = tokio::time::interval(force_peer_dial_interval);
@@ -730,6 +734,16 @@ async fn handle_effect(
                         metrics.highest_block_height_seen.swap(block_height as f64);
                         tracker.first_negative = block_height + 1;
                         trace!("Setting tracker.first_negative to {:?}", tracker.first_negative);
+
+                        // Check if we should clear the tx cache
+                        if block_height
+                            >= tracker.last_tx_cache_clear_height + tracker.seen_tx_clear_interval
+                        {
+                            debug!("Clearing seen_txs cache at block height {}", block_height);
+                            debug!("Cache before clearing: {:?}", tracker.seen_txs);
+                            tracker.seen_txs.clear();
+                            tracker.last_tx_cache_clear_height = block_height;
+                        }
                     }
                 }
             } else if seen_type.eq_bytes(b"tx") {
@@ -1356,11 +1370,15 @@ fn prepend_tas(slab: &mut NounSlab, tas_str: &str, nouns: Vec<Noun>) -> Result<N
 
 #[cfg(test)]
 mod tests {
+    use std::sync::LazyLock;
+
     use nockapp::noun::slab::NounSlab;
     use nockvm::noun::{D, T};
     use nockvm_macros::tas;
 
     use super::*;
+
+    pub static LIBP2P_CONFIG: LazyLock<LibP2PConfig> = LazyLock::new(|| LibP2PConfig::default());
 
     #[test]
     #[cfg_attr(miri, ignore)] // ibig has a memory leak so miri fails this test
@@ -1688,7 +1706,10 @@ mod tests {
             EquiXBuilder::new(),
             PeerId::random(), // local peer ID (not relevant for this test)
             vec![],           // connected peers (not relevant for this test)
-            Arc::new(Mutex::new(MessageTracker::new(metrics.clone()))),
+            Arc::new(Mutex::new(MessageTracker::new(
+                metrics.clone(),
+                LIBP2P_CONFIG.seen_tx_clear_interval,
+            ))),
             metrics,
         )
         .await;
@@ -1743,7 +1764,10 @@ mod tests {
             NockchainP2PMetrics::register(gnort::global_metrics_registry())
                 .expect("Could not register metrics"),
         );
-        let message_tracker = Arc::new(Mutex::new(MessageTracker::new(metrics.clone())));
+        let message_tracker = Arc::new(Mutex::new(MessageTracker::new(
+            metrics.clone(),
+            LIBP2P_CONFIG.seen_tx_clear_interval,
+        )));
 
         // Call handle_effect with the track add effect
         let result = handle_effect(
@@ -1802,7 +1826,10 @@ mod tests {
                 .expect("Could not register metrics"),
         );
         // Create a message tracker and add an entry that we'll later remove
-        let message_tracker = Arc::new(Mutex::new(MessageTracker::new(metrics)));
+        let message_tracker = Arc::new(Mutex::new(MessageTracker::new(
+            metrics.clone(),
+            LIBP2P_CONFIG.seen_tx_clear_interval,
+        )));
 
         // Create block ID as [1 2 3 4 5]
         let mut setup_slab: NounSlab = NounSlab::new();
@@ -1904,7 +1931,10 @@ mod tests {
                 .expect("Could not register metrics"),
         );
         // Create a message tracker and add entries
-        let message_tracker = Arc::new(Mutex::new(MessageTracker::new(metrics)));
+        let message_tracker = Arc::new(Mutex::new(MessageTracker::new(
+            metrics.clone(),
+            LIBP2P_CONFIG.seen_tx_clear_interval,
+        )));
 
         // Create block IDs
         let mut setup_slab: NounSlab = NounSlab::new();
@@ -2108,7 +2138,10 @@ mod tests {
                 .expect("Could not register metrics"),
         );
 
-        let message_tracker = Arc::new(Mutex::new(MessageTracker::new(metrics.clone())));
+        let message_tracker = Arc::new(Mutex::new(MessageTracker::new(
+            metrics.clone(),
+            LIBP2P_CONFIG.seen_tx_clear_interval,
+        )));
         let message_tracker_clone = Arc::clone(&message_tracker); // Clone the Arc, not the MessageTracker
         let result = handle_effect(
             effect_slab,
@@ -2155,7 +2188,10 @@ mod tests {
                 .expect("Could not register metrics"),
         );
 
-        let message_tracker = Arc::new(Mutex::new(MessageTracker::new(metrics.clone())));
+        let message_tracker = Arc::new(Mutex::new(MessageTracker::new(
+            metrics.clone(),
+            LIBP2P_CONFIG.seen_tx_clear_interval,
+        )));
         let message_tracker_clone = Arc::clone(&message_tracker); // Clone the Arc, not the MessageTracker
         let result = handle_effect(
             effect_slab,
@@ -2384,7 +2420,7 @@ fn log_outbound_failure(
             debug!("Connection to peer {} closed with request pending", peer)
         }
         request_response::OutboundFailure::Io(err) => {
-            warn!("Error making request to peer {}: {}", peer, err)
+            debug!("Error making request to peer {}: {}", peer, err)
         }
         request_response::OutboundFailure::UnsupportedProtocols => {
             debug!("Unsupported protocol when making request to peer {}", peer)

@@ -62,11 +62,14 @@ pub struct MessageTracker {
     pub elders_cache: BTreeMap<String, NounSlab>,
     pub elders_negative_cache: BTreeSet<String>,
     pub seen_elders: BTreeSet<String>,
+    // Highest block height seen
     pub first_negative: u64,
+    pub seen_tx_clear_interval: u64,
+    pub last_tx_cache_clear_height: u64,
 }
 
 impl MessageTracker {
-    pub fn new(metrics: Arc<NockchainP2PMetrics>) -> Self {
+    pub fn new(metrics: Arc<NockchainP2PMetrics>, seen_tx_clear_interval: u64) -> Self {
         Self {
             metrics,
             block_id_to_peers: BTreeMap::new(),
@@ -82,6 +85,8 @@ impl MessageTracker {
             elders_negative_cache: BTreeSet::new(),
             seen_elders: BTreeSet::new(),
             first_negative: 0,
+            seen_tx_clear_interval,
+            last_tx_cache_clear_height: 0,
         }
     }
 
@@ -450,10 +455,15 @@ impl NockchainDataRequest {
 
 #[cfg(test)]
 mod tests {
+    use std::sync::LazyLock;
+
     use nockapp::noun::slab::NounSlab;
     use nockvm::noun::{D, T};
 
     use super::*;
+    use crate::config::LibP2PConfig;
+
+    pub static LIBP2P_CONFIG: LazyLock<LibP2PConfig> = LazyLock::new(|| LibP2PConfig::default());
 
     #[test]
     #[cfg_attr(miri, ignore)] // ibig has a memory leak so miri fails this test
@@ -462,7 +472,7 @@ mod tests {
             NockchainP2PMetrics::register(gnort::global_metrics_registry())
                 .expect("Could not register metrics"),
         );
-        let mut tracker = MessageTracker::new(metrics);
+        let mut tracker = MessageTracker::new(metrics, LIBP2P_CONFIG.seen_tx_clear_interval);
         let peer_id = PeerId::random();
 
         // Create a block ID as [1 2 3 4 5]
@@ -517,7 +527,7 @@ mod tests {
             NockchainP2PMetrics::register(gnort::global_metrics_registry())
                 .expect("Could not register metrics"),
         );
-        let mut tracker = MessageTracker::new(metrics);
+        let mut tracker = MessageTracker::new(metrics, LIBP2P_CONFIG.seen_tx_clear_interval);
         let peer_id = PeerId::random();
 
         // Create a block ID
@@ -587,7 +597,7 @@ mod tests {
             NockchainP2PMetrics::register(gnort::global_metrics_registry())
                 .expect("Could not register metrics"),
         );
-        let mut tracker = MessageTracker::new(metrics);
+        let mut tracker = MessageTracker::new(metrics, LIBP2P_CONFIG.seen_tx_clear_interval);
         let peer_id1 = PeerId::random();
         let peer_id2 = PeerId::random();
 
@@ -647,7 +657,7 @@ mod tests {
             NockchainP2PMetrics::register(gnort::global_metrics_registry())
                 .expect("Could not register metrics"),
         );
-        let mut tracker = MessageTracker::new(metrics);
+        let mut tracker = MessageTracker::new(metrics, LIBP2P_CONFIG.seen_tx_clear_interval);
         let peer_id1 = PeerId::random();
         let peer_id2 = PeerId::random();
 
@@ -729,7 +739,7 @@ mod tests {
             NockchainP2PMetrics::register(gnort::global_metrics_registry())
                 .expect("Could not register metrics"),
         );
-        let mut tracker = MessageTracker::new(metrics);
+        let mut tracker = MessageTracker::new(metrics, LIBP2P_CONFIG.seen_tx_clear_interval);
         let peer_id1 = PeerId::random();
         let peer_id2 = PeerId::random();
 

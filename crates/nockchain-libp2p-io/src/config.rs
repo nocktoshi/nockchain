@@ -56,6 +56,9 @@ const REQUEST_HIGH_RESET: Duration = Duration::from_secs(60);
 // Elders debounce
 const ELDERS_DEBOUNCE_RESET: Duration = Duration::from_secs(60);
 
+// Cache clear interval of seen_tx cache handled in libp2p driver
+const SEEN_TX_CLEAR_INTERVAL: u64 = 1;
+
 // ALL PROTOCOLS MUST HAVE UNIQUE VERSIONS
 const REQ_RES_PROTOCOL_VERSION: &str = "/nockchain-1-req-res";
 const KAD_PROTOCOL_VERSION: &str = "/nockchain-1-kad";
@@ -155,6 +158,12 @@ pub struct LibP2PConfig {
     /// Interval for debouncing elders
     #[serde(default = "default_elders_debounce_reset_secs")]
     pub elders_debounce_reset_secs: u64,
+
+    /// Block interval for clearing seen transactions.
+    /// The cache will clear after seeing this many new blocks
+    /// added to the heaviest chain.
+    #[serde(default = "default_seen_tx_clear_interval")]
+    pub seen_tx_clear_interval: u64,
 }
 
 // Default value functions
@@ -225,6 +234,10 @@ fn default_elders_debounce_reset_secs() -> u64 {
     ELDERS_DEBOUNCE_RESET.as_secs() // Reset elders debounce every 60 seconds
 }
 
+fn default_seen_tx_clear_interval() -> u64 {
+    SEEN_TX_CLEAR_INTERVAL // By default, clear seen_tx cache after every new block on heaviest chain
+}
+
 // Do _not_ use this default implementation in production code. It's just a fallback.
 // Use from_env() to load from environment variables with sensible defaults.
 impl Default for LibP2PConfig {
@@ -250,6 +263,7 @@ impl Default for LibP2PConfig {
             peer_store_record_capacity: default_peer_store_record_capacity(),
             peer_status_log_interval_secs: default_peer_status_log_interval_secs(),
             elders_debounce_reset_secs: default_elders_debounce_reset_secs(),
+            seen_tx_clear_interval: default_seen_tx_clear_interval(),
         }
     }
 }
@@ -338,5 +352,9 @@ impl LibP2PConfig {
 
     pub fn elders_debounce_reset(&self) -> std::time::Duration {
         Duration::from_secs(self.elders_debounce_reset_secs)
+    }
+
+    pub fn seen_tx_clear_interval(&self) -> u64 {
+        self.seen_tx_clear_interval
     }
 }
