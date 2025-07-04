@@ -1,13 +1,11 @@
+use bitvec::prelude::{BitSlice, Lsb0};
+use ibig::UBig;
 use nockvm::jets::JetErr;
 use nockvm::mem::NockStack;
 use nockvm::noun::{Atom, IndirectAtom, Noun, D, DIRECT_MAX, NONE, T};
-
-use crate::form::Belt;
-
-use bitvec::prelude::{BitSlice, Lsb0};
-use ibig::UBig;
 pub use tracing::{debug, trace};
 
+use crate::form::Belt;
 
 // tests whether a felt atom has the leading 1. we cannot actually test
 // Felt, because it doesn't include the leading 1.
@@ -34,7 +32,7 @@ pub fn vec_to_hoon_list(stack: &mut NockStack, vec: &[u64]) -> Noun {
 }
 
 pub fn vec_to_hoon_tuple(stack: &mut NockStack, vec: &[u64]) -> Noun {
-    assert!( vec.len()>=2);
+    assert!(vec.len() >= 2);
     let mut list = NONE;
     for e in vec.iter().rev() {
         let n = Atom::new(stack, *e).as_noun();
@@ -47,9 +45,8 @@ pub fn vec_to_hoon_tuple(stack: &mut NockStack, vec: &[u64]) -> Noun {
     list
 }
 
-
 pub fn vecnoun_to_hoon_tuple(stack: &mut NockStack, vec: &[Noun]) -> Noun {
-    assert!( vec.len()>=2);
+    assert!(vec.len() >= 2);
     let mut list = NONE;
     for n in vec.iter().rev() {
         list = if list.is_none() {
@@ -131,5 +128,3 @@ pub fn hoon_list_to_vecnoun(list: Noun) -> Result<Vec<Noun>, JetErr> {
 pub fn is_hoon_list_end(noun: &Noun) -> bool {
     unsafe { noun.raw_equals(&D(0)) }
 }
-
-

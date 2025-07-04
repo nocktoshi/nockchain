@@ -1,23 +1,18 @@
-
-use crate::jets::tip5_jets::*;
-use crate::utils::*;
 use bitvec::prelude::{BitSlice, Lsb0};
 use nockvm::interpreter::Context;
 use nockvm::jets::util::slot;
 use nockvm::jets::JetErr;
 use nockvm::mem::NockStack;
 use nockvm::noun::{Cell, Noun, T};
+
 use crate::form::tip5::{permute, RATE};
+use crate::jets::tip5_jets::*;
+use crate::utils::*;
 
 // edit door values
-fn door_edit(
-    stack: &mut NockStack,
-    edit_axis_path: u64,
-    patch: Noun,
-    mut tree: Noun,
-) -> Noun {
+fn door_edit(stack: &mut NockStack, edit_axis_path: u64, patch: Noun, mut tree: Noun) -> Noun {
     let edit_axis = BitSlice::<u64, Lsb0>::from_element(&edit_axis_path);
-    
+
     let mut res = patch;
     let mut dest: *mut Noun = &mut res;
     let mut cursor = edit_axis
@@ -81,7 +76,7 @@ pub fn sponge_absorb_jet(context: &mut Context, subject: Noun) -> Result<Noun, J
     // update sponge in door
     let new_sponge = vec_to_hoon_list(stack, &sponge);
     let edit = door_edit(stack, 6, new_sponge, door);
-    
+
     Ok(edit)
 }
 
@@ -123,6 +118,6 @@ pub fn sponge_squeeze_jet(context: &mut Context, subject: Noun) -> Result<Noun, 
     let edit = door_edit(stack, 6, new_sponge, door);
 
     let output_noun = vec_to_hoon_list(stack, &output);
-    let res = T( stack, &[ output_noun, edit ]);
+    let res = T(stack, &[output_noun, edit]);
     Ok(res)
 }
