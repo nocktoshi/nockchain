@@ -13,6 +13,7 @@
       kernel-state-2
       kernel-state-3
       kernel-state-4
+      kernel-state-5
   ==
 ::
 +$  kernel-state-0
@@ -68,7 +69,17 @@
       constants=blockchain-constants:dt
   ==
 ::
-+$  kernel-state  kernel-state-4
++$  kernel-state-5
+  $:  %5
+      c=consensus-state-5
+      a=admin-state-5
+      m=mining-state-5
+    ::
+      d=derived-state-5
+      constants=blockchain-constants:dt
+  ==
+::
++$  kernel-state  kernel-state-5
 ::
 +$  consensus-state-0
   $+  consensus-state-0
@@ -123,7 +134,50 @@
 ::
 +$  consensus-state-4  $+(consensus-state-4 consensus-state-3)
 ::
-+$  consensus-state  consensus-state-4
++$  consensus-state-5
+  $+  consensus-state-5
+  ::
+  ::  indexes and not-fully-validated state
+  $:
+    $:
+    :: keys in raw-txs must be in EXACTLY ONE OF blocks-needed-by or excluded-txs
+        blocks-needed-by=(z-jug tx-id:dt block-id:dt) :: dependencies
+        excluded-txs=(z-set tx-id:dt) :: transactions unneeded by any block
+    ::
+    ::  every tx-id in spent-by must be in raw-txs and vice-versa
+        spent-by=(z-jug nname:dt tx-id:dt)
+    ::
+        pending-blocks=(z-map block-id:dt [=page:dt heard-at=@])  :: pending blocks
+    ==
+  ::
+  ::  core consensus state
+    $:  balance=(z-mip block-id:dt nname:dt nnote:dt)
+        txs=(z-mip block-id:dt tx-id:dt tx:dt) ::  fully validated transactions
+      ::
+      :: keys in raw-txs must be in EXACTLY ONE OF blocks-needed-by or excluded-txs
+        raw-txs=(z-map tx-id:dt [=raw-tx:dt heard-at=@]) :: raw transactions
+      ::
+        blocks=(z-map block-id:dt local-page:dt)  ::  fully validated blocks
+      ::
+        heaviest-block=(unit block-id:dt) ::  most recent heaviest block
+      ::
+      ::  min timestamp of block that is a child of this block
+        min-timestamps=(z-map block-id:dt @)
+      ::  this map is used to calculate epoch duration. it is a map of each
+      ::  block-id to the first block-id in that epoch.
+        epoch-start=(z-map block-id:dt block-id:dt)
+      ::  this map contains the expected target for the child
+      ::  of a given block-id.
+        targets=(z-map block-id:dt bignum:bignum:dt)
+      ::
+      ::  Bitcoin block hash for genesis block
+      ::>)  TODO: change face to btc-hash?
+        btc-data=(unit (unit btc-hash:dt))
+        =genesis-seal:dt  ::  desired seal for genesis block
+    ==
+  ==
+::
++$  consensus-state  consensus-state-5
 ::
 ::  you will not have lost any chain state if you lost pending state, you'd just have to
 ::  request data again from peers and reset your mining state
@@ -146,8 +200,7 @@
 +$  pending-state-3  $+(pending-state-3 pending-state-2)
 ::
 +$  pending-state-4  $+(pending-state-4 pending-state-3)
-::
-+$  pending-state  pending-state-4
+::  for kernel version 5 and later there is no pending state
 ::
 +$  admin-state-0
   $+  admin-state-0
@@ -166,7 +219,9 @@
 ::
 +$  admin-state-4  $+(admin-state-4 admin-state-3)
 ::
-+$  admin-state  admin-state-4
++$  admin-state-5  $+(admin-state-5 admin-state-4)
+::
++$  admin-state  admin-state-5
 ::
 +$  derived-state-0
   $+  derived-state-0
@@ -185,7 +240,9 @@
 ::
 +$  derived-state-4  $+(derived-state-4 derived-state-3)
 ::
-+$  derived-state  derived-state-4
++$  derived-state-5  $+(derived-state-5 derived-state-4)
+::
++$  derived-state  derived-state-5
 ::
 +$  mining-state-0
   $+  mining-state-0
@@ -205,7 +262,9 @@
 ::
 +$  mining-state-4  $+(mining-state-4 mining-state-3)
 ::
-+$  mining-state  mining-state-4
++$  mining-state-5  $+(mining-state-4 mining-state-3)
+::
++$  mining-state  mining-state-5
 ::
 +$  init-phase  $~(%.y ?)
 ::
@@ -223,7 +282,7 @@
       [%set-mining-key p=@t]  ::  set $lock for coinbase in mined blocks
       [%set-mining-key-advanced p=(list [share=@ m=@ keys=(list @t)])]  :: multisig and/or split coinbases
       [%enable-mining p=?]  ::  switch for generating candidate blocks for mining
-      [%timer p=~] ::  ask for heaviest block and any pending transactions
+      [%timer p=~] ::  ask for heaviest block and any needed transactions for pending blocks
       [%born p=~]  ::  initial event the king sends on boot
       [%genesis p=[=btc-hash:dt block-height=@ message=cord]]  ::  emit genesis block with this template
       :: set expected btc height and msg hash of genesis block

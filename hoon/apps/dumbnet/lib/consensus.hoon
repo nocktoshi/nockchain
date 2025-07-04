@@ -6,17 +6,19 @@
 ::
 ::  this library is where _every_ update to the consensus state
 ::  occurs, no matter how minor.
-|_  [c=consensus-state:dk p=pending-state:dk =blockchain-constants:dumb-transact]
+|_  [c=consensus-state:dk =blockchain-constants:dumb-transact]
 +*  t  ~(. dumb-transact blockchain-constants)
 ::
-:: We have to duplicate this here to avoid cyclic dependencies with pending.hoon
+++  has-raw-tx
+  |=  tid=tx-id:t
+  ^-  ?
+  (~(has z-by raw-txs.c) tid)
+::
 ++  get-raw-tx
   |=  tid=tx-id:t
   ^-  (unit raw-tx:t)
-  =/  p-rawtx  (~(get z-by raw-txs.p) tid)
-  ?~  p-rawtx
-    (~(get by raw-txs.c) tid)
-  p-rawtx
+  =/  tx  (~(get z-by raw-txs.c) tid)
+  ?~  tx  ~  `raw-tx.u.tx
 ::
 ::
 ++  got-raw-tx
@@ -65,6 +67,13 @@
     c(btc-data `btc-hash)
   ~>  %slog.[0 leaf+"received btc block hash, waiting to hear nockchain genesis block!"]
   c(btc-data `btc-hash)
+::
+++  inputs-in-spent-by
+  |=  raw=raw-tx:t
+  ^-  ?
+  %-  ~(any z-in (inputs-names:raw-tx:t raw))
+  |=  =nname:t
+  (~(has z-by spent-by.c) nname)
 ::
 ++  inputs-in-heaviest-balance
   |=  raw=raw-tx:t
@@ -168,11 +177,11 @@
 ::
 ::  +check-size: check on page size, requires all raw-tx
 ++  check-size
-  |=  [p=pending-state:dk pag=page:t]
+  |=  pag=page:t
   ^-  ?
   (lte (compute-size:page:t pag got-raw-tx) max-block-size:t)
 ::
-++  add-page
+++  accept-page
   |=  [pag=page:t acc=tx-acc:t now=@da]
   ^-  consensus-state:dk
   ::  update balance
@@ -195,14 +204,6 @@
     %-  ~(rep z-in txs.acc)
     |=  [=tx:t txs=_txs.c]
     (~(put z-bi txs) digest.pag id.tx tx)
-  =.  raw-txs.c
-    %-  ~(rep z-in txs.acc)
-    |=  [=tx:t raw-txs=_raw-txs.c]
-    (~(put z-by raw-txs) id.tx -.tx)
-  ::  update blocks
-  ::
-  =.  blocks.c
-    (~(put z-by blocks.c) digest.pag (to-local-page:page:t pag))
   ::
   ::  update epoch map. the first block-id in an epoch maps to its parent,
   ::  and each subsequent block maps to the same block-id as the first. this is helpful
@@ -234,7 +235,9 @@
     (~(got z-by targets.c) parent.pag)
   ::  note we do not update heaviest-block here, since that is conditional
   ::  and the effects emitted depend on whether we do it.
-  c
+  ?:  (~(has z-by pending-blocks.c) digest.pag)
+    (accept-pending-block digest.pag)
+  (accept-block pag)
 ::
 ::  +validate-page-without-txs-da: helper for urbit time
 ++  validate-page-without-txs-da
@@ -349,10 +352,10 @@
 ::    a $tx-acc otherwise, which is the datum needed to add the
 ::    page to consensus state.
 ++  validate-page-with-txs
-  |=  [p=pending-state:dk pag=page:t]
+  |=  pag=page:t
   ^-  (reason:dk tx-acc:t)
   =/  digest-b58=tape  (trip (to-b58:hash:t digest.pag))
-  ?.  (check-size p pag)
+  ?.  (check-size pag)
     ::~&  >>>  "block {digest-b58} is too large"
     [%.n %block-too-large]
   =/  raw-tx-set=(set (unit raw-tx:t))
@@ -495,4 +498,216 @@
     ==
   ::
   (~(put z-by min-timestamps.c) digest.pag min-timestamp)
+::
+::::  pending block and tx functionality
+::
+::
+::  Accept a block which has been fully validated and is not pending
+++  accept-block
+  |=  pag=page:t
+  ^-  consensus-state:dk
+  ?<  (~(has z-by blocks.c) digest.pag)
+  ?<  (~(has z-by pending-blocks.c) digest.pag)
+  =.  blocks.c  (~(put z-by blocks.c) digest.pag (to-local-page:page:t pag))
+  %-  ~(rep z-in tx-ids.pag)
+  |=  [=tx-id:t c=_c]
+  =.  blocks-needed-by.c  (~(put z-ju blocks-needed-by.c) tx-id digest.pag)
+  =.  excluded-txs.c  (~(del z-in excluded-txs.c) tx-id)
+  c
+::
+::  add a block which is waiting on transactions to pending state.
+::  If we have all transactions, a null set will be returned and
+::  state will not be changed
+++  add-pending-block
+  |=  pag=page:t
+  ^-  [(list tx-id:t) consensus-state:dk]
+  ?<  (~(has z-by blocks.c) digest.pag)
+  ?<  (~(has z-by pending-blocks.c) digest.pag)
+  =/  needed=(z-set tx-id:t)
+    %-  ~(rep z-in tx-ids.pag)
+    |=  [=tx-id:t needed=(z-set tx-id:t)]
+    ?.  (~(has z-by raw-txs.c) tx-id)
+      (~(put z-in needed) tx-id)
+    needed
+  ?:  =(*(z-set tx-id:t) needed)
+    [~ c] :: not missing any transactions
+  =.  pending-blocks.c  (~(put z-by pending-blocks.c) digest.pag [pag get-cur-height])
+  =.  c
+    %-  ~(rep z-in tx-ids.pag)
+    |=  [=tx-id:t c=_c]
+    =.  blocks-needed-by.c  (~(put z-ju blocks-needed-by.c) tx-id digest.pag)
+    =.  excluded-txs.c  (~(del z-in excluded-txs.c) tx-id)
+    c
+  [~(tap z-in needed) c]
+::
+::  reject a pending block
+++  reject-pending-block
+  |=  =block-id:t
+  ^-  consensus-state:dk
+  ::  block must be pending
+  ?<  (~(has z-by blocks.c) block-id)
+  =/  pag  page:(~(got z-by pending-blocks.c) block-id)
+  =.  c
+    %-  ~(rep z-by tx-ids.pag)
+    |=  [=tx-id:t c=_c]
+    =.  blocks-needed-by.c  (~(del z-ju blocks-needed-by.c) tx-id digest.pag)
+    =?  excluded-txs.c
+        ?&  ?!((~(has z-by blocks-needed-by.c) tx-id))  ::  not in blocks-needed-by
+            (~(has z-by raw-txs.c) tx-id)               ::  but in raw-txs
+        ==
+      (~(put z-in excluded-txs.c) tx-id)
+    c
+  =.  pending-blocks.c  (~(del z-by pending-blocks.c) digest.pag)
+  c
+::
+::  missing transaction ids from pending blocks
+++  missing-tx-ids
+  ^-  (list tx-id:t)
+  %~  tap  z-in
+  ^-  (z-set tx-id:t)
+  %-  ~(rep z-by pending-blocks.c)
+  |=  [[block-id:t pag=page:t *] all=(z-set tx-id:t)]
+  ^-  (z-set tx-id:t)
+  %-  ~(rep z-in tx-ids.pag)
+  |=  [=tx-id:t all=_all]
+  ?.  (~(has z-by raw-txs.c) tx-id)
+    (~(put z-in all) tx-id)
+  all
+::
+::  move a block from pending-blocks to blocks
+++  accept-pending-block
+  |=  =block-id:t
+  ^-  consensus-state:dk
+  ::  block must be pending
+  ?<  (~(has z-by blocks.c) block-id)
+  =/  pag  page:(~(got z-by pending-blocks.c) block-id)
+  =.  pending-blocks.c  (~(del z-by pending-blocks.c) digest.pag)
+  =.  blocks.c  (~(put z-by blocks.c) block-id (to-local-page:page:t pag))
+  c
+::
+::  list of pending blocks which are lower than the minimum retention height
+++  dropable-pending-blocks
+  |=  retain=(unit @)
+  ^-  (list block-id:t)
+  ?~  retain
+    ~
+  ?~  heaviest-block.c  ~
+  =/  height  height:(~(got z-by blocks.c) u.heaviest-block.c)
+  ?:  (lth height u.retain)
+    ~
+  =/  min-height  (sub height u.retain)
+  %-  ~(rep z-by pending-blocks.c)
+  |=  [[=block-id:t =page:t heard-at=@] dropable=(list block-id:t)]
+  ?:  (lth heard-at min-height)
+    [block-id dropable]
+  dropable
+::
+::  drop all dropable blocks
+++  drop-dropable-blocks
+  |=  retain=(unit @)
+  %+  roll  (dropable-pending-blocks retain)
+  |=  [=block-id:t con=_c]
+  =.  c  con
+  (reject-pending-block block-id)
+::
+::  Are the inputs already spent by another transaction we know of?
+++  inputs-spent
+  |=  =raw-tx:t
+  ^-  ?
+  (~(any z-in (inputs-names:raw-tx:t raw-tx)) ~(has z-by spent-by.c))
+::
+::  Is the transaction needed by a block?
+++  needed-by-block
+  |=  =tx-id:t
+  ^-  ?
+  (~(has z-by blocks-needed-by.c) tx-id)
+::
+::  add an already-validated raw transaction, producing a list of blocks ready to validate
+++  add-raw-tx
+  |=  =raw-tx:t
+  ^-  [(list block-id:t) consensus-state:dk]
+  ?<  (~(has z-by raw-txs.c) id.raw-tx)
+  =.  raw-txs.c  (~(put z-by raw-txs.c) id.raw-tx [raw-tx get-cur-height])
+  =/  input-names=(z-set nname:t)  (inputs-names:raw-tx:t raw-tx)
+  =.  spent-by.c
+    %-  ~(rep z-in input-names)
+    |=  [=nname:t sb=_spent-by.c]
+    (~(put z-ju sb) nname id.raw-tx)
+  =/  bnb  (~(get z-ju blocks-needed-by.c) id.raw-tx)
+  ?:  =(*(z-set block-id:t) bnb)
+    =.  excluded-txs.c  (~(put z-in excluded-txs.c) id.raw-tx)
+    [~ c]
+  =/  ready-blocks=(list block-id:t)
+    %-  ~(rep z-in bnb)
+    |=  [=block-id:t ready=(list block-id:t)]
+    =/  pending  (~(get z-by pending-blocks.c) block-id)
+    ?~  pending  ready
+    =/  pag  page.u.pending
+    =/  needed
+      %-  ~(rep z-in tx-ids.pag)
+      |=  [=tx-id:t needed=(z-set tx-id:t)]
+      ^-  (z-set tx-id:t)
+      ?.  (~(has z-by raw-txs.c) tx-id)
+        (~(put z-in needed) tx-id)
+      needed
+    ::  if the block is ready, add it to the ready list
+    ?:  =(*(z-set tx-id:t) needed)
+      [block-id ready]
+    ready
+  [ready-blocks c]
+::
+::  drop a transaction. This will crash if any block needs the transaction
+++  drop-tx
+  |=  =tx-id:t
+  ^-  consensus-state:dk
+  ?<  (~(has z-by blocks-needed-by.c) tx-id)
+  ?>  (~(has z-in excluded-txs.c) tx-id)
+  =/  raw-tx  raw-tx:(~(got z-by raw-txs.c) tx-id)
+  =.  raw-txs.c  (~(del z-by raw-txs.c) tx-id)
+  =.  excluded-txs.c  (~(del z-by excluded-txs.c) tx-id)
+  =.  spent-by.c
+    %-  ~(rep z-in (inputs-names:raw-tx:t raw-tx))
+    |=  [=nname:t sb=_spent-by.c]
+    (~(del z-ju sb) nname id.raw-tx)
+  c
+::
+::  transactions which may be dropped (excluded and lower than minimum retention height)
+++  dropable-txs
+  |=  retain=(unit @)
+  ^-  (z-set tx-id:t)
+  ?~  heaviest-block.c  ~
+  =/  height  height:(~(got z-by blocks.c) u.heaviest-block.c)
+  =/  spent=(z-set tx-id:t)
+    %-  ~(rep z-by excluded-txs.c)
+    |=  [=tx-id:t spent=(z-set tx-id:t)]
+    ^-  (z-set tx-id:t)
+    =/  raw-tx  raw-tx:(~(got z-by raw-txs.c) tx-id)
+    ?.  (inputs-in-heaviest-balance raw-tx)
+      (~(put z-in spent) tx-id)
+    spent
+  ?~  retain  spent
+  ?:  (lth height u.retain)  spent
+  =/  min-height  (sub height u.retain)
+  %-  ~(rep z-by excluded-txs.c)
+  |=  [=tx-id:t dropable=_spent]
+  =/  [=raw-tx:t heard-at=@]  (~(got z-by raw-txs.c) tx-id)
+  ?:  (lth heard-at min-height)
+    (~(put z-in dropable) tx-id)
+  dropable
+::
+::  drop all dropable transactions
+++  drop-dropable-txs
+  |=  retain=(unit @)
+  ^-  consensus-state:dk
+  %-  ~(rep z-in (dropable-txs retain))
+  |=  [=tx-id:t con=_c]
+  =.  c  con
+  (drop-tx tx-id)
+::
+::  garbage-collect state
+++  garbage-collect
+  |=  retain=(unit @)
+  ^-  consensus-state:dk
+  =.  c  (drop-dropable-blocks retain)
+  (drop-dropable-txs retain)
 --

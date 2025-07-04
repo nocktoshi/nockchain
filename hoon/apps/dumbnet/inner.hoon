@@ -2,7 +2,6 @@
 /=  sp  /common/stark/prover
 /=  c-transact  /common/tx-engine
 /=  dumb-miner  /apps/dumbnet/lib/miner
-/=  dumb-pending  /apps/dumbnet/lib/pending
 /=  dumb-derived  /apps/dumbnet/lib/derived
 /=  dumb-consensus  /apps/dumbnet/lib/consensus
 /=  mine  /common/pow
@@ -20,9 +19,8 @@
 ++  inner
   |_  k=kernel-state:dk
   +*  min      ~(. dumb-miner m.k constants.k)
-      pen      ~(. dumb-pending p.k c.k constants.k)
       der      ~(. dumb-derived d.k constants.k)
-      con      ~(. dumb-consensus c.k p.k constants.k)
+      con      ~(. dumb-consensus c.k constants.k)
       t        ~(. c-transact constants.k)
   ::
   ::  We should be calling the inner kernel load in case of update
@@ -38,12 +36,12 @@
     ~&  [%nockchain-state-version -.arg]
     ::  cut
     |^
-    ~>  %bout  (check-checkpoints (state-n-to-4 arg))
+    ~>  %bout  (check-checkpoints (state-n-to-5 arg))
     ::  this arm should be renamed each state upgrade to state-n-to-[latest] and extended to loop through all upgrades
-    ++  state-n-to-4
+    ++  state-n-to-5
       |=  arg=load-kernel-state:dk
       ^-  kernel-state:dk
-      ?.  ?=(%4 -.arg)
+      ?.  ?=(%5 -.arg)
         ~>  %slog.[0 leaf+"state upgrade required"]
         ?-  -.arg
             ::
@@ -51,8 +49,55 @@
           %1  $(arg (state-1-to-2 arg))
           %2  $(arg (state-2-to-3 arg))
           %3  $(arg (state-3-to-4 arg))
+          %4  $(arg (state-4-to-5 arg))
         ==
       arg
+    ::  upgrade kernel state 4 to kernel state 5
+    ++  state-4-to-5
+    |=  arg=kernel-state-4:dk
+    ^-  kernel-state-5:dk
+    |^
+      [%5 new-consensus a.arg m.arg d.arg constants.arg]
+    ++  new-consensus
+      ^-  consensus-state-5:dk
+      ~>  %slog.[0 leaf+"This upgrade may take some time"]
+      =/  blocks-needed-by=(z-jug tx-id:t block-id:t)
+        %-  ~(rep z-by blocks.c.arg)
+        |=  [[=block-id:t pag=local-page:t] bnb=(z-jug tx-id:t block-id:t)]
+        ^-  (z-jug tx-id:t block-id:t)
+        %-  ~(rep z-in tx-ids.pag)
+        |=  [=tx-id:t bnb=_bnb]
+        ^-  (z-jug tx-id:t block-id:t)
+        =+
+          ?.  (~(has z-by raw-txs.c.arg) tx-id)
+            ~>  %slog.[0 leaf+"Missing transaction in consensus state. Please alert the developers."]  ~
+            ~
+        (~(put z-ju bnb) tx-id block-id)
+      ~>  %slog.[0 leaf+"Indexed blocks by transaction id"]
+      =/  rtx=(map tx-id:t *)  raw-txs.c.arg
+      =/  bnb=(map tx-id:t *)  blocks-needed-by
+      =/  excluded-map=(map tx-id:t *)  (~(dif z-by rtx) bnb)
+      =/  excluded-txs=(z-set tx-id:t)  ~(key z-by excluded-map)
+      =+
+        ?:  =(*(z-set tx-id:t) excluded-txs)
+          ~>  %slog.[0 leaf+"Consensus state is consistent"]  ~
+        :: this is only a concern at upgrade time. After the upgrade this is allowed to happen
+        ~>  %slog.[0 leaf+"There are transactions in consensus state which are not included in any block. Please inform the developers."]  ~
+      =/  [spent-by=(z-jug nname:t tx-id:t) raw-txs=(z-map tx-id:t [raw-tx:t @])]
+        %-  ~(rep z-by raw-txs.c.arg)
+        |=  [[=tx-id:t =raw-tx:t] [sb=(z-jug nname:t tx-id:t) rtx=(z-map tx-id:t [raw-tx:t @])]]
+        ^-  [(z-jug nname:t tx-id:t) (z-map tx-id:t [raw-tx:t @])]
+        =.  sb
+          %-  ~(rep z-in (inputs-names:raw-tx:t raw-tx))
+          |=  [=nname:t sb=_sb]
+          (~(put z-ju sb) nname tx-id)
+        =.  rtx  (~(put z-by rtx) tx-id [raw-tx 0])
+        [sb rtx]
+      ~>  %slog.[0 leaf+"Indexed transactions by spent notes"]
+      ~>  %slog.[0 leaf+"Upgrade state version 4 to version 5 complete"]
+      =|  pending-blocks=(z-map block-id:t [=page:t heard-at=@])
+      [[blocks-needed-by excluded-txs spent-by pending-blocks] c.arg(raw-txs raw-txs)]
+    --
     ::  upgrade kernel state 3 to kernel state 4
     ::  (reset pending state)
     ++  state-3-to-4
@@ -167,8 +212,8 @@
       ``txs.c.k
     ::
         [%raw-transactions ~]
-      ^-  (unit (unit (z-map tx-id:t raw-tx:t)))
-      ``(~(uni z-by raw-txs.p.k) raw-txs.c.k)
+      ^-  (unit (unit (z-map tx-id:t [=raw-tx:t heard-at=@])))
+      ``raw-txs.c.k
     ::
     ::  For %block, %transaction, %raw-transaction, and %balance scries, the ID is
     ::  passed as a base58 encoded string in the scry path.
@@ -199,7 +244,7 @@
       ::  scry for a raw-tx
       ^-  (unit (unit raw-tx:t))
       :-  ~
-      (get-raw-tx:pen (from-b58:hash:t tid.pole))
+      (get-raw-tx:con (from-b58:hash:t tid.pole))
     ::
         [%heavy ~]
       ^-  (unit (unit (unit block-id:t)))
@@ -304,7 +349,7 @@
         [[(liar-effect wir %not-a-genesis-block)]~ k]
       ::  heard valid genesis block
       ~>  %slog.[0 leaf+"validated genesis block!"]
-      (new-block now eny pag *tx-acc:t)
+      (accept-block now eny pag *tx-acc:t)
     ::
     ++  heard-block
       |=  [wir=wire now=@da pag=page:t eny=@]
@@ -393,8 +438,9 @@
         %+  snoc  block-effs
         ^-  effect:dk
         [%track %remove digest.pag]
-      =^  missing-txs=(list tx-id:t)  p.k
-        (add-pending-block:pen pag)
+      =>  .(c.k `consensus-state:dk`c.k)  ::  tmi
+      =^  missing-txs=(list tx-id:t)  c.k
+        (add-pending-block:con pag)
       =.  d.k  (update-highest:der height.pag)
       ?:  !=(missing-txs *(list tx-id:t))
         ~>  %slog.[0 leaf+"missing txs"]
@@ -492,7 +538,7 @@
     ++  check-duplicate-block
       |=  digest=block-id:t
       ?|  (~(has z-by blocks.c.k) digest)
-          (~(has z-by pending-blocks.p.k) digest)
+          (~(has z-by pending-blocks.c.k) digest)
       ==
     ::
     ++  check-genesis
@@ -599,7 +645,7 @@
         [(liar-effect wir %tx-id-invalid)]~
       ::
       ::  do we already have raw-tx?
-      ?:  (has-raw-tx:pen id.raw)
+      ?:  (has-raw-tx:con id.raw)
         :: do almost nothing (idempotency), we already have it
         :: but do tell the runtime we've already seen it
         ~>  %slog.[3 leaf+"tx-id-already-seen"]
@@ -611,9 +657,7 @@
       ::
       ::  check if raw-tx is part of a pending block
       ::
-      =/  tx-pending-blocks=(z-set block-id:t)
-        (~(get z-ju tx-block.p.k) id.raw)
-      ?:  !=(*(z-set block-id:t) tx-pending-blocks)
+      ?:  (needed-by-block:con id.raw)
         ::  pending blocks are waiting on tx
         ?.  (validate:raw-tx:t raw)
           ::  raw-tx doesn't validate.
@@ -622,20 +666,19 @@
           ::  won't accidentally throw out a block that contained a valid tx-id
           ::  just because we received a tx that claimed the same id as the valid
           ::  one.
-          =.  p.k
+          =/  tx-pending-blocks  (~(get z-ju blocks-needed-by.c.k) id.raw)
+          =.  c.k
             %-  ~(rep z-in tx-pending-blocks)
-            |=  [id=block-id:t pend=_p.k]
-            =.  p.k  pend
-            (remove-pending-block:pen id)
+            |=  [id=block-id:t c=_c.k]
+            =.  c.k  c
+            (reject-pending-block:con id)
           ::
           ~>  %slog.[3 leaf+"page-pending-raw-tx-invalid"]
           :_  k
           [(liar-effect wir %page-pending-raw-tx-invalid) ~]
-        ::  add to raw-txs map, remove from tx-block jug, remove from
-        ::  block-tx jug
-        =.  p.k  (add-tx-in-pending-block:pen raw)
+        =^  work  c.k  (add-raw-tx:con raw)
         ~>  %slog.[3 leaf+"process-ready-blocks"]
-        (process-ready-blocks now eny raw)
+        (process-ready-blocks now eny work raw)
       ::  no pending blocks waiting on tx
       ::
       ::  check if any inputs are absent in heaviest balance
@@ -646,7 +689,7 @@
       ::  all inputs in balance
       ::
       ::  check if any inputs are in spent-by
-      ?:  (inputs-in-spent-by:pen raw)
+      ?:  (inputs-spent:con raw)
         ::  inputs present in spent-by, discard tx
         ~>  %slog.[3 leaf+"inputs-in-spent-by"]
         `k
@@ -657,8 +700,10 @@
         :_  k
         [(liar-effect wir %tx-inputs-not-in-spent-by-and-invalid)]~
       ::
-      =.  p.k
-        (add-tx-not-in-pending-block:pen raw get-cur-height:con)
+      =^  work  c.k
+        (add-raw-tx:con raw)
+      :: no blocks were depending on this so work should be empty
+      ?>  =(~ work)
       ::
       ::  next we would process blocks made ready by tx but we already
       ::  determined that no pending blocks were waiting on this this,
@@ -670,37 +715,33 @@
     ::
     ::  +process-ready-blocks: process blocks no longer waitings on txs
     ++  process-ready-blocks
-      |=  [now=@da eny=@ raw=raw-tx:t]
+      |=  [now=@da eny=@ work=(list block-id:t) =raw-tx:t]
       ^-  [(list effect:dk) kernel-state:dk]
       ::  .work contains block-ids for blocks that no longer have any
       ::  missing transactions
-      =/  work=(z-set block-id:t)  find-ready-blocks:pen
       =^  eff  k
-        %-  ~(rep z-in work)
+        %+  roll  work
         |=  [bid=block-id:t effs=(list effect:dk) k=_k]
         =.  ^k  k
         ::  process the block, skipping the steps that we know its already
-        ::  done by the fact that it was in pending-blocks.p.k
+        ::  done by the fact that it was in pending-blocks.c.k
         =^  new-effs  k
           %:  process-block-with-txs
             now  eny
-            (to-page:local-page:t (~(got z-by pending-blocks.p.k) bid))
-            :: if the block is bad, then tell the driver never to send it
-            :: to us again
+            page:(~(got z-by pending-blocks.c.k) bid)
+            :: if the block is bad, then tell the driver we dont want to see it
+            :: again
             ~[[%seen %block bid ~]]
           ==
         ::  remove the block from pending blocks. at this point, its either
         ::  been discarded by the kernel or lives in the consensus state
-        =.  p.^k  p.k
-        =.  p.k  (remove-pending-block:pen bid)
-        ::  add the effects onto the list and return the updated kernel state
         [(weld new-effs effs) k]
       ::
       ::  tell the miner about the new transaction. this might look strange
       ::  informing it here, potentially after new blocks have been made ready
       ::  by it, but this tx may be part of a reorg, so the processed blocks
       ::  might not be the heaviest.
-      =.  m.k  (heard-new-tx:min raw)
+      =.  m.k  (heard-new-tx:min raw-tx)
       ::
       eff^k
     ::
@@ -716,7 +757,7 @@
     ::    go through here.
     ::
     ::    bad-block-effs are effects which are passed through and emitted
-    ::    only if the block is bad. If the block is good then ++new-block
+    ::    only if the block is bad. If the block is good then ++accept-block
     ::    emits effects and bad-block-effs is ignored.
     ++  process-block-with-txs
       |=  [now=@da eny=@ pag=page:t bad-block-effs=(list effect:dk)]
@@ -726,24 +767,25 @@
       ::  if we do have all raw-txs, check if pag validates
       ::  (i.e. transactions are valid and size isnt too big)
       =/  new-transfers=(reason:dk tx-acc:t)
-        (validate-page-with-txs:con p.k pag)
+        (validate-page-with-txs:con pag)
       ?-    -.new-transfers
           %.y
-        (new-block now eny pag +.new-transfers)
+        (accept-block now eny pag +.new-transfers)
         ::
           %.n
         ::  did not validate, so we throw the block out and stop
         ::  tracking it
+        =.  c.k  (reject-pending-block:con digest.pag)
         [bad-block-effs k]
       ==
     ::
-    ::  +new-block: update kernel state with new valid block.
-    ++  new-block
+    ::  +accept-block: update kernel state with new valid block.
+    ++  accept-block
       |=  [now=@da eny=@ pag=page:t acc=tx-acc:t]
       ^-  [(list effect:dk) kernel-state:dk]
       ::
       ::  page is validated, update consensus and derived state
-      =.  c.k  (add-page:con pag acc now)
+      =.  c.k  (accept-page:con pag acc now)
       =/  print-var
         =/  pow-print=@t
           ?:  check-pow-flag:t
@@ -812,11 +854,12 @@
           ==
         [orphaned-block-span reorg-span effs]
       ::
-      ::  refresh pending state
-      =.  p.k  (refresh-after-new-block:pen retain.a.k)
+      ::  Drop pending blocks and transactions which haven't
+      ::  been included in testing and are too old.
+      =.  c.k  (garbage-collect:con retain.a.k)
       ::
       ::  tell the miner about the new block
-      =.  m.k  (heard-new-block:min c.k p.k now)
+      =.  m.k  (heard-new-block:min c.k now)
       ::
       ::  update derived state
       =.  d.k  (update:der c.k pag)
@@ -1044,7 +1087,7 @@
           `k
         ::~&  >  'generation of candidate blocks enabled.'
         =.  m.k  (set-mining:min p.command)
-        =.  m.k  (heard-new-block:min c.k p.k now)
+        =.  m.k  (heard-new-block:min c.k now)
         `k
       ::
       ++  do-timer
@@ -1055,10 +1098,10 @@
           ::  kernel in init phase, command ignored
           `k
         =/  tx-req-effs=(list effect:dk)
-          %-  ~(rep z-in find-pending-tx-ids:pen)
-          |=  [=tx-id:t effs=(list effect:dk)]
-          ^-  (list effect:dk)
-          [[%request %raw-tx %by-id tx-id] effs]
+          %+  turn  missing-tx-ids:con
+          |=  =tx-id:t
+          ^-  effect:dk
+          [%request %raw-tx %by-id tx-id]
         ::
         ::  we always request the next heaviest block with each %timer event
         =/  heavy-height=page-number:t

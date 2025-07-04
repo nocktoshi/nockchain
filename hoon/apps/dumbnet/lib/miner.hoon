@@ -120,7 +120,7 @@
 ::    over any transactions we had previously been attempting to include that werent
 ::    included in the most recent block.
 ++  heard-new-block
-  |=  [c=consensus-state:dk p=pending-state:dk now=@da]
+  |=  [c=consensus-state:dk now=@da]
   ^-  mining-state:dk
   ::
   ::  do a sanity check that we have a heaviest block, and that the heaviest block
@@ -154,8 +154,9 @@
     (new:tx-acc:t (~(get z-by balance.c) u.heaviest-block.c))
   ::
   ::  roll over the pending txs and try to include them in the new candidate block
-  %+  roll  ~(val z-by raw-txs.p)
-  |=  [raw=raw-tx:t min=_m]
+  %-  ~(rep z-by excluded-txs.c)
+  |=  [=tx-id:t min=_m]
   =.  m  min
+  =/  raw  raw-tx:(~(got z-by raw-txs.c) tx-id)
   (heard-new-tx raw)
 --

@@ -2,6 +2,13 @@
 /=  z  /common/zeke
 |%
 ::
++|  %no-by-in
+++  by  %do-not-use
+++  in  %do-not-use
+++  ju  %do-not-use
+++  ja  %do-not-use
+++  bi  %do-not-use
+::
 +|  %map
 ++  z-map
   |$  [key value]                                       ::  table
