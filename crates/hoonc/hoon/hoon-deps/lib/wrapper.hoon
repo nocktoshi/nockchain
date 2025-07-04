@@ -48,12 +48,12 @@
   |=  crash=?
   |=  inner=fort
   |=  hash=@uvI
-  ~&  build-hash+hash
   =<  .(desk-hash.outer `hash)
   |_  outer=outer-state
   +*  inner-fort  ~(. inner internal.outer)
   ++  load
     |=  old=outer-state
+    ~&  build-hash+hash
     ?+    -.old  ~&("wrapper +load: invalid old state" !!)
         %0
       =/  new-internal  (load:inner-fort internal.old)
