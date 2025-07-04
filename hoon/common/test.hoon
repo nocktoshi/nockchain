@@ -25,13 +25,23 @@
             (~(dunk ut p.expected) %expected)
     ==  ==
   result
-::  +expect: compares :actual to %.y and pretty-prints anything else
+::
 ::
 ++  expect
   |=  actual=vase
   (expect-eq !>(%.y) actual)
-::  +expect-fail: kicks a trap, expecting crash. pretty-prints if succeeds
 ::
+::  +expect-null: checks if actual is null
+++  expect-null
+  |=  actual=vase
+  (expect-eq !>(%.y) !>(?=(~ q.actual)))
+::
+::  +expect-some: checks if actual is not null, used to check units
+++  expect-some
+  |=  actual=vase
+  (expect-eq !>(%.n) !>(?=(~ q.actual)))
+::
+::  +expect-fail: kicks a trap, expecting crash. pretty-prints if succeeds
 ++  expect-fail
   |=  [a=(trap) err=(unit tape)]
   ^-  tang

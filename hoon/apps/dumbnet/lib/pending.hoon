@@ -62,11 +62,9 @@
     ::  add 1 b/c range is inclusive of cur-height
     ::  so retain=1 means min-height=cur-height
     +((sub cur-height u.retain))
-  =/  heard-kvs=(list [tx-id:t page-number:t])
-    ~(tap z-by heard-at.p)
   ::
   =/  keep-drop=[k=(list [tx-id:t page-number:t]) d=(list raw-tx:t)]
-    %+  roll  heard-kvs
+    %-  ~(rep z-in heard-at.p)
     |=  $:  [tid=tx-id:t num=page-number:t]
             [keep=(list [tx-id:t page-number:t]) drop=(list raw-tx:t)]
         ==
@@ -141,19 +139,17 @@
 ++  add-inputs-to-spent-by
   |=  raw=raw-tx:t
   ^-  pending-state:dk
-  =/  inputs-names=(list nname:t)
-    ~(tap z-in (inputs-names:raw-tx:t raw))
-  =/  new-entries=(list [nname:t tx-id:t])
-    (turn inputs-names |=(n=nname:t n^id.raw))
-  p(spent-by (~(gas z-by spent-by.p) new-entries))
+  =.  spent-by.p
+    %-  ~(rep z-in (inputs-names:raw-tx:t raw))
+    |=  [n=nname:t spb=_spent-by.p]
+    (~(put z-by spb) n id.raw)
+  p
 ::
 ++  remove-inputs-from-spent-by
   |=  raw=raw-tx:t
   ^-  pending-state:dk
-  =/  inputs-names=(list nname:t)
-    ~(tap z-in (inputs-names:raw-tx:t raw))
   =.  spent-by.p
-    %+  roll  inputs-names
+    %-  ~(rep z-by (inputs-names:raw-tx:t raw))
     |=  [nom=nname:t spb=_spent-by.p]
     (~(del z-by spb) nom)
   p
@@ -178,10 +174,8 @@
   ?~  block-vals
     ::  no blocks waiting on this tx, so do nothing
     p
-  =/  block-list=(list block-id:t)
-    ~(tap z-in u.block-vals)
   =.  block-tx.p
-    %+  roll  block-list
+    %-  ~(rep z-by u.block-vals)
     |=  [bid=block-id:t blt=_block-tx.p]
     (~(del z-ju blt) bid tid)
   p
@@ -230,12 +224,10 @@
     ::  no txs needed by block so just delete from block-tx
     =.  block-tx.p      (~(del z-by block-tx.p) bid)
     p
-  =/  tx-list=(list tx-id:t)
-    ~(tap z-in u.tx-vals)
   =.  block-tx.p        (~(del z-by block-tx.p) bid)
   ::  remove the block-id from this map.
   =.  tx-block.p
-    %+  roll  tx-list
+    %-  ~(rep z-in u.tx-vals)
     |=  [tid=tx-id:t txb=_tx-block.p]
     (~(del z-ju txb) tid bid)
   p

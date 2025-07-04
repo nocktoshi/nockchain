@@ -224,8 +224,9 @@
         [%mining-pubkeys ~]
       ^-  (unit (unit (list [m=@ pks=(list @t)])))
       =/  locks=(list [m=@ pks=(list @t)])
-        %+  turn  ~(tap z-in pubkeys.m.k)
-        |=(=lock:t (to-b58:lock:t lock))
+        %-  ~(rep z-in pubkeys.m.k)
+        |=  [=lock:t l=(list [m=@ pks=(list @t)])]
+        [(to-b58:lock:t lock) l]
       ``locks
     ::
         [%balance bid=@ ~]
@@ -610,9 +611,9 @@
       ::
       ::  check if raw-tx is part of a pending block
       ::
-      =/  tx-pending-blocks=(list block-id:t)
-        ~(tap z-in (~(get z-ju tx-block.p.k) id.raw))
-      ?:  !=(*(list block-id:t) tx-pending-blocks)
+      =/  tx-pending-blocks=(z-set block-id:t)
+        (~(get z-ju tx-block.p.k) id.raw)
+      ?:  !=(*(z-set block-id:t) tx-pending-blocks)
         ::  pending blocks are waiting on tx
         ?.  (validate:raw-tx:t raw)
           ::  raw-tx doesn't validate.
@@ -622,7 +623,7 @@
           ::  just because we received a tx that claimed the same id as the valid
           ::  one.
           =.  p.k
-            %+  roll  tx-pending-blocks
+            %-  ~(rep z-in tx-pending-blocks)
             |=  [id=block-id:t pend=_p.k]
             =.  p.k  pend
             (remove-pending-block:pen id)
@@ -675,7 +676,7 @@
       ::  missing transactions
       =/  work=(z-set block-id:t)  find-ready-blocks:pen
       =^  eff  k
-        %+  roll  ~(tap z-in work)
+        %-  ~(rep z-in work)
         |=  [bid=block-id:t effs=(list effect:dk) k=_k]
         =.  ^k  k
         ::  process the block, skipping the steps that we know its already
@@ -744,13 +745,19 @@
       ::  page is validated, update consensus and derived state
       =.  c.k  (add-page:con pag acc now)
       =/  print-var
-        ?>  ?=(^ pow.pag)
+        =/  pow-print=@t
+          ?:  check-pow-flag:t
+            ?>  ?=(^ pow.pag)
+            %+  rap  3
+            :~  ' with proof version '  (scot %u version.u.pow.pag)
+            ==
+          ' .Skipping pow check because check-pow-flag was disabled'
         %-  trip
         ^-  @t
         %+  rap  3
         :~  'block '  (to-b58:hash:t digest.pag)
             ' added to validated blocks at '  (scot %u height.pag)
-            ' with proof version '  (scot %u version.u.pow.pag)
+            pow-print
         ==
       ~>  %slog.[0 %leaf^print-var]
       =/  effs=(list effect:dk)
@@ -1048,10 +1055,10 @@
           ::  kernel in init phase, command ignored
           `k
         =/  tx-req-effs=(list effect:dk)
-          %+  turn  ~(tap z-by find-pending-tx-ids:pen)
-          |=  =tx-id:t
-          ^-  effect:dk
-          [%request %raw-tx %by-id tx-id]
+          %-  ~(rep z-in find-pending-tx-ids:pen)
+          |=  [=tx-id:t effs=(list effect:dk)]
+          ^-  (list effect:dk)
+          [[%request %raw-tx %by-id tx-id] effs]
         ::
         ::  we always request the next heaviest block with each %timer event
         =/  heavy-height=page-number:t

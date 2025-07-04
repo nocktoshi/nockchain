@@ -13,7 +13,7 @@
 ++  get-raw-tx
   |=  tid=tx-id:t
   ^-  (unit raw-tx:t)
-  =/  p-rawtx  (~(get by raw-txs.p) tid)
+  =/  p-rawtx  (~(get z-by raw-txs.p) tid)
   ?~  p-rawtx
     (~(get by raw-txs.c) tid)
   p-rawtx
@@ -88,7 +88,7 @@
 ++  get-cur-balance
   ^-  (z-map nname:t nnote:t)
   ?~  heaviest-block.c
-    ::~&  >>  "no known blocks, balance is empty"
+    ~>  %slog.[%1 leaf+"no known blocks, balance is empty"]
     *(z-map nname:t nnote:t)
   (~(got z-by balance.c) u.heaviest-block.c)
 ::
@@ -192,11 +192,11 @@
   ::  update txs
   ::
   =.  txs.c
-    %+  roll  ~(tap z-in txs.acc)
+    %-  ~(rep z-in txs.acc)
     |=  [=tx:t txs=_txs.c]
     (~(put z-bi txs) digest.pag id.tx tx)
   =.  raw-txs.c
-    %+  roll  ~(tap z-in txs.acc)
+    %-  ~(rep z-in txs.acc)
     |=  [=tx:t raw-txs=_raw-txs.c]
     (~(put z-by raw-txs) id.tx -.tx)
   ::  update blocks
@@ -252,7 +252,11 @@
   |=  [pag=page:t now-secs=@]
   ^-  (reason:dk ~)
   =/  version  (height-to-proof-version height.pag)
-  ?.  =(version version:(need pow.pag))
+  =/  version-check=?
+    ?.  check-pow-flag:t
+      %.y
+    =(version version:(need pow.pag))
+  ?.  version-check
     ~&  [%expected-vs-actual version version:(need pow.pag)]
     [%.n %proof-version-invalid]
   =/  par=page:t  (to-page:local-page:t (~(got z-by blocks.c) parent.pag))
