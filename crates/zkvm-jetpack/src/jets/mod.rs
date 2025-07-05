@@ -8,6 +8,7 @@ pub mod fpntt_jets;
 pub mod mary_jets;
 pub mod mega_jets;
 pub mod memory_table_jets_v2;
+pub mod proof_gen_jets;
 pub mod shape_jets;
 pub mod table_utils;
 pub mod tip5_jets;

@@ -237,7 +237,7 @@ pub fn snag_as_bpoly_jet(context: &mut Context, subject: Noun) -> Result<Noun, J
     snag_as_bpoly(stack, mary_noun, i)
 }
 
-fn snag_as_bpoly(stack: &mut NockStack, mary_noun: Noun, i: usize) -> Result<Noun, JetErr> {
+pub fn snag_as_bpoly(stack: &mut NockStack, mary_noun: Noun, i: usize) -> Result<Noun, JetErr> {
     let mary_cell = mary_noun.as_cell()?;
     let ma_step = mary_cell.head().as_atom()?.as_u32()?;
 

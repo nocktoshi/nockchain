@@ -1,4 +1,5 @@
 use crate::form::mary::{MarySlice, MarySliceMut};
+use crate::form::Belt;
 
 #[inline(always)]
 pub fn mary_weld(a: MarySlice, b: MarySlice, res: MarySliceMut) {
@@ -26,5 +27,19 @@ pub fn mary_transpose(fpolys: MarySlice, offset: usize, res: &mut MarySliceMut) 
                     fpolys.dat[offset * (j * num_cols + i) + k];
             }
         }
+    }
+}
+
+#[inline(always)]
+pub fn snag_as_bpoly(a: MarySlice, i: usize) -> &[Belt] {
+    let step = a.step as usize;
+    to_belts(&a.dat[step * i..(step * (i + 1))])
+}
+
+#[inline(always)]
+pub fn to_belts(sli: &[u64]) -> &[Belt] {
+    unsafe {
+        let ptr = sli.as_ptr() as *const Belt;
+        std::slice::from_raw_parts(ptr, sli.len())
     }
 }

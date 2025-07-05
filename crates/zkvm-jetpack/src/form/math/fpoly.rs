@@ -1,0 +1,204 @@
+use std::cmp::max;
+use std::vec;
+
+use crate::form::fext::*;
+use crate::form::poly::*;
+
+#[inline(always)]
+pub fn fpadd(a: &[Felt], b: &[Felt], res: &mut [Felt]) {
+    let min: &[Felt];
+    let max: &[Felt];
+    if a.len() <= b.len() {
+        min = a;
+        max = b;
+    } else {
+        min = b;
+        max = a;
+    }
+
+    for ((res_vec, max_vec), min_vec) in res
+        .iter_mut()
+        .zip(max.iter())
+        .zip(min.iter().map(Some).chain(std::iter::repeat(None)))
+    {
+        if let Some(min_vec) = min_vec {
+            fadd(min_vec, max_vec, res_vec);
+        } else {
+            res_vec.copy_from_slice(max_vec);
+        }
+    }
+}
+
+#[inline(always)]
+pub fn fpadd_(left: &[Felt], right: &[Felt]) -> Vec<Felt> {
+    let len = max(left.len(), right.len());
+    let mut res = vec![Felt::zero(); len];
+    fpadd(left, right, res.as_mut_slice());
+    res
+}
+
+#[inline(always)]
+pub fn fpsub(a: &[Felt], b: &[Felt], res: &mut [Felt]) {
+    debug_assert!(a.len() >= b.len());
+    let min: &[Felt] = b;
+    let max: &[Felt] = a;
+
+    for ((res_vec, max_vec), min_vec) in res
+        .iter_mut()
+        .zip(max.iter())
+        .zip(min.iter().map(Some).chain(std::iter::repeat(None)))
+    {
+        if let Some(min_vec) = min_vec {
+            fsub(max_vec, min_vec, res_vec);
+        } else {
+            res_vec.copy_from_slice(max_vec);
+        }
+    }
+
+    //  TODO: hoon impl does not normalize here, but maybe it should?
+    //normalize_poly(res)
+}
+
+#[inline(always)]
+pub fn fpsub_in_place(a: &mut [Felt], b: &[Felt]) {
+    debug_assert!(a.len() >= b.len());
+    for (max_vec, min_vec) in a
+        .iter_mut()
+        .zip(b.iter().map(Some).chain(std::iter::repeat(None)))
+    {
+        if let Some(min_vec) = min_vec {
+            *max_vec = *max_vec - *min_vec;
+        } else {
+            break;
+        }
+    }
+    //  TODO: hoon impl does not normalize here, but maybe it should?
+    //normalize_poly(a)
+}
+
+#[inline(always)]
+pub fn fpsub_(left: &[Felt], right: &[Felt]) -> Vec<Felt> {
+    let len = max(left.len(), right.len());
+    let mut res = vec![Felt::zero(); len];
+    fpsub(left, right, res.as_mut_slice());
+
+    //  TODO: hoon impl does not normalize here, but maybe it should?
+    //normalize_poly(&mut res);
+    res
+}
+
+#[inline(always)]
+pub fn fpmul(a: &[Felt], b: &[Felt], res: &mut [Felt]) {
+    let a_len = a.len();
+    let b_len = b.len();
+    for i in 0..a_len {
+        if a[i].is_zero() {
+            continue;
+        }
+
+        for j in 0..b_len {
+            let mut result_felt: Felt = Felt::zero();
+            let mut fmul_result: Felt = Felt::zero();
+
+            fmul(&a[i], &b[j], &mut fmul_result);
+
+            fadd(&res[i + j], &fmul_result, &mut result_felt);
+
+            res[i + j] = result_felt;
+        }
+    }
+}
+
+#[allow(dead_code)]
+#[inline(always)]
+fn fpmul_(left: &[Felt], right: &[Felt]) -> Vec<Felt> {
+    let len = left.len() + right.len() - 1;
+    let mut res = vec![Felt::zero(); len];
+    fpmul(left, right, res.as_mut_slice());
+    res
+}
+
+pub fn fpdiv(a: &[Felt], b: &[Felt], res: &mut [Felt]) {
+    let a_head_felt: &Felt = a.leading_coeff();
+    let b_head_felt: &Felt = b.leading_coeff();
+
+    // Calculate factor to be used rescale quotient.
+    let lead = *a_head_felt / *b_head_felt;
+
+    let mut a_inv: Felt = Felt::zero();
+    let mut b_inv: Felt = Felt::zero();
+
+    // Calculate inverses
+    finv(a_head_felt, &mut a_inv);
+    finv(b_head_felt, &mut b_inv);
+
+    // Make poly monic
+    let mut a_monic = fpscal_(&a_inv, a);
+    let mut b_monic = fpscal_(&b_inv, b);
+
+    // Get leading coefficient of divisor and take its inverse
+    let mut divisor_leading_inv = Felt::zero();
+    finv(b_monic.leading_coeff(), &mut divisor_leading_inv);
+
+    // Obtain rev(a) and rev(b)
+    a_monic.reverse();
+    b_monic.reverse();
+
+    let mut remainder = a_monic.clone();
+
+    if a.degree() < b.degree() {
+        res.fill(Felt::zero());
+        return;
+    }
+
+    for i in 0..res.len() {
+        let x = remainder[i] * divisor_leading_inv;
+        res[i] = x;
+        let scal_res = fpscal_(&x, &b_monic);
+        fpsub_in_place(&mut remainder[i..], &scal_res);
+    }
+    res.reverse();
+
+    let res_cpy = res.to_vec();
+    fpscal(&lead, &res_cpy, res);
+}
+
+pub fn fpdiv_(left: &[Felt], right: &[Felt]) -> Vec<Felt> {
+    let len = if left.len() < right.len() {
+        1
+    } else {
+        left.len() - right.len() + 1
+    };
+
+    let mut res = vec![Felt::zero(); len];
+    fpdiv(left, right, res.as_mut_slice());
+    res
+}
+
+#[inline(always)]
+pub fn fpscal(c: &Felt, fp: &[Felt], res: &mut [Felt]) {
+    if fp.is_zero() {
+        res.fill(Felt::zero());
+        return;
+    }
+
+    for (res_vec, fp_vec) in res.iter_mut().zip(fp.iter()) {
+        fmul(c, fp_vec, res_vec);
+    }
+}
+
+#[allow(dead_code)]
+#[inline(always)]
+pub fn fpscal_(left: &Felt, right: &[Felt]) -> Vec<Felt> {
+    let len = right.len();
+    let mut res = vec![Felt::zero(); len];
+    fpscal(left, right, res.as_mut_slice());
+    res
+}
+
+#[inline(always)]
+pub fn bpoly_to_fpoly(bpoly: &[Belt], res: &mut [Felt]) {
+    for (i, b) in bpoly.iter().enumerate() {
+        res[i] = Felt::lift(*b);
+    }
+}

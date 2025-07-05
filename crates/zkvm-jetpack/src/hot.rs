@@ -11,6 +11,7 @@ use crate::jets::fpntt_jets::*;
 use crate::jets::mary_jets::*;
 use crate::jets::mega_jets::*;
 use crate::jets::memory_table_jets_v2::*;
+use crate::jets::proof_gen_jets::*;
 use crate::jets::shape_jets::*;
 use crate::jets::tip5_jets::*;
 use crate::jets::tip5_sponge::*;
@@ -328,6 +329,48 @@ pub const XTRA_JETS: &[HotEntry] = &[
         ],
         1,
         bp_build_merk_heap_jet,
+    ),
+    (
+        &[
+            K_138,
+            Left(b"one"),
+            Left(b"two"),
+            Left(b"tri"),
+            Left(b"qua"),
+            Left(b"pen"),
+            Left(b"zeke"),
+            Left(b"ext-field"),
+            Left(b"misc-lib"),
+            Left(b"proof-lib"),
+            Left(b"utils"),
+            Left(b"fri"),
+            Left(b"table-lib"),
+            Left(b"stark-core"),
+            Left(b"precompute-ntts"),
+        ],
+        1,
+        precompute_ntts_jet,
+    ),
+    (
+        &[
+            K_138,
+            Left(b"one"),
+            Left(b"two"),
+            Left(b"tri"),
+            Left(b"qua"),
+            Left(b"pen"),
+            Left(b"zeke"),
+            Left(b"ext-field"),
+            Left(b"misc-lib"),
+            Left(b"proof-lib"),
+            Left(b"utils"),
+            Left(b"fri"),
+            Left(b"table-lib"),
+            Left(b"stark-core"),
+            Left(b"compute-deep"),
+        ],
+        1,
+        compute_deep_jet,
     ),
     (
         &[
