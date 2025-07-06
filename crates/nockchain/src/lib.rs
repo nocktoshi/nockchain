@@ -529,5 +529,5 @@ fn welcome() {
         // ("Rustc LLVM version", env!("VERGEN_RUSTC_LLVM_VERSION")),
     ];
 
-    print_version_info(&mut stdout, &info);
+    //print_version_info(&mut stdout, &info);
 }
