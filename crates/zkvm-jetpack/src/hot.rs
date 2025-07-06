@@ -145,6 +145,7 @@ pub const XTRA_JETS: &[HotEntry] = &[
             Left(b"pow"),
             Left(b"stark-engine"),
             Left(b"stark-verifier"),
+            Left(b"verify-door"),
             Left(b"evaluate-deep"),
         ],
         1,
