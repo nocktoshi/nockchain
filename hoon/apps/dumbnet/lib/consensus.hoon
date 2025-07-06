@@ -664,7 +664,7 @@
   ?>  (~(has z-in excluded-txs.c) tx-id)
   =/  raw-tx  raw-tx:(~(got z-by raw-txs.c) tx-id)
   =.  raw-txs.c  (~(del z-by raw-txs.c) tx-id)
-  =.  excluded-txs.c  (~(del z-by excluded-txs.c) tx-id)
+  =.  excluded-txs.c  (~(del z-in excluded-txs.c) tx-id)
   =.  spent-by.c
     %-  ~(rep z-in (inputs-names:raw-tx:t raw-tx))
     |=  [=nname:t sb=_spent-by.c]
@@ -678,7 +678,7 @@
   ?~  heaviest-block.c  ~
   =/  height  height:(~(got z-by blocks.c) u.heaviest-block.c)
   =/  spent=(z-set tx-id:t)
-    %-  ~(rep z-by excluded-txs.c)
+    %-  ~(rep z-in excluded-txs.c)
     |=  [=tx-id:t spent=(z-set tx-id:t)]
     ^-  (z-set tx-id:t)
     =/  raw-tx  raw-tx:(~(got z-by raw-txs.c) tx-id)
@@ -688,7 +688,7 @@
   ?~  retain  spent
   ?:  (lth height u.retain)  spent
   =/  min-height  (sub height u.retain)
-  %-  ~(rep z-by excluded-txs.c)
+  %-  ~(rep z-in excluded-txs.c)
   |=  [=tx-id:t dropable=_spent]
   =/  [=raw-tx:t heard-at=@]  (~(got z-by raw-txs.c) tx-id)
   ?:  (lth heard-at min-height)

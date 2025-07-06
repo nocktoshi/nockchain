@@ -154,7 +154,7 @@
     (new:tx-acc:t (~(get z-by balance.c) u.heaviest-block.c))
   ::
   ::  roll over the pending txs and try to include them in the new candidate block
-  %-  ~(rep z-by excluded-txs.c)
+  %-  ~(rep z-in excluded-txs.c)
   |=  [=tx-id:t min=_m]
   =.  m  min
   =/  raw  raw-tx:(~(got z-by raw-txs.c) tx-id)
