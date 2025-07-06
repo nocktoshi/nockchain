@@ -15,6 +15,7 @@ use crate::jets::proof_gen_jets::*;
 use crate::jets::shape_jets::*;
 use crate::jets::tip5_jets::*;
 use crate::jets::tip5_sponge::*;
+use crate::jets::trace_gen_jets::*;
 use crate::jets::verifier_jets::*;
 
 pub fn produce_prover_hot_state() -> Vec<HotEntry> {
@@ -330,6 +331,25 @@ pub const XTRA_JETS: &[HotEntry] = &[
         ],
         1,
         bp_build_merk_heap_jet,
+    ),
+    (
+        &[
+            K_138,
+            Left(b"one"),
+            Left(b"two"),
+            Left(b"tri"),
+            Left(b"qua"),
+            Left(b"pen"),
+            Left(b"zeke"),
+            Left(b"ext-field"),
+            Left(b"misc-lib"),
+            Left(b"proof-lib"),
+            Left(b"utils"),
+            Left(b"constraint-util"),
+            Left(b"build-tree-data"),
+        ],
+        1,
+        build_tree_data_jet,
     ),
     (
         &[
