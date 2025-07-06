@@ -282,7 +282,7 @@ pub fn make_libp2p_driver(
                             },
                             SwarmEvent::ConnectionClosed { connection_id, peer_id, endpoint, cause, .. } => {
                                 message_tracker.lock().await.lost_connection(connection_id);
-                                info!("SEvent: friendship ended with {peer_id} via: {endpoint:?}. cause: {cause:?}");
+                                debug!("SEvent: friendship ended with {peer_id} via: {endpoint:?}. cause: {cause:?}");
                                 // Clean up the message tracker when a peer disconnects
                                 let mut tracker = message_tracker.lock().await;
                                 tracker.remove_peer(&peer_id);
