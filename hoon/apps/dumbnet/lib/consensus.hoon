@@ -358,7 +358,7 @@
   ?.  (check-size pag)
     ::~&  >>>  "block {digest-b58} is too large"
     [%.n %block-too-large]
-  =/  raw-tx-set=(set (unit raw-tx:t))
+  =/  raw-tx-set=(z-set (unit raw-tx:t))
     (~(run z-in tx-ids.pag) |=(=tx-id:t (get-raw-tx tx-id)))
   =/  raw-tx-list=(list (unit raw-tx:t))  ~(tap z-in raw-tx-set)
   =|  tx-list=(list tx:t)

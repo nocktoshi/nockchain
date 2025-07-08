@@ -298,6 +298,17 @@
       ?~  heaviest-block
         ~
       `(to-page-summary:page:t (to-page:local-page:t u.heaviest-block))
+    ::
+         [%blocks-summary ~]
+      ^-  (unit (unit (list [block-id:t page:t])))
+      :-  ~
+      :-  ~
+      %~  tap  z-by
+      ^-  (z-map block-id:t page:t)
+      %-  ~(run z-by blocks.c.k)
+      |=  lp=local-page:t
+      ^-  page:t
+      lp(pow ~)
     ==
   ::
   ++  poke
@@ -834,7 +845,7 @@
       ::
       =/  is-reorg=?
         ?~  old-heavy  %.n  ::  first block after genesis, not a reorg
-        !=(parent.pag u.old-heavy)
+        &(is-new-heaviest !=(parent.pag u.old-heavy))
       ::  case (b): new heaviest block - check if it's a reorganization
       =?  effs  is-reorg
         ?~  old-heavy  effs

@@ -927,6 +927,8 @@
       :((cury cat 3) '[' first ' ' last ']')
       '\0a- assets: '
       (scot %ud assets.note)
+      '\0a- block height: '
+      (scot %ud origin-page.note)
       '\0a- source: '
       (to-b58:hash:transact p.source.note)
       '\0a## lock'
