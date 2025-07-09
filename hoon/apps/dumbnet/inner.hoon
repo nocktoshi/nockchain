@@ -36,7 +36,7 @@
     ~&  [%nockchain-state-version -.arg]
     ::  cut
     |^
-    ~>  %bout  (check-checkpoints (state-n-to-5 arg))
+    ~>  %bout  (update-constants (check-checkpoints (state-n-to-5 arg)))
     ::  this arm should be renamed each state upgrade to state-n-to-[latest] and extended to loop through all upgrades
     ++  state-n-to-5
       |=  arg=load-kernel-state:dk
@@ -165,6 +165,12 @@
         derived-state  (~(update-highest dumb-derived derived-state constants) height.q.i.list)
         list  t.list
       ==
+    ::
+    ::  ensure constants get updated to defaults set tx-engine core
+    ++  update-constants
+      |=  arg=kernel-state:dk
+      arg(constants *blockchain-constants:t)
+    ::
     ++  check-checkpoints
       |=  arg=kernel-state:dk
       =/  mainnet=(unit ?)  (~(is-mainnet dumb-derived d.arg constants.arg) c.arg)
@@ -947,6 +953,8 @@
       |^
       ?-  -.command
           %born
+        ::  We leave this string interpolation in because %born only happens once on boot
+        ~&  constants+constants.k
         (do-born eny)
       ::
           %pow
