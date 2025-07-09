@@ -6,9 +6,21 @@
 =<  ((moat |) inner)  :: wrapped kernel
 =>
   |%
-  +$  effect  [%command %pow prf=proof:sp dig=tip5-hash-atom block-commitment=noun-digest:tip5 nonce=noun-digest:tip5]
+  +$  mine-success
+    $:  %command
+        %pow
+        =proof
+        dig=tip5-hash-atom
+        header=noun-digest:tip5
+        nonce=noun-digest:tip5
+    ==
+  +$  effect  [%mine-result (each [hash=noun-digest:tip5 mine-success] dig=noun-digest:tip5)]
   +$  kernel-state  [%state version=%1]
-  +$  cause  prover-input:sp
+  +$  cause  
+    $%  [%0 header=noun-digest:tip5 nonce=noun-digest:tip5 target=bignum:bignum pow-len=@]
+        [%1 header=noun-digest:tip5 nonce=noun-digest:tip5 target=bignum:bignum pow-len=@]
+        [%2 header=noun-digest:tip5 nonce=noun-digest:tip5 target=bignum:bignum pow-len=@]
+    ==
   --
 |%
 ++  moat  (keep kernel-state) :: no state
@@ -32,10 +44,18 @@
       ~>  %slog.[0 [%leaf "error: bad cause"]]
       `k
     =/  cause  u.cause
+    =/  input=prover-input:sp
+      ?-  -.cause
+        %0  [%0 header.cause nonce.cause pow-len.cause]
+        %1  [%1 header.cause nonce.cause pow-len.cause]
+        %2  [%2 header.cause nonce.cause pow-len.cause]
+      ==
     :: XX TODO set up stark config, construct effect
     =/  [prf=proof:sp dig=tip5-hash-atom] 
-      (prove-block-inner:mine cause)
+      (prove-block-inner:mine input)
     :_  k
-    [%command %pow prf dig header.cause nonce.cause]~
+    ?:  (check-target:mine dig target.cause)
+      [%mine-result %& (atom-to-digest:tip5 dig) %command %pow prf dig header.cause nonce.cause]~
+    [%mine-result %| (atom-to-digest:tip5 dig)]~
   --
 --

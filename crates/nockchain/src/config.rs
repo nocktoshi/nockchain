@@ -90,10 +90,17 @@ pub struct NockchainCli {
     pub max_established: Option<u32>,
     #[arg(long, help = "Maximum established connections per peer")]
     pub max_established_per_peer: Option<u32>,
+    #[arg(
+        long,
+        help = "Prune <N> inbound connections when a peer is denied due to connection limits. (Use on boot nodes only.)"
+    )]
+    pub prune_inbound: Option<usize>,
     #[arg(long, help = "Maximum system memory percentage for connection limits")]
     pub max_system_memory_fraction: Option<f64>,
     #[arg(long, help = "Maximum process memory for connection limits (bytes)")]
     pub max_system_memory_bytes: Option<usize>,
+    #[arg(long, help = "Number of threads to mine with defaults to one less than the number of cpus available.", default_value = None)]
+    pub num_threads: Option<u64>,
 }
 
 impl NockchainCli {

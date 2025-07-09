@@ -431,10 +431,23 @@ pub async fn init_with_kernel<J: Jammer + Send + 'static>(
         }
     });
 
+    let prune_inbound = cli.as_ref().and_then(|c| c.prune_inbound);
+
     let mine = cli.as_ref().map_or(false, |c| c.mine);
 
+    let threads = cli
+        .as_ref()
+        .and_then(|c| {
+            if let Some(num_threads) = &c.num_threads {
+                Some(*num_threads)
+            } else {
+                Some(1)
+            }
+        })
+        .expect("Failed to get number of threads for mining");
+
     let mining_driver =
-        crate::mining::create_mining_driver(mining_config, mine, Some(mining_init_tx));
+        crate::mining::create_mining_driver(mining_config, mine, threads, Some(mining_init_tx));
     nockapp.add_io_driver(mining_driver).await;
 
     let libp2p_driver = nockchain_libp2p_io::nc::make_libp2p_driver(
@@ -445,6 +458,7 @@ pub async fn init_with_kernel<J: Jammer + Send + 'static>(
         memory_limits,
         &initial_peer_multiaddrs,
         &force_peers,
+        prune_inbound,
         equix_builder,
         config::CHAIN_INTERVAL,
         Some(libp2p_init_tx),

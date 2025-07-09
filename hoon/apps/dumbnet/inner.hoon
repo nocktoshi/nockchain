@@ -315,6 +315,7 @@
     |=  [wir=wire eny=@ our=@ux now=@da dat=*]
     ^-  [(list effect:dk) kernel-state:dk]
     |^
+    =/  old-state  m.k
     =/  cause  ((soft cause:dk) dat)
     ?~  cause
       ~>  %slog.[0 [%leaf "error: badly formatted cause, should never occur."]]
@@ -340,7 +341,22 @@
       ==
     ::  possibly update timestamp on candidate block for mining
     =.  m.k  (update-timestamp:min now)
-    effs^k
+    :_  k
+    ?.  mining.m.k
+      effs
+    ?:  =(candidate-block.m.k candidate-block.old-state)
+      effs
+    ::  emit effect if candidate block changed
+    =/  target  (~(got z-by targets.c.k) parent.candidate-block.m.k)
+    =/  version=proof-version:sp
+      (height-to-proof-version:con height.candidate-block.m.k)
+    =/  commit  (block-commitment:page:t candidate-block.m.k)
+    :_  effs
+    ?-  version
+      %0  [%mine %0 commit target pow-len:t]
+      %1  [%mine %1 commit target pow-len:t]
+      %2  [%mine %2 commit target pow-len:t]
+    ==
     ::
     ::  +heard-genesis-block: check if block is a genesis block and decide whether to keep it
     ++  heard-genesis-block
@@ -1008,16 +1024,6 @@
         ?.  =(bc.command commit)
           ~&  "mined for wrong (old) block commitment"
           (do-mine nonce.command)
-        ?.  =(nonce.command next-nonce.m.k)
-          ~&  "mined wrong (old) nonce"
-          =/  version=proof-version:sp
-            (height-to-proof-version:con height.candidate-block.m.k)
-          :_  k
-          ?-  version
-            %0  [%mine %0 commit next-nonce.m.k pow-len:t]~
-            %1  [%mine %1 commit next-nonce.m.k pow-len:t]~
-            %2  [%mine %2 commit next-nonce.m.k pow-len:t]~
-          ==
         ?:  %+  check-target:mine  dig.command
             (~(got z-by targets.c.k) parent.candidate-block.m.k)
           =.  m.k  (set-pow:min prf.command)
@@ -1173,17 +1179,18 @@
           `k
         =/  commit=block-commitment:t
           (block-commitment:page:t candidate-block.m.k)
+        =/  target  target.candidate-block.m.k
         =/  proof-version  (height-to-proof-version:con height.candidate-block.m.k)
-        =/  proof-input=prover-input:sp
+        =/  mine-start
           ?-  proof-version
-            %0  [%0 commit nonce pow-len:t]
-            %1  [%1 commit nonce pow-len:t]
-            %2  [%2 commit nonce pow-len:t]
+            %0  [%0 commit target pow-len:t]
+            %1  [%1 commit target pow-len:t]
+            %2  [%2 commit target pow-len:t]
           ==
         =.  next-nonce.m.k  nonce
         ~&  mining-on+nonce
         :_  k
-        [%mine proof-input]~
+        [%mine mine-start]~
       ::
       ::  only send a %elders request for reasonable heights
       ++  missing-parent-effects

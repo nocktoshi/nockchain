@@ -89,7 +89,7 @@ pub enum SerfAction<C> {
     Stop,
 }
 
-pub(crate) struct SerfThread<C> {
+pub struct SerfThread<C> {
     handle: Option<std::thread::JoinHandle<()>>,
     action_sender: mpsc::Sender<SerfAction<C>>,
     pub cancel_token: NockCancelToken,
@@ -98,7 +98,7 @@ pub(crate) struct SerfThread<C> {
 }
 
 impl<C: SerfCheckpoint + Send + 'static> SerfThread<C> {
-    async fn new(
+    pub async fn new(
         kernel_bytes: Vec<u8>,
         checkpoint: Option<C>,
         constant_hot_state: Vec<HotEntry>,
@@ -211,11 +211,7 @@ impl<C> SerfThread<C> {
     }
 
     // We are very carefully ensuring that the future does not contain the &self reference, to allow spawning a task without lifetime issues
-    pub(crate) fn poke(
-        &self,
-        wire: WireRepr,
-        cause: NounSlab,
-    ) -> impl Future<Output = Result<NounSlab>> {
+    pub fn poke(&self, wire: WireRepr, cause: NounSlab) -> impl Future<Output = Result<NounSlab>> {
         let (result, result_fut) = oneshot::channel();
         let action_sender = self.action_sender.clone();
         async move {
