@@ -68,13 +68,6 @@
   ~>  %slog.[0 leaf+"received btc block hash, waiting to hear nockchain genesis block!"]
   c(btc-data `btc-hash)
 ::
-++  inputs-in-spent-by
-  |=  raw=raw-tx:t
-  ^-  ?
-  %-  ~(any z-in (inputs-names:raw-tx:t raw))
-  |=  =nname:t
-  (~(has z-by spent-by.c) nname)
-::
 ++  inputs-in-heaviest-balance
   |=  raw=raw-tx:t
   ^-  ?
@@ -598,7 +591,7 @@
   =/  min-height  (sub height u.retain)
   %-  ~(rep z-by pending-blocks.c)
   |=  [[=block-id:t =page:t heard-at=@] dropable=(list block-id:t)]
-  ?:  (lth heard-at min-height)
+  ?:  (lte heard-at min-height)
     [block-id dropable]
   dropable
 ::
@@ -691,7 +684,7 @@
   %-  ~(rep z-in excluded-txs.c)
   |=  [=tx-id:t dropable=_spent]
   =/  [=raw-tx:t heard-at=@]  (~(got z-by raw-txs.c) tx-id)
-  ?:  (lth heard-at min-height)
+  ?:  (lte heard-at min-height)
     (~(put z-in dropable) tx-id)
   dropable
 ::

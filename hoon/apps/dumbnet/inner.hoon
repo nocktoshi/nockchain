@@ -826,7 +826,7 @@
             %+  rap  3
             :~  ' with proof version '  (scot %u version.u.pow.pag)
             ==
-          ' .Skipping pow check because check-pow-flag was disabled'
+          '. Skipping pow check because check-pow-flag was disabled'
         %-  trip
         ^-  @t
         %+  rap  3
@@ -887,9 +887,21 @@
           ==
         [orphaned-block-span reorg-span effs]
       ::
-      ::  Drop pending blocks and transactions which haven't
-      ::  been included in testing and are too old.
-      =.  c.k  (garbage-collect:con retain.a.k)
+      ::  Garbage collect pending blocks and excluded transactions.
+      ::  Garbage collection only runs when we receive a new heaviest
+      ::  block, since that's when the block height advances and we can
+      ::  determine what's expired. Pending blocks are removed based on
+      ::  elapsed heaviest blocks since they were heard. Excluded txs are
+      ::  removed based on the same criteria with the added check that they
+      ::  they aren't spent in the current heaviest chain.
+      =?  c.k  is-new-heaviest
+        (garbage-collect:con retain.a.k)
+      ::
+      ::  if new block is heaviest, regossip txs that haven't been garbage collected
+      =?  effs  is-new-heaviest
+        %-  ~(rep z-in excluded-txs.c.k)
+        |=  [=tx-id:t effs=_effs]
+        [[%gossip %0 %heard-tx (got-raw-tx:con tx-id)] effs]
       ::
       ::  tell the miner about the new block
       =.  m.k  (heard-new-block:min c.k now)
