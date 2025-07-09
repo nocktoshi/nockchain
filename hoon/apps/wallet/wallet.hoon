@@ -164,11 +164,13 @@
       [%import-master-pubkey =coil]                    ::  base58-encoded pubkey + chain code
       [%send-tx dat=draft]
       [%list-notes-by-pubkey pubkey=@t]                ::  base58-encoded pubkey
+      [%list-notes-by-pubkey-csv pubkey=@t]            ::  base58-encoded pubkey, CSV format
       $:  %simple-spend
           names=(list [first=@t last=@t])              ::  base58-encoded name hashes
           recipients=(list [m=@ pks=(list @t)])        ::  base58-encoded locks
           gifts=(list coins:transact)                  ::  number of coins to spend
           fee=coins:transact                           ::  fee
+          index=(unit @ud)                             ::  index of child key to spend from
       ==
       [%sign-tx dat=draft index=(unit @ud) entropy=@]
       [%list-pubkeys ~]
@@ -1008,6 +1010,12 @@
     """
     ~[(make-markdown-effect nodes)]
   --
+  ::
+  ++  ui-to-tape
+    |=  @
+    ^-  tape
+    %-  trip
+    (rsh [3 2] (scot %ui +<))
 --
 ::
 %-  (moat &)
@@ -1072,6 +1080,7 @@
       %scan                  (do-scan cause)
       %list-notes            (do-list-notes cause)
       %list-notes-by-pubkey  (do-list-notes-by-pubkey cause)
+      %list-notes-by-pubkey-csv  (do-list-notes-by-pubkey-csv cause)
       %simple-spend          (do-simple-spend cause)
       %update-balance        (do-update-balance cause)
       %update-block          (do-update-block cause)
@@ -1671,6 +1680,44 @@
         [%exit 0]
     ==
   ::
+  ++  do-list-notes-by-pubkey-csv
+    |=  =cause
+    ?>  ?=(%list-notes-by-pubkey-csv -.cause)
+    =/  target-pubkey=schnorr-pubkey:transact
+      (from-b58:schnorr-pubkey:transact pubkey.cause)
+    =/  matching-notes=(list [name=nname:transact note=nnote:transact])
+      %+  skim  ~(tap z-by:zo balance.state)
+      |=  [name=nname:transact note=nnote:transact]
+      (~(has z-in:zo pubkeys.lock.note) target-pubkey)
+    =/  csv-header=tape
+      "name_first,name_last,assets,block_height,source_hash"
+    =/  csv-rows=(list tape)
+      %+  turn  matching-notes
+      |=  [name=nname:transact note=nnote:transact]
+      =/  name-b58=[first=@t last=@t]  (to-b58:nname:transact name)
+      =/  source-hash-b58=@t  (to-b58:hash:transact p.source.note)
+      """
+      {(trip first.name-b58)},{(trip last.name-b58)},{(ui-to-tape assets.note)},{(ui-to-tape origin-page.note)},{(trip source-hash-b58)}
+      """
+    =/  csv-content=tape
+      %+  welp  csv-header
+      %+  welp  "\0a"
+      %-  zing
+      %+  turn  csv-rows
+      |=  row=tape
+      "{row}\0a"
+    =/  filename=@t
+      %-  crip
+      "notes-{(trip (to-b58:schnorr-pubkey:transact target-pubkey))}.csv"
+    :_  state
+    :~  :-  %file
+        :-  %write
+        :-  filename
+        %-  crip
+        csv-content
+        [%exit 0]
+    ==
+  ::
   ++  do-simple-spend
     |=  =cause
     ?>  ?=(%simple-spend -.cause)
@@ -1716,12 +1763,15 @@
     ::
     ::  the fee is subtracted from the first note that permits doing so without overspending
     =/  fee=coins:transact  fee.cause
-    ::  use the first private key to construct the subsequent inputs
+    ::  get private key at specified index, or first derived key if no index
+    =/  private-keys=(list coil)  ~(coils get:v %prv)
+    ?~  private-keys
+      ~|("No private keys available for signing" !!)
     =/  sender=coil
-      =/  private-keys=(list coil)  ~(coils get:v %prv)
-      ?~  private-keys
-        ~|("No private keys available for signing" !!)
-      (head private-keys)
+      ?~  index.cause  i.private-keys
+      =/  key-at-index=meta  (~(by-index get:v %prv) u.index.cause)
+      ?>  ?=(%coil -.key-at-index)
+      key-at-index
     =/  sender-key=schnorr-seckey:transact
       (from-atom:schnorr-seckey:transact p.key.sender)
     ::  for each name, create an input from the corresponding note in sender's
@@ -1771,12 +1821,21 @@
         name  draft-name
       ==
     =/  draft-jam  (jam draft)
+    =/  markdown-text=@t
+      %-  crip
+      """
+      ## draft
+
+      - {<draft-name>}
+
+      {<draft>}
+      """
     =/  path=@t
       %-  crip
       "./drafts/{(trip name.draft)}.draft"
     %-  (debug "saving draft to {<path>}")
     =/  =effect  [%file %write path draft-jam]
-    :-  ~[effect [%exit 0]]
+    :-  ~[effect [%markdown markdown-text] [%exit 0]]
     state
   ::
   ++  do-keygen

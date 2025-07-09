@@ -147,6 +147,13 @@ pub enum Commands {
         pubkey: Option<String>,
     },
 
+    /// List notes by public key in CSV format
+    ListNotesByPubkeyCsv {
+        /// Public key to filter notes
+        #[arg(short, long)]
+        pubkey: String,
+    },
+
     /// Perform a simple spend operation
     SimpleSpend {
         /// Names of notes to spend (comma-separated)
@@ -161,6 +168,9 @@ pub enum Commands {
         /// Transaction fee
         #[arg(long)]
         fee: u64,
+        /// Optional key index to use for signing (0-255)
+        #[arg(short, long, value_parser = clap::value_parser!(u64).range(0..=255))]
+        index: Option<u64>,
     },
 
     /// Create a transaction from a draft file
@@ -209,6 +219,7 @@ impl Commands {
             Commands::Scan { .. } => "scan",
             Commands::ListNotes => "list-notes",
             Commands::ListNotesByPubkey { .. } => "list-notes-by-pubkey",
+            Commands::ListNotesByPubkeyCsv { .. } => "list-notes-by-pubkey-csv",
             Commands::SimpleSpend { .. } => "simple-spend",
             Commands::SendTx { .. } => "send-tx",
             Commands::UpdateBalance => "update-balance",
@@ -374,7 +385,7 @@ impl Wallet {
             .map_err(|e| CrownError::Unknown(format!("Failed to decode draft: {}", e)))?;
 
         let index_noun = match index {
-            Some(i) => D(i),
+            Some(i) => T(&mut slab, &[D(0), D(i)]),
             None => D(0),
         };
 
@@ -527,6 +538,7 @@ impl Wallet {
         recipients: String,
         gifts: String,
         fee: u64,
+        index: Option<u64>,
     ) -> CommandNoun<NounSlab> {
         let mut slab = NounSlab::new();
 
@@ -630,10 +642,17 @@ impl Wallet {
         });
 
         let fee_noun = D(fee);
+        let index_noun = match index {
+            Some(i) => {
+                let inner = D(i);
+                T(&mut slab, &[D(0), inner])
+            }
+            None => D(0),
+        };
 
         Self::wallet(
             "simple-spend",
-            &[names_noun, recipients_noun, gifts_noun, fee_noun],
+            &[names_noun, recipients_noun, gifts_noun, fee_noun, index_noun],
             Operation::Poke,
             &mut slab,
         )
@@ -716,6 +735,18 @@ impl Wallet {
         let pubkey_noun = make_tas(&mut slab, pubkey).as_noun();
         Self::wallet(
             "list-notes-by-pubkey",
+            &[pubkey_noun],
+            Operation::Poke,
+            &mut slab,
+        )
+    }
+
+    /// Lists notes by public key in CSV format
+    fn list_notes_by_pubkey_csv(pubkey: &str) -> CommandNoun<NounSlab> {
+        let mut slab = NounSlab::new();
+        let pubkey_noun = make_tas(&mut slab, pubkey).as_noun();
+        Self::wallet(
+            "list-notes-by-pubkey-csv",
             &[pubkey_noun],
             Operation::Poke,
             &mut slab,
@@ -851,12 +882,20 @@ async fn main() -> Result<(), NockAppError> {
                 return Err(CrownError::Unknown("Public key is required".into()).into());
             }
         }
+        Commands::ListNotesByPubkeyCsv { pubkey } => Wallet::list_notes_by_pubkey_csv(pubkey),
         Commands::SimpleSpend {
             names,
             recipients,
             gifts,
             fee,
-        } => Wallet::simple_spend(names.clone(), recipients.clone(), gifts.clone(), *fee),
+            index,
+        } => Wallet::simple_spend(
+            names.clone(),
+            recipients.clone(),
+            gifts.clone(),
+            *fee,
+            *index,
+        ),
         Commands::SendTx { draft } => Wallet::send_tx(draft),
         Commands::UpdateBalance => Wallet::update_balance(),
         Commands::ExportMasterPubkey => Wallet::export_master_pubkey(),
@@ -1281,12 +1320,13 @@ mod tests {
         let fee = 1;
 
         let (noun, op) =
-            Wallet::simple_spend(names.clone(), recipients.clone(), gifts.clone(), fee)?;
+            Wallet::simple_spend(names.clone(), recipients.clone(), gifts.clone(), fee, None)?;
         let wire = WalletWire::Command(Commands::SimpleSpend {
             names: names.clone(),
             recipients: recipients.clone(),
             gifts: gifts.clone(),
             fee: fee.clone(),
+            index: None,
         })
         .to_wire();
         let spend_result = wallet.app.poke(wire, noun.clone()).await?;
@@ -1314,7 +1354,7 @@ mod tests {
         // generate keys
         let (genkey_noun, genkey_op) = Wallet::gen_master_privkey("correct horse battery staple")?;
         let (spend_noun, spend_op) =
-            Wallet::simple_spend(names.clone(), recipients.clone(), gifts.clone(), fee)?;
+            Wallet::simple_spend(names.clone(), recipients.clone(), gifts.clone(), fee, None)?;
 
         let wire1 = WalletWire::Command(Commands::GenMasterPrivkey {
             seedphrase: "correct horse battery staple".to_string(),
@@ -1328,6 +1368,7 @@ mod tests {
             recipients: recipients.clone(),
             gifts: gifts.clone(),
             fee: fee.clone(),
+            index: None,
         })
         .to_wire();
         let spend_result = wallet.app.poke(wire2, spend_noun.clone()).await?;
