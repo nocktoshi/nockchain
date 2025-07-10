@@ -157,7 +157,7 @@
 ::
 +$  cause
   $%  [%keygen entropy=byts salt=byts]
-      [%derive-child i=@ hardened=? label=(unit @t)]
+      [%derive-child i=@ hardened=? label=(unit @tas)]
       [%import-keys keys=(list (pair trek meta))]
       [%export-keys ~]
       [%export-master-pubkey ~]

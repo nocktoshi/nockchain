@@ -67,6 +67,16 @@ impl Wire for WalletWire {
 /// Represents a Noun that the wallet kernel can handle
 type CommandNoun<T> = Result<(T, Operation), NockAppError>;
 
+fn validate_label(s: &str) -> Result<String, String> {
+    if s.chars()
+        .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-')
+    {
+        Ok(s.to_string())
+    } else {
+        Err("Label must contain only lowercase letters, numbers, and hyphens".to_string())
+    }
+}
+
 #[derive(Subcommand, Debug, Clone)]
 pub enum Commands {
     /// Generate a new key pair
@@ -83,7 +93,7 @@ pub enum Commands {
         hardened: bool,
 
         /// Label for the child key
-        #[arg(short, long, default_value = None)]
+        #[arg(short, long, value_parser = validate_label, default_value = None)]
         label: Option<String>,
     },
 
@@ -354,10 +364,10 @@ impl Wallet {
         let mut slab = NounSlab::new();
         let index_noun = D(index);
         let hardened_noun = if hardened { YES } else { NO };
-        let label_noun = label
-            .as_ref()
-            .map(|l| l.into_noun(&mut slab))
-            .unwrap_or(SIG);
+        let label_noun = label.as_ref().map_or(SIG, |l| {
+            let label_noun = l.into_noun(&mut slab);
+            T(&mut slab, &[SIG, label_noun])
+        });
 
         Self::wallet(
             "derive-child",
