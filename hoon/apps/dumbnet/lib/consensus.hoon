@@ -220,7 +220,11 @@
 ++  check-size
   |=  pag=page:t
   ^-  ?
-  (lte (compute-size:page:t pag got-raw-tx) max-block-size:t)
+  %+  lte
+    %+  add
+      (compute-size-without-txs:page:t pag)
+    (txs-size-by-id:page:t pag got-raw-tx)
+  max-block-size:t
 ::
 ++  accept-page
   |=  [pag=page:t acc=tx-acc:t now=@da]
