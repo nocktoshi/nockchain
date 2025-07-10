@@ -383,7 +383,21 @@ pub async fn init_with_kernel<J: Jammer + Send + 'static>(
     };
 
     let born_init_tx = if cli.as_ref().map(|c| c.fakenet).unwrap_or(false) {
-        setup::poke(&mut nockapp, setup::SetupCommand::PokeFakenetConstants).await?;
+        let pow_len = cli
+            .as_ref()
+            .map(|c| c.fakenet_pow_len.unwrap_or(2))
+            .unwrap_or(2);
+        let target = cli
+            .as_ref()
+            .map(|c| c.fakenet_log_difficulty.unwrap_or(1))
+            .unwrap_or(1);
+        setup::poke(
+            &mut nockapp,
+            setup::SetupCommand::PokeFakenetConstants(setup::fakenet_blockchain_constaints(
+                pow_len, target,
+            )),
+        )
+        .await?;
         if let Some(true) = is_kernel_mainnet {
             panic!("Fatal: attemped to boot mainnet node with fakenet flag")
         } else if !genesis_seal_set {
@@ -399,7 +413,17 @@ pub async fn init_with_kernel<J: Jammer + Send + 'static>(
         let born_init_tx = fake_genesis_signals.register_driver("born");
         let _ = fake_genesis_signals.create_task();
 
-        let poke = setup::heard_fake_genesis_block()?;
+        // Check if custom genesis path is provided, read file if so
+        let genesis_data = if let Some(genesis_path) = cli
+            .as_ref()
+            .and_then(|c| c.fakenet_genesis_jam_path.as_ref())
+        {
+            Some(fs::read(genesis_path)?)
+        } else {
+            None
+        };
+
+        let poke = setup::heard_fake_genesis_block(genesis_data)?;
         let fakenet_driver = fake_genesis_signals.create_driver(poke, None);
         nockapp.add_io_driver(fakenet_driver).await;
         Some(born_init_tx)

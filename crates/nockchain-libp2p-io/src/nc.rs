@@ -631,6 +631,17 @@ async fn handle_effect(
                 connected_peers.clone()
             };
 
+            if request_type.data() == tas!(b"raw-tx") {
+                if let Ok(raw_tx_cell) = request_body.tail().as_cell() {
+                    if raw_tx_cell.head().eq_bytes(b"by-id") {
+                        trace!("Requesting raw transaction by ID, removing ID from seen set");
+                        let tx_id = tip5_hash_to_base58(raw_tx_cell.tail())?;
+                        let mut tracker_guard = message_tracker.clone().lock_owned().await;
+                        tracker_guard.seen_txs.remove(&tx_id);
+                    }
+                }
+            }
+
             debug!("Sending request to {} peers", target_peers.len());
 
             for peer_id in target_peers {

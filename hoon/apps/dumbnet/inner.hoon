@@ -36,7 +36,9 @@
     ~&  [%nockchain-state-version -.arg]
     ::  cut
     |^
-    ~>  %bout  (update-constants (check-checkpoints (state-n-to-5 arg)))
+    =.  k  ~>  %bout  (update-constants (check-checkpoints (state-n-to-5 arg)))
+    =.  c.k  ~>  %bout  check-and-repair:con
+    k
     ::  this arm should be renamed each state upgrade to state-n-to-[latest] and extended to loop through all upgrades
     ++  state-n-to-5
       |=  arg=load-kernel-state:dk
