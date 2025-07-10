@@ -8,7 +8,7 @@ use getrandom::getrandom;
 use nockapp::utils::bytes::Byts;
 use nockapp::{system_data_dir, CrownError, NockApp, NockAppError, ToBytesExt};
 use nockvm::jets::cold::Nounable;
-use nockvm::noun::{Atom, Cell, IndirectAtom, Noun, D, SIG, T};
+use nockvm::noun::{Atom, Cell, IndirectAtom, Noun, D, NO, SIG, T, YES};
 use tokio::fs as tokio_fs;
 use tokio::net::UnixStream;
 use tracing::{error, info};
@@ -72,15 +72,19 @@ pub enum Commands {
     /// Generate a new key pair
     Keygen,
 
-    /// Derive a child key from the current master key
+    /// Derive child key (pub, private or both) from the current master key
     DeriveChild {
-        /// Type of key to derive (e.g., "pub", "priv")
-        #[arg(short, long)]
-        key_type: String,
-
         /// Index of the child key to derive
         #[arg(short, long, value_parser = clap::value_parser!(u64).range(0..=255))]
         index: u64,
+
+        /// Hardened or unhardened child key
+        #[arg(short, long)]
+        hardened: bool,
+
+        /// Label for the child key
+        #[arg(short, long, default_value = None)]
+        label: Option<String>,
     },
 
     /// Import keys from a file
@@ -343,17 +347,21 @@ impl Wallet {
     //
     // # Arguments
     //
-    // * `key_type` - The type of key to derive (e.g., "pub", "priv")
     // * `index` - The index of the child key to derive
-    // TODO: add label if necessary
-    fn derive_child(key_type: KeyType, index: u64) -> CommandNoun<NounSlab> {
+    // * `hardened` - Whether the child key should be hardened
+    // * `label` - Optional label for the child key
+    fn derive_child(index: u64, hardened: bool, label: &Option<String>) -> CommandNoun<NounSlab> {
         let mut slab = NounSlab::new();
-        let key_type_noun = make_tas(&mut slab, key_type.to_string()).as_noun();
         let index_noun = D(index);
+        let hardened_noun = if hardened { YES } else { NO };
+        let label_noun = label
+            .as_ref()
+            .map(|l| l.into_noun(&mut slab))
+            .unwrap_or(SIG);
 
         Self::wallet(
             "derive-child",
-            &[key_type_noun, index_noun, SIG],
+            &[index_noun, hardened_noun, label_noun],
             Operation::Poke,
             &mut slab,
         )
@@ -844,20 +852,11 @@ async fn main() -> Result<(), NockAppError> {
             getrandom(&mut salt).map_err(|e| CrownError::Unknown(e.to_string()))?;
             Wallet::keygen(&entropy, &salt)
         }
-        Commands::DeriveChild { key_type, index } => {
-            // Validate key_type is either "pub" or "priv"
-            let key_type = match key_type.as_str() {
-                "pub" => KeyType::Pub,
-                "priv" => KeyType::Prv,
-                _ => {
-                    return Err(CrownError::Unknown(
-                        "Key type must be either 'pub' or 'priv'".into(),
-                    )
-                    .into())
-                }
-            };
-            Wallet::derive_child(key_type, *index)
-        }
+        Commands::DeriveChild {
+            index,
+            hardened,
+            label,
+        } => Wallet::derive_child(*index, *hardened, label),
         Commands::SignTx { draft, index } => Wallet::sign_tx(draft, *index),
         Commands::ImportKeys { input } => Wallet::import_keys(input),
         Commands::ExportKeys => Wallet::export_keys(),
@@ -1048,11 +1047,14 @@ mod tests {
 
         // Derive a child key
         let index = 0;
-        let (noun, op) = Wallet::derive_child(key_type.clone(), index)?;
+        let hardened = true;
+        let label = None;
+        let (noun, op) = Wallet::derive_child(index, hardened, &label)?;
 
         let wire = WalletWire::Command(Commands::DeriveChild {
-            key_type: key_type.clone().to_string().to_owned(),
             index,
+            hardened,
+            label,
         })
         .to_wire();
 
@@ -1347,7 +1349,7 @@ mod tests {
 
         // these should be valid names of notes in the wallet balance
         let names = "[Amt4GcpYievY4PXHfffiWriJ1sYfTXFkyQsGzbzwMVzewECWDV3Ad8Q BJnaDB3koU7ruYVdWCQqkFYQ9e3GXhFsDYjJ1vSmKFdxzf6Y87DzP4n]".to_string();
-        let recipients = "EHmKL2U3vXfS5GYAY5aVnGdukfDWwvkQPCZXnjvZVShsSQi3UAuA4tQ".to_string();
+        let recipients = "3HKKp7xZgCw1mhzk4iw735S2ZTavCLHc8YDGRP6G9sSTrRGsaPBu1AqJ8cBDiw2LwhRFnQG7S3N9N9okc28uBda6oSAUCBfMSg5uC9cefhrFrvXVGomoGcRvcFZTWuJzm3ch".to_string();
         let gifts = "0".to_string();
         let fee = 0;
 

@@ -157,7 +157,7 @@
 ::
 +$  cause
   $%  [%keygen entropy=byts salt=byts]
-      [%derive-child key-type=?(%pub %prv) i=@ label=(unit @t)]
+      [%derive-child i=@ hardened=? label=(unit @t)]
       [%import-keys keys=(list (pair trek meta))]
       [%export-keys ~]
       [%export-master-pubkey ~]
@@ -170,7 +170,9 @@
           recipients=(list [m=@ pks=(list @t)])        ::  base58-encoded locks
           gifts=(list coins:transact)                  ::  number of coins to spend
           fee=coins:transact                           ::  fee
-          index=(unit @ud)                             ::  index of child key to spend from
+          index=(unit @ud)                             ::  index of child key to spend from.
+                                                       ::  if key is hardened, index must have (bex 31)
+                                                       ::  already added
       ==
       [%sign-tx dat=draft index=(unit @ud) entropy=@]
       [%list-pubkeys ~]
@@ -539,26 +541,24 @@
   ++  from-public
     |=  =keyc:slip10
     (from-public:slip10 keyc)
-::
-::  Derives public key from parent public key
-::  index i is expected to be a bip32 style index
-::  meaning that for the n-th child key, i=n.
-::
-  ++  derive-public
+  ::
+  ::  derives the i-th child key(s) from a parent key.
+  ::  index i can be any child index. returns the door
+  ::  with the door sample modified with the values
+  ::  corresponding to the key. the core sample can then
+  ::  be harvested for keys.
+  ::
+  ++  derive
     |=  [parent=coil i=@u]
-    ?>  &(?=(%pub -.key.parent) (lte i (dec (bex 31))))
-    =>  [cor=(from-public [p.key cc]:parent) i=i]
-    (derive-public:cor i)
-::
-::  Derives private key from parent private key
-::  index i is expected to be a bip32 style index
-::  meaning that for n-th child key: i = (n + 2^31)
-::
-  ++  derive-private
-    |=  [parent=coil i=@u]
-    ?>  &(?=(%prv -.key.parent) (gte i (bex 31)))
-    =>  [cor=(from-private [p.key cc]:parent) i=i]
-    (derive-private:cor i)
+    ?-    -.key.parent
+        %pub
+      =>  [cor=(from-public [p.key cc]:parent) i=i]
+      (derive:cor i)
+    ::
+        %prv
+      =>  [cor=(from-private [p.key cc]:parent) i=i]
+      (derive:cor i)
+    ==
   --
 ::
 ++  vault
@@ -588,14 +588,21 @@
       ~|("receive-address not set - this is a bug" !!)
     receive-address.state
   ::
+  ++  has
+    |_  key-type=?(%pub %prv)
+    ++  key-path  ^-  trek
+      (welp base-path ~[key-type])
+    ::
+    ++  master
+      ^-  ?
+      =/  =trek  (welp key-path /m)
+      (~(has of keys.state) trek)
+    --
   ++  get
     |_  key-type=?(%pub %prv)
     ::
     ++  key-path  ^-  trek
       (welp base-path ~[key-type])
-    ::
-    ++  seed-path  ^-  trek
-      (welp base-path /seed)
     ::
     ++  master
       ^-  coil
@@ -664,29 +671,6 @@
         (welp key-path /label)
       label/u.label
     --
-  ::
-  ::  +derive-child: derives the i-th hardened/unhardened child
-  ::
-  ::    derives the i-th hardened or unhardened child from the master key.
-  ::    this arm will convert i to fit the slip10/bip32 indexing schemes.
-  ::    the i-th hardened corresponds to index i + 2^31 while the ith
-  ::    unhardened child corresponds to index i.
-  ::
-  ++  derive-child
-    |=  [parent=coil i=@u]
-    ^-  coil
-    ?:  (gte i (bex 31))
-      ~|("Child index {<i>} out of range. Child indices are capped to values between [0, 2^31)" !!)
-    ?~  master.state
-      ~|("No master keys available for derivation" !!)
-    ?:  ?=(%prv -.key.parent)
-      ::
-      ::  If the parent key is %prv, then the child is hardened
-      ::  and we add 2^31 to the index
-      =>  (derive-private:s10 parent (add i (bex 31)))
-      [%coil [%prv private-key] chain-code]
-    =>  (derive-public:s10 parent i)
-    [%coil [%pub public-key] chain-code]
   ::
   ++  get-note
     |=  name=nname:transact
@@ -1874,17 +1858,73 @@
         [%exit 0]
     ==
   ::
-  ::  derives child %pub or %prv key of current master key
-  ::  at index `i`. this will overwrite existing paths.
+  ::  derives child keys of current master key
+  ::  at index `i`. this will overwrite existing paths if
+  ::  the master key changes
   ++  do-derive-child
+    |^
     |=  =cause
     ?>  ?=(%derive-child -.cause)
-    =/  par=coil  ~(master get:v key-type.cause)
-    =/  child=coil  (derive-child:v par i.cause)
+    =/  index
+      ?:  hardened.cause
+        (add i.cause (bex 31))
+      i.cause
+    =/  derived-keys=(set coil)  (derive-child index)
     =.  keys.state
-      (key:put:v child `i.cause label.cause)
+      %-  ~(rep in derived-keys)
+      |=  [=coil keys=_keys.state]
+      =.  keys.state  keys
+      (key:put:v coil `index label.cause)
     :-  [%exit 0]~
     state
+    ::
+    ::  +derive-child: derives the i-th hardened/unhardened child key(s)
+    ::
+    ::    derives the i-th child from the master key. for hardened keys,
+    ::    (bex 31) should be already added to `i`.
+    ::
+    ++  derive-child
+      |=  i=@u
+      ^-  (set coil)
+      ?:  (gte i (bex 32))
+        ~|("Child index {<i>} out of range. Child indices are capped to values between [0, 2^32)" !!)
+      ?~  master.state
+        ~|("No master keys available for derivation" !!)
+      =;  coils=(list coil)
+        (silt coils)
+      =/  hardened  (gte i (bex 31))
+      ::
+      ::  Grab the prv master key if it exists (cold wallet)
+      ::  otherwise grab the pub master key (hot wallet).
+      =/  parent=coil
+        ?:  ~(master has:v %prv)
+          ~(master get:v %prv)
+        ~(master get:v %pub)
+      ?:  hardened
+        ?>  ?=(%prv -.key.parent)
+        ::
+        =>  (derive:s10 parent i)
+        :~  [%coil [%prv private-key] chain-code]
+            [%coil [%pub public-key] chain-code]
+        ==
+      ::
+      ::  if unhardened, we just assert that they are within the valid range
+      ?:  (gte i (bex 31))
+        ~|("Unhardened child index {<i>} out of range. Indices are capped to values between [0, 2^31)" !!)
+      ?-    -.key.parent
+       ::  if the parent is a private key, we can derive the unhardened prv and pub child
+          %prv
+        =>  (derive:s10 parent i)
+        :~  [%coil [%prv private-key] chain-code]
+            [%coil [%pub public-key] chain-code]
+        ==
+      ::
+       ::  if the parent is a public key, we can only derive the unhardened pub child
+          %pub
+        =>  (derive:s10 parent i)
+        ~[[%coil [%pub public-key] chain-code]]
+      ==
+    --
   ::
   ++  do-sign-tx
     |=  =cause
