@@ -544,28 +544,28 @@ fn welcome() {
 
     print_banner(&mut stdout, banner);
 
-    let info = [
-        ("Build label", env!("BUILD_EMBED_LABEL")),
-        ("Build host", env!("BUILD_HOST")),
-        ("Build user", env!("BUILD_USER")),
-        ("Build timestamp", env!("BUILD_TIMESTAMP")),
-        ("Build date", env!("FORMATTED_DATE")),
-        // ("Git commit", env!("BAZEL_GIT_COMMIT")),
-        // ("Build timestamp", env!("VERGEN_BUILD_TIMESTAMP")),
-        // ("Cargo debug", env!("VERGEN_CARGO_DEBUG")),
-        // ("Cargo features", env!("VERGEN_CARGO_FEATURES")),
-        // ("Cargo opt level", env!("VERGEN_CARGO_OPT_LEVEL")),
-        // ("Cargo target", env!("VERGEN_CARGO_TARGET_TRIPLE")),
-        // ("Git branch", env!("VERGEN_GIT_BRANCH")),
-        // ("Git commit date", env!("VERGEN_GIT_COMMIT_DATE")),
-        // ("Git commit author", env!("VERGEN_GIT_COMMIT_AUTHOR_NAME")),
-        // ("Git commit message", env!("VERGEN_GIT_COMMIT_MESSAGE")),
-        // ("Git commit timestamp", env!("VERGEN_GIT_COMMIT_TIMESTAMP")),
-        // ("Git commit SHA", env!("VERGEN_GIT_SHA")),
-        // ("Rustc channel", env!("VERGEN_RUSTC_CHANNEL")),
-        // ("Rustc host", env!("VERGEN_RUSTC_HOST_TRIPLE")),
-        // ("Rustc LLVM version", env!("VERGEN_RUSTC_LLVM_VERSION")),
-    ];
+    //let info = [
+    //("Build label", env!("BUILD_EMBED_LABEL")),
+    //("Build host", env!("BUILD_HOST")),
+    //("Build user", env!("BUILD_USER")),
+    //("Build timestamp", env!("BUILD_TIMESTAMP")),
+    //("Build date", env!("FORMATTED_DATE")),
+    // ("Git commit", env!("BAZEL_GIT_COMMIT")),
+    // ("Build timestamp", env!("VERGEN_BUILD_TIMESTAMP")),
+    // ("Cargo debug", env!("VERGEN_CARGO_DEBUG")),
+    // ("Cargo features", env!("VERGEN_CARGO_FEATURES")),
+    // ("Cargo opt level", env!("VERGEN_CARGO_OPT_LEVEL")),
+    // ("Cargo target", env!("VERGEN_CARGO_TARGET_TRIPLE")),
+    // ("Git branch", env!("VERGEN_GIT_BRANCH")),
+    // ("Git commit date", env!("VERGEN_GIT_COMMIT_DATE")),
+    // ("Git commit author", env!("VERGEN_GIT_COMMIT_AUTHOR_NAME")),
+    // ("Git commit message", env!("VERGEN_GIT_COMMIT_MESSAGE")),
+    // ("Git commit timestamp", env!("VERGEN_GIT_COMMIT_TIMESTAMP")),
+    // ("Git commit SHA", env!("VERGEN_GIT_SHA")),
+    // ("Rustc channel", env!("VERGEN_RUSTC_CHANNEL")),
+    // ("Rustc host", env!("VERGEN_RUSTC_HOST_TRIPLE")),
+    // ("Rustc LLVM version", env!("VERGEN_RUSTC_LLVM_VERSION")),
+    //];
 
     //print_version_info(&mut stdout, &info);
 }

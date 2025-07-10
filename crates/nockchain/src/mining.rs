@@ -8,7 +8,7 @@ use nockapp::nockapp::NockAppError;
 use nockapp::noun::slab::NounSlab;
 use nockapp::noun::{AtomExt, NounExt};
 use nockapp::save::SaveableCheckpoint;
-use nockapp::utils::NOCK_STACK_SIZE_HUGE;
+use nockapp::utils::NOCK_STACK_SIZE_TINY;
 use nockapp::CrownError;
 use nockvm::noun::{Atom, D, NO, T, YES};
 use nockvm_macros::tas;
@@ -145,7 +145,7 @@ pub fn create_mining_driver(
                                     kernel,
                                     None,
                                     hot_state.clone(),
-                                    NOCK_STACK_SIZE_HUGE,
+                                    NOCK_STACK_SIZE_TINY,
                                     test_jets.clone(),
                                     false,
                                 )
@@ -231,7 +231,7 @@ pub fn create_mining_driver(
                                         kernel,
                                         None,
                                         hot_state.clone(),
-                                        NOCK_STACK_SIZE_HUGE,
+                                        NOCK_STACK_SIZE_TINY,
                                         test_jets.clone(),
                                         false,
                                     )
