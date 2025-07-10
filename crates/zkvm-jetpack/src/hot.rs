@@ -7,6 +7,7 @@ use crate::jets::cheetah_jets::*;
 use crate::jets::compute_table_jets_v2::*;
 use crate::jets::crypto_jets::*;
 use crate::jets::fext_jets::*;
+use crate::jets::fp_jets::*;
 use crate::jets::fpntt_jets::*;
 use crate::jets::mary_jets::*;
 use crate::jets::mega_jets::*;
@@ -454,6 +455,21 @@ pub const EXTENSION_FIELD_JETS: &[HotEntry] = &[
         ],
         1,
         bp_coseword_jet,
+    ),
+    (
+        &[
+            K_138,
+            Left(b"one"),
+            Left(b"two"),
+            Left(b"tri"),
+            Left(b"qua"),
+            Left(b"pen"),
+            Left(b"zeke"),
+            Left(b"ext-field"),
+            Left(b"coseword"),
+        ],
+        1,
+        fp_coseword_jet,
     ),
     (
         &[

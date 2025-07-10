@@ -3,6 +3,7 @@ use std::vec;
 
 use crate::form::fext::*;
 use crate::form::poly::*;
+use crate::jets::fpntt_jets::fp_ntt;
 
 #[inline(always)]
 pub fn fpadd(a: &[Felt], b: &[Felt], res: &mut [Felt]) {
@@ -201,4 +202,27 @@ pub fn bpoly_to_fpoly(bpoly: &[Belt], res: &mut [Felt]) {
     for (i, b) in bpoly.iter().enumerate() {
         res[i] = Felt::lift(*b);
     }
+}
+
+#[inline(always)]
+pub fn fp_shift(poly_a: &[Felt], felt_b: &Felt, poly_res: &mut [Felt]) {
+    let mut felt_power: Felt = Felt::from([1, 0, 0]);
+
+    for i in 0..poly_a.len() {
+        let res_felt: &mut Felt = &mut Felt::from([0, 0, 0]);
+        fmul(&poly_a[i], &felt_power, res_felt);
+        poly_res[i] = *res_felt;
+
+        fmul(&felt_power.clone(), felt_b, &mut felt_power);
+    }
+}
+
+#[inline(always)]
+pub fn fp_coseword(fp: &[Felt], offset: &Felt, order: u32, root: &Felt) -> Vec<Felt> {
+    // shift
+    let len_res: u32 = order;
+    let mut res = vec![Felt::zero(); len_res as usize];
+    fp_shift(fp, offset, &mut res);
+
+    fp_ntt(&res, root)
 }
