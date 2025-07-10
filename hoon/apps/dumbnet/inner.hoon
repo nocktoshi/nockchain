@@ -904,6 +904,8 @@
         %-  ~(rep z-in excluded-txs.c.k)
         |=  [=tx-id:t effs=_effs]
         [[%gossip %0 %heard-tx (got-raw-tx:con tx-id)] effs]
+      ::  regossip block transactions if mining
+      =.  effs  (weld (regossip-block-txs-effects pag) effs)
       ::
       ::  tell the miner about the new block
       =.  m.k  (heard-new-block:min c.k now)
@@ -1136,7 +1138,7 @@
         ?:  init.a.k
           ::  kernel in init phase, command ignored
           `k
-        =/  tx-req-effs=(list effect:dk)
+        =/  effects=(list effect:dk)
           %+  turn  missing-tx-ids:con
           |=  =tx-id:t
           ^-  effect:dk
@@ -1147,10 +1149,11 @@
           ?~  heaviest-block.c.k
             *page-number:t  ::  rerequest genesis block
           +(height:(~(got z-by blocks.c.k) u.heaviest-block.c.k))
-        =/  effs=(list effect:dk)
-          :-  [%request %block %by-height heavy-height]
-          tx-req-effs
-        effs^k
+        =.  effects
+          [[%request %block %by-height heavy-height] effects]
+        =.  effects
+          (weld regossip-candidate-block-txs-effects effects)
+        effects^k
       ::
       ++  do-genesis
         ::  generate genesis block and sets it as candidate block
@@ -1256,6 +1259,24 @@
           ==
         ~>  %slog.[0 leaf+log-message]
         [%request %block %elders block-id peer-id]~ :: ask for elders
+    ::
+    ::  only if mining: re-gossip transactions included in block when block is fully validated
+    ::  precondition: all transactions for block are in raw-txs
+    ++  regossip-block-txs-effects
+      |=  =page:t
+      ^-  (list effect:dk)
+      ?.  mining.m.k  ~
+      %-  ~(rep z-in tx-ids.page)
+      |=  [=tx-id:t effects=(list effect:dk)]
+      ^-  (list effect:dk)
+      =/  tx=raw-tx:t  raw-tx:(~(got z-by raw-txs.c.k) tx-id)
+      =/  fec=effect:dk  [%gossip %0 %heard-tx tx]
+      [fec effects]
+    ::
+    ::  only if mining: regossip transactions included in candidate block
+    ++  regossip-candidate-block-txs-effects
+      ^-  (list effect:dk)
+      (regossip-block-txs-effects candidate-block.m.k)
     --::  +poke
   --::  +kernel
 --
