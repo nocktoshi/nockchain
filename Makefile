@@ -33,25 +33,14 @@ update-hoonc:
 	cargo install --locked --path crates/hoonc --bin hoonc
 
 .PHONY: install-nockchain
-install-nockchain: build-hoon-all
+install-nockchain: assets/dumb.jam assets/miner.jam
 	$(call show_env_vars)
 	cargo install --locked --force --path crates/nockchain --bin nockchain
 
-.PHONY: update-nockchain
-update-nockchain: build-hoon-all
-	$(call show_env_vars)
-	cargo install --locked --path crates/nockchain --bin nockchain
-
-
 .PHONY: install-nockchain-wallet
-install-nockchain-wallet: build-hoon-all
+install-nockchain-wallet: assets/wal.jam
 	$(call show_env_vars)
 	cargo install --locked --force --path crates/nockchain-wallet --bin nockchain-wallet
-
-.PHONY: update-nockchain-wallet
-update-nockchain-wallet: build-hoon-all
-	$(call show_env_vars)
-	cargo install --locked --path crates/nockchain-wallet --bin nockchain-wallet
 
 .PHONY: ensure-dirs
 ensure-dirs:
@@ -88,17 +77,20 @@ HOON_SRCS := $(find hoon -type file -name '*.hoon')
 ## Build dumb.jam with hoonc
 assets/dumb.jam: update-hoonc hoon/apps/dumbnet/outer.hoon $(HOON_SRCS)
 	$(call show_env_vars)
+	rm -f assets/dumb.jam
 	RUST_LOG=trace hoonc hoon/apps/dumbnet/outer.hoon hoon
 	mv out.jam assets/dumb.jam
 
 ## Build wal.jam with hoonc
 assets/wal.jam: update-hoonc hoon/apps/wallet/wallet.hoon $(HOON_SRCS)
 	$(call show_env_vars)
+	rm -f assets/wal.jam
 	RUST_LOG=trace hoonc hoon/apps/wallet/wallet.hoon hoon
 	mv out.jam assets/wal.jam
 
 ## Build mining.jam with hoonc
 assets/miner.jam: update-hoonc hoon/apps/dumbnet/miner.hoon $(HOON_SRCS)
 	$(call show_env_vars)
+	rm -f assets/miner.jam
 	RUST_LOG=trace hoonc hoon/apps/dumbnet/miner.hoon hoon
 	mv out.jam assets/miner.jam
