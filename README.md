@@ -15,7 +15,7 @@ Install `rustup` by following their instructions at: [https://rustup.rs/](https:
 Ensure you have these dependencies installed if running on Debian/Ubuntu:
 ```
 sudo apt update
-sudo apt install clang llvm-dev libclang-dev
+sudo apt install clang llvm-dev libclang-dev make
 ```
 
 Copy the example environment file and rename it to `.env`:
@@ -90,13 +90,13 @@ Make sure your current directory is nockchain.
 To run a Nockchain node without mining.
 
 ```
-sh ./scripts/run_nockchain_node.sh
+bash ./scripts/run_nockchain_node.sh
 ```
 
 To run a Nockchain node and mine to a pubkey:
 
 ```
-sh ./scripts/run_nockchain_miner.sh
+bash ./scripts/run_nockchain_miner.sh
 ```
 
 For launch, make sure you run in a fresh working directory that does not include a .data.nockchain file from testing.
