@@ -30,12 +30,6 @@ make install-hoonc
 export PATH="$HOME/.cargo/bin:$PATH"
 ```
 
-To build the Nockchain and the wallet binaries and their required assets:
-
-```
-make build
-```
-
 ## Install Wallet
 
 After you've run the setup and build commands, install the wallet:
