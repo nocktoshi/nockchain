@@ -47,9 +47,6 @@ const MAX_PENDING_INCOMING_CONNECTIONS: u32 = 16;
 /** Maximum pending outcoing connections */
 const MAX_PENDING_OUTGOING_CONNECTIONS: u32 = 16;
 
-/** Minimum number of peers */
-const MIN_PEERS: usize = 8;
-
 // Request/response constants
 // const REQUEST_RESPONSE_MAX_CONCURRENT_STREAMS: usize = MAX_ESTABLISHED_CONNECTIONS as usize * 2;
 const REQUEST_RESPONSE_TIMEOUT: Duration = Duration::from_secs(20);
@@ -123,10 +120,6 @@ pub struct LibP2PConfig {
     /// Maximum pending outgoing connections
     #[serde(default = "default_max_pending_outgoing_connections")]
     pub max_pending_outgoing_connections: u32,
-
-    /// Minimum number of peers
-    #[serde(default = "default_min_peers")]
-    pub min_peers: usize,
 
     /// Request/response timeout (seconds)
     #[serde(default = "default_request_response_timeout_secs")]
@@ -213,9 +206,6 @@ fn default_max_pending_incoming_connections() -> u32 {
 fn default_max_pending_outgoing_connections() -> u32 {
     MAX_PENDING_OUTGOING_CONNECTIONS
 }
-fn default_min_peers() -> usize {
-    MIN_PEERS
-}
 fn default_request_response_timeout_secs() -> u64 {
     REQUEST_RESPONSE_TIMEOUT.as_secs()
 }
@@ -266,7 +256,6 @@ impl Default for LibP2PConfig {
             max_established_connections_per_peer: default_max_established_connections_per_peer(),
             max_pending_incoming_connections: default_max_pending_incoming_connections(),
             max_pending_outgoing_connections: default_max_pending_outgoing_connections(),
-            min_peers: default_min_peers(),
             request_response_timeout_secs: default_request_response_timeout_secs(),
             request_high_threshold: default_request_high_threshold(),
             request_high_reset_secs: default_request_high_reset_secs(),
@@ -367,9 +356,5 @@ impl LibP2PConfig {
 
     pub fn seen_tx_clear_interval(&self) -> u64 {
         self.seen_tx_clear_interval
-    }
-
-    pub fn min_peers(&self) -> usize {
-        self.min_peers
     }
 }
