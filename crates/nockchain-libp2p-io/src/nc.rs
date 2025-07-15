@@ -29,7 +29,7 @@ use nockvm::noun::{Atom, Noun, D, T};
 use nockvm_macros::tas;
 use rand::seq::SliceRandom;
 use serde_bytes::ByteBuf;
-use tokio::sync::{mpsc, Mutex};
+use tokio::sync::{mpsc, Mutex, MutexGuard};
 use tokio::task::{AbortHandle, JoinError, JoinSet};
 use tokio::time::{Duration, MissedTickBehavior};
 use tracing::{debug, error, info, instrument, trace, warn};
@@ -192,6 +192,7 @@ pub fn make_libp2p_driver(
             let peer_status_log_interval = libp2p_config.peer_status_log_interval_secs();
             let elders_debounce_reset = libp2p_config.elders_debounce_reset();
             let seen_tx_clear_interval = libp2p_config.seen_tx_clear_interval();
+            let min_peers = libp2p_config.min_peers();
             let mut swarm = match crate::p2p::start_swarm(
                 libp2p_config, keypair, bind, allowed, limits, memory_limits,
             ) {
@@ -233,7 +234,7 @@ pub fn make_libp2p_driver(
                 let _ = tx.send(());
                 debug!("libp2p driver initialization complete signal sent");
             }
-            let mut peer_status_log = tokio::time::interval(peer_status_log_interval);
+            let mut connectivity_interval = tokio::time::interval(peer_status_log_interval);
             loop {
                 let timer_fut = async {
                     let _ = nockchain_timer.tick().await;
@@ -243,8 +244,12 @@ pub fn make_libp2p_driver(
                     guard = timer_fut => {
                         join_set.spawn("timer".to_string(), send_timer_poke(guard, traffic_cop.clone()))
                     }
-                    _ = peer_status_log.tick() => {
-                        log_peer_status(&mut swarm, &metrics).await;
+                    _ = connectivity_interval.tick() => {
+                        let peer_count = log_peer_status(&mut swarm, &metrics).await;
+                        if peer_count < min_peers {
+                            let tracker = message_tracker.lock().await;
+                            dial_more_peers(&mut swarm, tracker);
+                        }
                     },
                     Ok(noun_slab) = effect_handle.next_effect() => {
                         let _span = tracing::trace_span!("broadcast").entered();
@@ -282,8 +287,16 @@ pub fn make_libp2p_driver(
                                 debug!("SEvent: {peer_id} is new friend via: {endpoint:?}");
                             },
                             SwarmEvent::ConnectionClosed { connection_id, peer_id, endpoint, cause, .. } => {
-                                message_tracker.lock().await.lost_connection(connection_id);
-                                debug!("SEvent: friendship ended with {peer_id} via: {endpoint:?}. cause: {cause:?}");
+                                let mut message_tracker_lock = message_tracker.lock().await;
+                                let peer_count = message_tracker_lock.lost_connection(connection_id);
+                                if peer_count < min_peers { // TODO configurable
+                                    dial_more_peers(&mut swarm, message_tracker_lock);
+                                }
+                                if let Some(cause) = cause {
+                                    debug!("SEvent: friendship ended with {peer_id} via: {endpoint:?}. cause: {cause:?}");
+                                } else {
+                                    info!("SEvent: friendship ended by us with {peer_id} via: {endpoint:?}.");
+                                }
                             },
                             SwarmEvent::IncomingConnectionError { local_addr, send_back_addr, error, .. } => {
                                trace!("SEvent: Failed incoming connection from {} to {}: {}",
@@ -1231,8 +1244,11 @@ async fn handle_request_response(
     Ok(())
 }
 
-async fn log_peer_status(swarm: &mut Swarm<NockchainBehaviour>, metrics: &NockchainP2PMetrics) {
-    {
+async fn log_peer_status(
+    swarm: &mut Swarm<NockchainBehaviour>,
+    metrics: &NockchainP2PMetrics,
+) -> usize {
+    let connected_peer_count = {
         info!("Logging current peer status...");
         let connected_peers: Vec<_> = swarm.connected_peers().cloned().collect();
         let peer_count = connected_peers.len();
@@ -1252,7 +1268,8 @@ async fn log_peer_status(swarm: &mut Swarm<NockchainBehaviour>, metrics: &Nockch
         }
 
         let _ = metrics.active_peer_connections.swap(peer_count as f64);
-    }
+        peer_count
+    };
 
     // Count peers in the routing table by iterating through k-buckets
     let mut routing_table_size = 0;
@@ -1271,6 +1288,7 @@ async fn log_peer_status(swarm: &mut Swarm<NockchainBehaviour>, metrics: &Nockch
             "Routing table has {} entries", routing_table_size
         );
     };
+    connected_peer_count
 }
 
 /// Converts a request noun into a scry path that can be used to query the Nockchain state.
@@ -2475,4 +2493,35 @@ fn log_inbound_failure(
             debug!("Unsupported protocol when responding to peer {}", peer)
         }
     };
+}
+
+fn dial_more_peers(swarm: &mut Swarm<NockchainBehaviour>, tracker: MutexGuard<MessageTracker>) {
+    let mut addresses_to_dial = Vec::new();
+    for bucket in swarm.behaviour_mut().kad.kbuckets() {
+        for peer in bucket.iter() {
+            if tracker
+                .peer_connections
+                .contains_key(&peer.node.key.into_preimage())
+            {
+                continue;
+            }
+            for address in peer.node.value.iter() {
+                let mut address = address.clone();
+
+                if let Ok(address_with_peer_id) =
+                    address.clone().with_p2p(peer.node.key.into_preimage())
+                {
+                    address = address_with_peer_id;
+                }
+                addresses_to_dial.push(address);
+            }
+        }
+    }
+    addresses_to_dial.shuffle(&mut rand::thread_rng());
+    for address in addresses_to_dial {
+        info!("Redialing {}", address);
+        if let Err(err) = swarm.dial(address) {
+            log_dial_error(err);
+        };
+    }
 }
