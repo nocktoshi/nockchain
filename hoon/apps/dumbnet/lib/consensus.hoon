@@ -189,8 +189,8 @@
     (chunk:bignum:t next-target-atom)
   ?:  =(prev-target-atom next-target-atom)
     next-target-bn
-  ~>  %slog.[0 (cat 3 'previous target: ' (scot %ud prev-target-atom))]
-  ~>  %slog.[0 (cat 3 'new target: ' (scot %ud next-target-atom))]
+  ~>  %slog.[0 (cat 3 'previous target: ' (scot %ui prev-target-atom))]
+  ~>  %slog.[0 (cat 3 'new target: ' (scot %ui next-target-atom))]
   next-target-bn
 ::
 ::  +compute-epoch-duration: computes the duration of an epoch in seconds
