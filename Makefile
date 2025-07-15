@@ -1,3 +1,6 @@
+# Create .env file if it doesn't exist
+$(shell [ ! -f .env ] && touch .env)
+
 # Load environment variables from .env file
 include .env
 
@@ -21,6 +24,10 @@ build-rust:
 .PHONY: test
 test:
 	cargo test --release
+
+.PHONY: fmt
+fmt:
+	cargo fmt
 
 .PHONY: install-hoonc
 install-hoonc: nuke-hoonc-data ## Install hoonc from this repo
@@ -72,24 +79,28 @@ build-hoon-all: nuke-assets update-hoonc ensure-dirs build-trivial $(HOON_TARGET
 build-hoon: ensure-dirs update-hoonc $(HOON_TARGETS)
 	$(call show_env_vars)
 
+.PHONY: build-assets
+build-assets: ensure-dirs $(HOON_TARGETS)
+	$(call show_env_vars)
+
 HOON_SRCS := $(find hoon -type file -name '*.hoon')
 
 ## Build dumb.jam with hoonc
-assets/dumb.jam: update-hoonc ensure-dirs hoon/apps/dumbnet/outer.hoon $(HOON_SRCS)
+assets/dumb.jam: ensure-dirs hoon/apps/dumbnet/outer.hoon $(HOON_SRCS)
 	$(call show_env_vars)
 	rm -f assets/dumb.jam
 	RUST_LOG=trace hoonc hoon/apps/dumbnet/outer.hoon hoon
 	mv out.jam assets/dumb.jam
 
 ## Build wal.jam with hoonc
-assets/wal.jam: update-hoonc ensure-dirs hoon/apps/wallet/wallet.hoon $(HOON_SRCS)
+assets/wal.jam: ensure-dirs hoon/apps/wallet/wallet.hoon $(HOON_SRCS)
 	$(call show_env_vars)
 	rm -f assets/wal.jam
 	RUST_LOG=trace hoonc hoon/apps/wallet/wallet.hoon hoon
 	mv out.jam assets/wal.jam
 
 ## Build mining.jam with hoonc
-assets/miner.jam: update-hoonc ensure-dirs hoon/apps/dumbnet/miner.hoon $(HOON_SRCS)
+assets/miner.jam: ensure-dirs hoon/apps/dumbnet/miner.hoon $(HOON_SRCS)
 	$(call show_env_vars)
 	rm -f assets/miner.jam
 	RUST_LOG=trace hoonc hoon/apps/dumbnet/miner.hoon hoon

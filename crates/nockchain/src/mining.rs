@@ -12,15 +12,13 @@ use nockapp::utils::NOCK_STACK_SIZE_TINY;
 use nockapp::CrownError;
 use nockchain_libp2p_io::tip5_util::tip5_hash_to_base58;
 use nockvm::interpreter::NockCancelToken;
-use nockvm::noun::{Atom, FullDebugCell, D, NO, T, YES};
+use nockvm::noun::{Atom, D, NO, T, YES};
 use nockvm_macros::tas;
 use rand::Rng;
 use tokio::sync::Mutex;
 use tracing::{debug, info, instrument, warn};
-use zkvm_jetpack::form::{tip5, PRIME};
+use zkvm_jetpack::form::PRIME;
 use zkvm_jetpack::noun::noun_ext::NounExt as OtherNounExt;
-
-use crate::mining;
 
 pub enum MiningWire {
     Mined,
