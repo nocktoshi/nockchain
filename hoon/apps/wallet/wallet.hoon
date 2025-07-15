@@ -912,14 +912,14 @@
       =+  (to-b58:nname:transact name.note)
       :((cury cat 3) '[' first ' ' last ']')
       '\0a- assets: '
-      (scot %ui assets.note)
+      (rsh [3 2] (scot %ui assets.note))
       '\0a- block height: '
-      (scot %ui origin-page.note)
+      (rsh [3 2] (scot %ui origin-page.note))
       '\0a- source: '
       (to-b58:hash:transact p.source.note)
       '\0a## lock'
       '\0a- m: '
-      (scot %ui m.lock.note)
+      (rsh [3 2] (scot %ui m.lock.note))
       '\0a- signers: '
     ==
   %-  crip

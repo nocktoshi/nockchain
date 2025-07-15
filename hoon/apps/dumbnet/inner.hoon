@@ -524,7 +524,7 @@
         %-  trip
         %^  cat  3
           'heard elders starting at height '
-        (scot %ui oldest)
+        (rsh [3 2] (scot %ui oldest))
       ~>  %slog.[0 leaf+log-message]
       ::  find highest block we have in the ancestor list
       =/  latest-known=(unit [=block-id:t =page-number:t])
@@ -556,7 +556,7 @@
           :~  'DEEP REORG: processed elders and asking for oldest: requesting elders for block '
               (to-b58:hash:t last-id)
               ' at height '
-              (scot %ui oldest)
+              (rsh [3 2] (scot %ui oldest))
           ==
         ~>  %slog.[0 %leaf^log-message]
         :_  k
@@ -565,7 +565,7 @@
         %-  trip
         %^  cat  3
           'processed elders and found intersection: requesting next block '
-        (scot %ui +(page-number.u.latest-known))
+        (rsh [3 2] (scot %ui +(page-number.u.latest-known)))
       ~>  %slog.[0 %leaf^print-var]
       ::  request next block after our highest known block
       ::  this will trigger either catchup or reorg from this point
@@ -818,14 +818,14 @@
           ?:  check-pow-flag:t
             ?>  ?=(^ pow.pag)
             %+  rap  3
-            :~  ' with proof version '  (scot %ui version.u.pow.pag)
+            :~  ' with proof version '  (rsh [3 2] (scot %ui version.u.pow.pag))
             ==
           '. Skipping pow check because check-pow-flag was disabled'
         %-  trip
         ^-  @t
         %+  rap  3
         :~  'block '  (to-b58:hash:t digest.pag)
-            ' added to validated blocks at '  (scot %ui height.pag)
+            ' added to validated blocks at '  (rsh [3 2] (scot %ui height.pag))
             pow-print
         ==
       ~>  %slog.[0 %leaf^print-var]
@@ -1227,9 +1227,9 @@
             :~  'heard block '
                 (to-b58:hash:t block-id)
                 ' at height '
-                (scot %ui block-height)
+                (rsh [3 2] (scot %ui block-height))
                 ' but we only have blocks up to height '
-                (scot %ui u.highest-block-height.d.k)
+                (rsh [3 2] (scot %ui u.highest-block-height.d.k))
                 ': requesting next highest block.'
             ==
           ~>  %slog.[0 leaf+log-message]
@@ -1241,7 +1241,7 @@
           :~  'potential reorg: requesting elders for block '
               (to-b58:hash:t block-id)
               ' at height '
-              (scot %ui block-height)
+              (rsh [3 2] (scot %ui block-height))
           ==
         ~>  %slog.[0 leaf+log-message]
         [%request %block %elders block-id peer-id]~ :: ask for elders
