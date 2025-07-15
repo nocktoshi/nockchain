@@ -912,14 +912,14 @@
       =+  (to-b58:nname:transact name.note)
       :((cury cat 3) '[' first ' ' last ']')
       '\0a- assets: '
-      (rsh [3 2] (scot %ui assets.note))
+      (scot %ui assets.note)
       '\0a- block height: '
-      (rsh [3 2] (scot %ui origin-page.note))
+      (scot %ui origin-page.note)
       '\0a- source: '
       (to-b58:hash:transact p.source.note)
       '\0a## lock'
       '\0a- m: '
-      (rsh [3 2] (scot %ui m.lock.note))
+      (scot %ui m.lock.note)
       '\0a- signers: '
     ==
   %-  crip
@@ -1781,7 +1781,7 @@
         %-  with-choice:with-refund:simple-from-note:new:input:transact
        [recipient gift fee note sender-key assert-receive-address:v]
       ::  we cannot subtract the fee from this note, or we already have from a previous one
-      :_  %.n
+      :_  spent-fee
       %-  with-choice:with-refund:simple-from-note:new:input:transact
       [recipient gift 0 note sender-key assert-receive-address:v]
     ::
