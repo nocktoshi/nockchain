@@ -20,6 +20,10 @@ build: build-hoon-all build-rust
 build-rust:
 	cargo build --release
 
+.PHONY: build-nockchain-jemalloc
+build-nockchain-jemalloc:
+	cargo build --release --features jemalloc --bin nockchain
+
 ## Run all tests
 .PHONY: test
 test:
