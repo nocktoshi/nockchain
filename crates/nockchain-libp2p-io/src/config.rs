@@ -241,7 +241,7 @@ fn default_peer_store_record_capacity() -> NonZero<usize> {
 }
 
 fn default_peer_status_log_interval_secs() -> u64 {
-    60 // Log peer status every 60 seconds
+    300 // Log peer status every 5 minutes
 }
 
 fn default_elders_debounce_reset_secs() -> u64 {

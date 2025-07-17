@@ -290,14 +290,11 @@ pub fn make_libp2p_driver(
                             },
                             SwarmEvent::ConnectionClosed { connection_id, peer_id, endpoint, cause, .. } => {
                                 let mut message_tracker_lock = message_tracker.lock().await;
-                                let peer_count = message_tracker_lock.lost_connection(connection_id);
-                                if peer_count < min_peers { // TODO configurable
-                                    dial_more_peers(&mut swarm, message_tracker_lock);
-                                }
+                                let _ = message_tracker_lock.lost_connection(connection_id);
                                 if let Some(cause) = cause {
                                     debug!("SEvent: friendship ended with {peer_id} via: {endpoint:?}. cause: {cause:?}");
                                 } else {
-                                    info!("SEvent: friendship ended by us with {peer_id} via: {endpoint:?}.");
+                                    debug!("SEvent: friendship ended by us with {peer_id} via: {endpoint:?}.");
                                 }
                             },
                             SwarmEvent::IncomingConnectionError { local_addr, send_back_addr, error, .. } => {
