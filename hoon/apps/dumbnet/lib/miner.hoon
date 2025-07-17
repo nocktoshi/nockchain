@@ -31,7 +31,7 @@
   m(shares s)
 ::
 ++  mining-pubkeys-set
-  =(*(z-set lock:t) pubkeys.m)
+  !=(*(z-set lock:t) pubkeys.m)
 ::
 +|  %candidate-block
 ++  set-pow
@@ -92,7 +92,7 @@
   |=  [c=consensus-state:dk now=@da]
   ^-  [? mining-state:dk]
   ?:  ?|  =(*page:t candidate-block.m)
-          mining-pubkeys-set
+          !mining-pubkeys-set
       ==
     ::  not mining or no candidate block is set so no need to update
     [%.n m]
@@ -215,7 +215,7 @@
   ?:  =(u.heaviest-block.c parent.candidate-block.m)
     ~>  %slog.[0 leaf+"heaviest block unchanged, do not generate new candidate block"]
     m
-  ?:  mining-pubkeys-set
+  ?.  mining-pubkeys-set
     ~>  %slog.[0 leaf+"no pubkey(s) set so no new candidate block will be generated"]
     m
   =/  print-var

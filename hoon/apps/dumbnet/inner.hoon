@@ -420,6 +420,7 @@
       ?:  (check-duplicate-block digest.pag)
         :: do almost nothing (idempotency), we already have block
         :: however we *should* tell the runtime we have it
+        ~>  %slog.[0 leaf+"heard block: duplicate block"]
         :_  k
         [%seen %block digest.pag ~]~
       ::
@@ -463,6 +464,7 @@
         [%liar-block-id digest.pag +.check-page-without-txs]
       ::
       ?.  (check-pow pag)
+        ~>  %slog.[0 leaf+"heard-block: bad pow"]
         :_  k
         %+  snoc  block-effs
         [%liar-block-id digest.pag %failed-pow-check]
@@ -674,23 +676,29 @@
       =/  id-b58  (to-b58:hash:t id.raw)
       ~>  %slog.[3 leaf+(trip (cat 3 'raw-tx: ' id-b58))]
       ::
-      ::  check tx-id. this is the fastest check to do, so we try it first before
-      ::  calling validate:raw-tx (which also checks the id)
-      ?.  =((compute-id:raw-tx:t raw) id.raw)
-        ~>  %slog.[3 leaf+"tx-id-invalid"]
-        :_  k
-        [(liar-effect wir %tx-id-invalid)]~
-      ::
-      ::  do we already have raw-tx?
+      ::  check if we already have raw-tx
       ?:  (has-raw-tx:con id.raw)
         :: do almost nothing (idempotency), we already have it
         :: but do tell the runtime we've already seen it
         ~>  %slog.[3 leaf+"tx-id-already-seen"]
         :_  k
         [%seen %tx id.raw]~
+      ::
+      ::  check if the raw-tx contents are in base field
       ?.  (based:raw-tx:t raw)
         :_  k
         [(liar-effect wir %raw-tx-not-based)]~
+      ::
+      ::  check tx-id. this is faster than calling validate:raw-tx (which also checks the id)
+      ::  so we do it first
+      ?.  =((compute-id:raw-tx:t raw) id.raw)
+        ~>  %slog.[3 leaf+"tx-id-invalid"]
+        :_  k
+        [(liar-effect wir %tx-id-invalid)]~
+      ?~  softed-tx=((soft raw-tx:t) raw)
+        ~>  %slog.[3 leaf+"tx-not-soft"]
+        :_  k
+        [(liar-effect wir %tx-not-soft)]~
       ::
       ::  check if raw-tx is part of a pending block
       ::
@@ -800,6 +808,12 @@
         (accept-block now eny pag +.new-transfers)
         ::
           %.n
+        =/  print-var
+          %-  trip
+          %^  cat  3
+            'process-block-with-txs: block did not validate. reason: '
+          p.new-transfers
+        ~>  %slog.[0 leaf+print-var]
         ::  did not validate, so we throw the block out and stop
         ::  tracking it
         =.  c.k  (reject-pending-block:con digest.pag)
