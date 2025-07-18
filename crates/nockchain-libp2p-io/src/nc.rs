@@ -189,7 +189,7 @@ pub fn make_libp2p_driver(
             let request_high_reset = libp2p_config.request_high_reset();
             let initial_peer_retries = libp2p_config.initial_peer_retries;
             let request_high_threshold = libp2p_config.request_high_threshold;
-            let peer_status_log_interval = libp2p_config.peer_status_log_interval_secs();
+            let peer_status_interval = libp2p_config.peer_status_interval_secs();
             let elders_debounce_reset = libp2p_config.elders_debounce_reset();
             let seen_tx_clear_interval = libp2p_config.seen_tx_clear_interval();
             let min_peers = libp2p_config.min_peers();
@@ -236,7 +236,7 @@ pub fn make_libp2p_driver(
                 let _ = tx.send(());
                 debug!("libp2p driver initialization complete signal sent");
             }
-            let mut connectivity_interval = tokio::time::interval(peer_status_log_interval);
+            let mut connectivity_interval = tokio::time::interval(peer_status_interval);
             loop {
                 let timer_fut = async {
                     let _ = nockchain_timer.tick().await;
