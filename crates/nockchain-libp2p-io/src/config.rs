@@ -12,20 +12,16 @@ const KADEMLIA_BOOTSTRAP_INTERVAL: Duration = Duration::from_secs(300);
 const FORCE_PEER_DIAL_INTERVAL: Duration = Duration::from_secs(600);
 
 /** How long we should keep a peer connection alive with no traffic */
-const SWARM_IDLE_TIMEOUT: Duration = Duration::from_secs(30);
+const SWARM_IDLE_TIMEOUT: Duration = Duration::from_secs(60);
 
 // Core protocol (QUIC/ping/etc) constants
 /** How many times we should retry dialing our initial peers if we can't get Kademlia initialized */
 // TODO: Make command-line configurable
 const INITIAL_PEER_RETRIES: u32 = 5;
 /** How often we should send a keep-alive message to a peer */
-const KEEP_ALIVE_INTERVAL: Duration = Duration::from_secs(15);
-/** How long should we wait before timing out the connection */
-// const CONNECTION_TIMEOUT: Duration = SWARM_IDLE_TIMEOUT;
+const KEEP_ALIVE_INTERVAL: Duration = Duration::from_secs(10);
 /** How long should we wait before timing out the handshake */
 const HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(15);
-/** How long QUIC should wait before timing out an idle connection */
-// const MAX_IDLE_TIMEOUT_MILLISECS: u32 = CONNECTION_TIMEOUT.as_millis() as u32;
 /** How often we should send an identify message to a peer */
 const IDENTIFY_INTERVAL: Duration = Duration::from_secs(120);
 
@@ -42,17 +38,16 @@ const MAX_ESTABLISHED_CONNECTIONS: u32 = 128;
 const MAX_ESTABLISHED_CONNECTIONS_PER_PEER: u32 = 2;
 
 /** Maximum pending incoming connections */
-const MAX_PENDING_INCOMING_CONNECTIONS: u32 = 16;
+const MAX_PENDING_INCOMING_CONNECTIONS: u32 = 32;
 
 /** Maximum pending outcoing connections */
-const MAX_PENDING_OUTGOING_CONNECTIONS: u32 = 16;
+const MAX_PENDING_OUTGOING_CONNECTIONS: u32 = 32;
 
 /** Minimum number of peers */
 const MIN_PEERS: usize = 8;
 
 // Request/response constants
-// const REQUEST_RESPONSE_MAX_CONCURRENT_STREAMS: usize = MAX_ESTABLISHED_CONNECTIONS as usize * 2;
-const REQUEST_RESPONSE_TIMEOUT: Duration = Duration::from_secs(20);
+const REQUEST_RESPONSE_TIMEOUT: Duration = Duration::from_secs(30);
 const REQUEST_HIGH_THRESHOLD: u64 = 60;
 const REQUEST_HIGH_RESET: Duration = Duration::from_secs(60);
 
@@ -148,10 +143,9 @@ pub struct LibP2PConfig {
     // /// Kademlia protocol version
     // #[serde(default = "default_kad_protocol_version")]
     // pub kad_protocol_version: String,
-    /// Identify protocol version
-    #[serde(default = "default_identify_protocol_version")]
-    pub identify_protocol_version: String,
-
+    ///// Identify protocol version
+    //#[serde(default = "default_identify_protocol_version")]
+    //pub identify_protocol_version: String,
     /// Peer store record capacity
     /// This is the maximum number of records that can be stored in the peer store.
     #[serde(default = "default_peer_store_record_capacity")]
@@ -230,10 +224,6 @@ fn default_request_high_reset_secs() -> u64 {
     REQUEST_HIGH_RESET.as_secs()
 }
 
-fn default_identify_protocol_version() -> String {
-    IDENTIFY_PROTOCOL_VERSION.to_string()
-}
-
 fn default_peer_store_record_capacity() -> NonZero<usize> {
     PEER_STORE_RECORD_CAPACITY
         .try_into()
@@ -278,7 +268,6 @@ impl Default for LibP2PConfig {
             request_response_timeout_secs: default_request_response_timeout_secs(),
             request_high_threshold: default_request_high_threshold(),
             request_high_reset_secs: default_request_high_reset_secs(),
-            identify_protocol_version: default_identify_protocol_version(),
             peer_store_record_capacity: default_peer_store_record_capacity(),
             peer_status_interval_secs: default_peer_status_interval_secs(),
             elders_debounce_reset_secs: default_elders_debounce_reset_secs(),
@@ -309,6 +298,10 @@ impl LibP2PConfig {
 
     pub fn req_res_protocol_version() -> &'static str {
         REQ_RES_PROTOCOL_VERSION
+    }
+
+    pub fn identify_protocol_version() -> &'static str {
+        IDENTIFY_PROTOCOL_VERSION
     }
 
     /// Get kademlia bootstrap interval as Duration

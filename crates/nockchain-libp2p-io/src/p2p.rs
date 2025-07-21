@@ -67,7 +67,7 @@ impl NockchainBehaviour {
             let peer_id = libp2p::identity::PeerId::from_public_key(&keypair.public());
 
             let identify_config = identify::Config::new(
-                libp2p_config.identify_protocol_version.clone(),
+                String::from(LibP2PConfig::identify_protocol_version()),
                 keypair.public(),
             )
             .with_interval(libp2p_config.identify_interval())
