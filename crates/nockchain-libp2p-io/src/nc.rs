@@ -106,9 +106,10 @@ impl EffectType {
         let Ok(atom) = head.as_atom() else {
             return EffectType::Unknown;
         };
-        let bytes = atom
-            .to_bytes_until_nul()
-            .expect("failed to strip null bytes");
+        let Ok(bytes) = atom.to_bytes_until_nul() else {
+            warn!("atom was not properly formatted: {:?}", atom);
+            return EffectType::Unknown;
+        };
 
         match bytes.as_slice() {
             b"gossip" => EffectType::Gossip,
