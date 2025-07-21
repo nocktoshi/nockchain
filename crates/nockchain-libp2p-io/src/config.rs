@@ -253,7 +253,7 @@ fn default_seen_tx_clear_interval() -> u64 {
 }
 
 fn default_poke_timeout_secs() -> u64 {
-    10 // Timeout for pokes
+    20 // Timeout for pokes
 }
 
 // Do _not_ use this default implementation in production code. It's just a fallback.
