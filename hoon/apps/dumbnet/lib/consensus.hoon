@@ -675,7 +675,6 @@
 ::
 ::  add an already-validated raw transaction, producing a list of blocks ready to validate
 ++  add-raw-tx
-  ~/  %add-raw-tx
   |=  =raw-tx:t
   ^-  [(list block-id:t) consensus-state:dk]
   ?<  (~(has z-by raw-txs.c) id.raw-tx)
