@@ -167,6 +167,7 @@
   $%  [%keygen entropy=byts salt=byts]
       [%derive-child i=@ hardened=? label=(unit @tas)]
       [%import-keys keys=(list (pair trek meta))]
+      [%import-extended extended-key=@t]               ::  extended key string
       [%export-keys ~]
       [%export-master-pubkey ~]
       [%import-master-pubkey =coil]                    ::  base58-encoded pubkey + chain code
@@ -602,6 +603,10 @@
       =>  [cor=(from-private [p.key cc]:parent) i=i]
       (derive:cor i)
     ==
+  ::
+  ++  from-extended-key
+    |=  key=@t
+    (from-extended-key:slip10 key)
   --
 ::
 ++  vault
@@ -651,7 +656,16 @@
       ^-  coil
       =/  =trek  (welp key-path /m)
       =/  =meta  (~(got of keys.state) trek)
+      :: check if private key matches public key
       ?>  ?=(%coil -.meta)
+      ?:  ?=(%prv key-type)
+        =/  public-key=@
+          public-key:(from-private:s10 [p.key cc]:meta)
+        ~&  >  ['public-key' public-key]
+        ~&  >  ['master-pub' p.key:(public:^master master.state)]
+        ?:  =(public-key p.key:(public:^master master.state))
+          meta
+        ~|("private key does not match public key" !!)
       meta
     ::
     ++  by-index
@@ -754,6 +768,53 @@
     =/  next-pid=@ud  +(max-pid)
     ?:  =(next-pid 0)  `1  :: handle wraparound
     `next-pid
+  ::
+  ::  +derive-child: derives the i-th hardened/unhardened child key(s)
+  ::
+  ::    derives the i-th child from the master key. for hardened keys,
+  ::    (bex 31) should be already added to `i`.
+  ::
+  ++  derive-child
+    |=  i=@u
+    ^-  (set coil)
+    ?:  (gte i (bex 32))
+      ~|("Child index {<i>} out of range. Child indices are capped to values between [0, 2^32)" !!)
+    ?~  master.state
+      ~|("No master keys available for derivation" !!)
+    =;  coils=(list coil)
+      (silt coils)
+    =/  hardened  (gte i (bex 31))
+    ::
+    ::  Grab the prv master key if it exists (cold wallet)
+    ::  otherwise grab the pub master key (hot wallet).
+    =/  parent=coil
+      ?:  ~(master has %prv)
+        ~(master get %prv)
+      ~(master get %pub)
+    ?:  hardened
+      ?>  ?=(%prv -.key.parent)
+      ::
+      =>  (derive:s10 parent i)
+      :~  [%coil [%prv private-key] chain-code]
+          [%coil [%pub public-key] chain-code]
+      ==
+    ::
+    ::  if unhardened, we just assert that they are within the valid range
+    ?:  (gte i (bex 31))
+      ~|("Unhardened child index {<i>} out of range. Indices are capped to values between [0, 2^31)" !!)
+    ?-    -.key.parent
+     ::  if the parent is a private key, we can derive the unhardened prv and pub child
+        %prv
+      =>  (derive:s10 parent i)
+      :~  [%coil [%prv private-key] chain-code]
+          [%coil [%pub public-key] chain-code]
+      ==
+    ::
+     ::  if the parent is a public key, we can only derive the unhardened pub child
+        %pub
+      =>  (derive:s10 parent i)
+      ~[[%coil [%pub public-key] chain-code]]
+    ==
   --
 ::    +plan: core for managing draft relationships
 ::
@@ -1112,6 +1173,7 @@
       %update-balance        (do-update-balance cause)
       %update-block          (do-update-block cause)
       %import-keys           (do-import-keys cause)
+      %import-extended       (do-import-extended cause)
       %export-keys           (do-export-keys cause)
       %export-master-pubkey  (do-export-master-pubkey cause)
       %import-master-pubkey  (do-import-master-pubkey cause)
@@ -1367,6 +1429,101 @@
         [%exit 0]
     ==
   ::
+  ++  do-import-extended
+    |=  =cause
+    ?>  ?=(%import-extended -.cause)
+    %-  (debug "import-extended: {<extended-key.cause>}")
+    =/  core  (from-extended-key:s10 extended-key.cause)
+    =/  is-private=?  !=(0 prv:core)
+    =/  key-type=?(%pub %prv)  ?:(is-private %prv %pub)
+    =/  coil-key=key
+      ?:  is-private
+        [%prv private-key:core]
+      [%pub public-key:core]
+    =/  imported-coil=coil  [%coil coil-key chain-code:core]
+    =/  public-coil=coil  [%coil [%pub public-key] chain-code]:core
+    =/  key-label=@t
+      ?:  is-private
+        (crip "imported-private-{<(end [3 4] public-key:core)>}")
+      (crip "imported-public-{<(end [3 4] public-key:core)>}")
+    ::  if this is a master key (no parent), set as master
+    ?:  =(0 dep:core)
+      =.  master.state  (some public-coil)
+      =.  state  set-receive-address:v
+      =.  keys.state  (key:put:v imported-coil ~ `key-label)
+      =.  keys.state  (key:put:v public-coil ~ `key-label)
+      =/  extended-type=tape  ?:(is-private "private" "public")
+      :_  state
+      :~  :-  %markdown
+          %-  crip
+          """
+          ## imported import {extended-type} key
+
+          - import key: {(trip extended-key.cause)}
+          - label: {(trip key-label)}
+          - set as master key
+          """
+          [%exit 0]
+      ==
+    ::  otherwise, import as derived key
+    ::  first validate that this key is actually a child of the current master
+    ?~  master.state
+      :_  state
+      :~  :-  %markdown
+          %-  crip
+          """
+          ## import failed
+
+          cannot import derived key: no master key set
+          """
+          [%exit 1]
+      ==
+    =/  master-pubkey-coil=coil  (public:master master.state)
+    =/  expected-children=(set coil)
+      (derive-child:v ind:core)
+    =/  imported-pubkey=@  public-key:core
+    ::  find the public key coil from the derived children set
+    =/  expected-pubkey-coil=(unit coil)
+      %-  ~(rep in expected-children)
+      |=  [=coil acc=(unit coil)]
+      ?^  acc  acc
+      ?:  ?=(%pub -.key.coil)
+        `coil
+      ~
+    ?~  expected-pubkey-coil
+      ~|("no public key found in derived children - this should not happen" !!)
+    =/  expected-pubkey=@  p.key.u.expected-pubkey-coil
+    ?.  =(imported-pubkey expected-pubkey)
+      :_  state
+      :~  :-  %markdown
+          %-  crip
+          """
+          ## import failed
+
+          imported key at index {<ind:core>} does not match expected child of master key
+
+          - imported pubkey: {<imported-pubkey>}
+          - expected pubkey: {<expected-pubkey>}
+          """
+          [%exit 1]
+      ==
+    ::  key is valid, proceed with import
+    =.  keys.state  (key:put:v imported-coil `ind:core `key-label)
+    =/  extended-type=tape  ?:(is-private "private" "public")
+    :_  state
+    :~  :-  %markdown
+        %-  crip
+        """
+        ## imported import {extended-type} key
+
+        - import key: {(trip extended-key.cause)}
+        - label: {(trip key-label)}
+        - index: {<ind:core>}
+        - verified as child of master key
+        """
+        [%exit 0]
+    ==
+  ::
   ++  do-export-keys
     |=  =cause
     ?>  ?=(%export-keys -.cause)
@@ -1390,7 +1547,7 @@
   ++  do-export-master-pubkey
     |=  =cause
     ?>  ?=(%export-master-pubkey -.cause)
-    %-  (debug "import-master-pubkey")
+    %-  (debug "export-master-pubkey")
     ?~  master.state
       ~&  "wallet warning: no master keys available for export"
       [[%exit 0]~ state]
@@ -1401,12 +1558,16 @@
     =/  dat-jam=@  (jam master-coil)
     =/  key-b58=tape  (en:base58:wrap p.key.master-coil)
     =/  cc-b58=tape  (en:base58:wrap cc.master-coil)
+    =/  extended-key=@t
+      =/  core  (from-public:s10 [p.key cc]:master-coil)
+      extended-public-key:core
     :_  state
     :~  :-  %markdown
         %-  crip
         """
         ## exported master public key:
 
+        - import key: {(trip extended-key)}
         - pubkey: {key-b58}
         - chaincode: {cc-b58}
 
@@ -1476,13 +1637,16 @@
     =.  keys.state  (key:put:v master-privkey-coil ~ private-label)
     =.  keys.state  (key:put:v master-pubkey-coil ~ public-label)
     %-  (debug "master.state: {<master.state>}")
+    =/  extended-key=@t  extended-public-key:cor
     :_  state
     :~  :-  %markdown
         %-  crip
         """
-        ## master public key
+        ## master public key (import)
 
-        {<public-key:cor>}
+        - import key: {(trip extended-key)}
+        - pubkey: {<(en:base58:wrap p.key.master-pubkey-coil)>}
+        - chaincode: {<(en:base58:wrap cc.master-pubkey-coil)>}
         """
         [%exit 0]
     ==
@@ -1551,13 +1715,18 @@
     %-  (debug "show-master-pubkey")
     =/  =meta  ~(master get:v %pub)
     ?>  ?=(%coil -.meta)
+    =/  extended-key=@t
+      =/  core  (from-public:s10 [p.key cc]:meta)
+      extended-public-key:core
     :_  state
     :~  :-  %markdown
         %-  crip
         """
         ## master public key
 
-          {(en:base58:wrap p.key.meta)}
+        - import key: {(trip extended-key)}
+        - pubkey: {<p.key.meta>}
+        - chaincode: {<cc.meta>}
         """
         [%exit 0]
     ==
@@ -1568,13 +1737,20 @@
     %-  (debug "show-master-privkey")
     =/  =meta  ~(master get:v %prv)
     ?>  ?=(%coil -.meta)
+    =/  extended-key=@t
+      =/  core  (from-private:s10 [p.key cc]:meta)
+      extended-private-key:core
+    =/  key-b58=tape  (en:base58:wrap p.key.meta)
+    =/  cc-b58=tape  (en:base58:wrap cc.meta)
     :_  state
     :~  :-  %markdown
         %-  crip
         """
         ## master private key
 
-        {(en:base58:wrap p.key.meta)}
+        - import key: {(trip extended-key)}
+        - private key: {key-b58}
+        - chaincode: {cc-b58}
         """
         [%exit 0]
     ==
@@ -1912,6 +2088,8 @@
     =.  keys.state  (key:put:v master-public-coil ~ pub-label)
     =.  keys.state  (key:put:v master-private-coil ~ prv-label)
     =.  keys.state  (seed:put:v seed-phrase)
+    =/  extended-private=@t  extended-private-key:cor
+    =/  extended-public=@t  extended-public-key:cor
     :_  state
     :~  :-  %markdown
         %-  crip
@@ -1927,6 +2105,12 @@
         ### Chain Code
         {<(en:base58:wrap chain-code:cor)>}
 
+        ### Import Private Key
+        {(trip extended-private)}
+
+        ### Import Public Key
+        {(trip extended-public)}
+
         ### Seed Phrase
         {<seed-phrase>}
         """
@@ -1937,14 +2121,13 @@
   ::  at index `i`. this will overwrite existing paths if
   ::  the master key changes
   ++  do-derive-child
-    |^
     |=  =cause
     ?>  ?=(%derive-child -.cause)
     =/  index
       ?:  hardened.cause
         (add i.cause (bex 31))
       i.cause
-    =/  derived-keys=(set coil)  (derive-child index)
+    =/  derived-keys=(set coil)  (derive-child:v index)
     =.  keys.state
       %-  ~(rep in derived-keys)
       |=  [=coil keys=_keys.state]
@@ -1952,54 +2135,6 @@
       (key:put:v coil `index label.cause)
     :-  [%exit 0]~
     state
-    ::
-    ::  +derive-child: derives the i-th hardened/unhardened child key(s)
-    ::
-    ::    derives the i-th child from the master key. for hardened keys,
-    ::    (bex 31) should be already added to `i`.
-    ::
-    ++  derive-child
-      |=  i=@u
-      ^-  (set coil)
-      ?:  (gte i (bex 32))
-        ~|("Child index {<i>} out of range. Child indices are capped to values between [0, 2^32)" !!)
-      ?~  master.state
-        ~|("No master keys available for derivation" !!)
-      =;  coils=(list coil)
-        (silt coils)
-      =/  hardened  (gte i (bex 31))
-      ::
-      ::  Grab the prv master key if it exists (cold wallet)
-      ::  otherwise grab the pub master key (hot wallet).
-      =/  parent=coil
-        ?:  ~(master has:v %prv)
-          ~(master get:v %prv)
-        ~(master get:v %pub)
-      ?:  hardened
-        ?>  ?=(%prv -.key.parent)
-        ::
-        =>  (derive:s10 parent i)
-        :~  [%coil [%prv private-key] chain-code]
-            [%coil [%pub public-key] chain-code]
-        ==
-      ::
-      ::  if unhardened, we just assert that they are within the valid range
-      ?:  (gte i (bex 31))
-        ~|("Unhardened child index {<i>} out of range. Indices are capped to values between [0, 2^31)" !!)
-      ?-    -.key.parent
-       ::  if the parent is a private key, we can derive the unhardened prv and pub child
-          %prv
-        =>  (derive:s10 parent i)
-        :~  [%coil [%prv private-key] chain-code]
-            [%coil [%pub public-key] chain-code]
-        ==
-      ::
-       ::  if the parent is a public key, we can only derive the unhardened pub child
-          %pub
-        =>  (derive:s10 parent i)
-        ~[[%coil [%pub public-key] chain-code]]
-      ==
-    --
   ::
   ++  do-sign-tx
     |=  =cause

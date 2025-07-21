@@ -169,8 +169,8 @@ pub enum Commands {
 
     /// Derive child key (pub, private or both) from the current master key
     DeriveChild {
-        /// Index of the child key to derive
-        #[arg(short, long, value_parser = clap::value_parser!(u64).range(0..=255))]
+        /// Index of the child key to derive, should be in range [0, 2^31)
+        #[arg(short, long, value_parser = clap::value_parser!(u64).range(0..2 << 31))]
         index: u64,
 
         /// Hardened or unhardened child key
@@ -182,11 +182,16 @@ pub enum Commands {
         label: Option<String>,
     },
 
-    /// Import keys from a file
+    /// Import keys from a file or extended key
+    #[command(group = clap::ArgGroup::new("import_source").required(true).args(&["file", "key"]))]
     ImportKeys {
         /// Path to the jammed keys file
-        #[arg(short, long, value_name = "FILE")]
-        input: String,
+        #[arg(short = 'f', long = "file", value_name = "FILE")]
+        file: Option<String>,
+
+        /// Extended key string (e.g., "zprv..." or "zpub...")
+        #[arg(short = 'k', long = "key", value_name = "EXTENDED_KEY")]
+        key: Option<String>,
     },
 
     /// Export keys to a file
@@ -198,8 +203,8 @@ pub enum Commands {
         #[arg(short, long)]
         draft: String,
 
-        /// Optional key index to use for signing (0-255)
-        #[arg(short, long, value_parser = clap::value_parser!(u64).range(0..=255))]
+        /// Optional key index to use for signing [0, 2^31)
+        #[arg(short, long, value_parser = clap::value_parser!(u64).range(0..2 << 31))]
         index: Option<u64>,
     },
 
@@ -267,8 +272,9 @@ pub enum Commands {
         /// Transaction fee
         #[arg(long)]
         fee: u64,
-        /// Optional key index to use for signing (0-255)
-        #[arg(short, long, value_parser = clap::value_parser!(u64).range(0..=255))]
+        /// Optional key index to use for signing [0, 2^32)
+        /// if hardened index must have 2^31 already added to the index
+        #[arg(short, long, value_parser = clap::value_parser!(u64).range(0..2 << 32))]
         index: Option<u64>,
         /// Type of timelock intent: "absolute", "relative", or "none"
         #[arg(long, default_value = "none")]
@@ -562,6 +568,17 @@ impl Wallet {
             .map_err(|e| CrownError::Unknown(format!("Failed to decode master pubkeys: {}", e)))?;
 
         Self::wallet("import-keys", &[pubkey_noun], Operation::Poke, &mut slab)
+    }
+
+    /// Imports an extended key.
+    ///
+    /// # Arguments
+    ///
+    /// * `extended_key` - Extended key string (e.g., "zprv..." or "zpub...")
+    fn import_extended(extended_key: &str) -> CommandNoun<NounSlab> {
+        let mut slab = NounSlab::new();
+        let key_noun = make_tas(&mut slab, extended_key).as_noun();
+        Self::wallet("import-extended", &[key_noun], Operation::Poke, &mut slab)
     }
 
     /// Exports keys to a file.
@@ -977,7 +994,18 @@ async fn main() -> Result<(), NockAppError> {
         } => Wallet::derive_child(*index, *hardened, label),
 
         Commands::SignTx { draft, index } => Wallet::sign_tx(draft, *index),
-        Commands::ImportKeys { input } => Wallet::import_keys(input),
+        Commands::ImportKeys { file, key } => {
+            if let Some(file_path) = file {
+                Wallet::import_keys(file_path)
+            } else if let Some(extended_key) = key {
+                Wallet::import_extended(extended_key)
+            } else {
+                return Err(CrownError::Unknown(
+                    "Either --file or --key must be provided for import-keys".to_string(),
+                )
+                .into());
+            }
+        }
         Commands::ExportKeys => Wallet::export_keys(),
         Commands::GenMasterPrivkey { seedphrase } => Wallet::gen_master_privkey(seedphrase),
         Commands::GenMasterPubkey {
@@ -1358,25 +1386,31 @@ mod tests {
 
         println!("Markdown content: {}", markdown_text);
 
-        // Extract the private key from the markdown - it should be on a line by itself
-        let extracted_privkey = markdown_text
+        // Extract the private key from the markdown - it should be on a line with "- private key: "
+        let extracted_privkey_line = markdown_text
             .lines()
-            .find(|line| line.trim() == master_privkey)
+            .find(|line| line.trim().contains("private key: "))
             .ok_or_else(|| {
                 CrownError::Unknown("Private key not found in markdown output".to_string())
             })?
             .trim();
 
+        // remove the "- private key: " prefix and get the base58 value directly
+        let extracted_privkey_b58 = extracted_privkey_line
+            .trim_start_matches("- private key: ")
+            .trim()
+            .to_string();
+
         // Verify the extracted private key matches our input
         assert_eq!(
-            extracted_privkey, master_privkey,
+            extracted_privkey_b58, master_privkey,
             "Extracted private key '{}' does not match input private key '{}'",
-            extracted_privkey, master_privkey
+            extracted_privkey_b58, master_privkey
         );
 
         println!("✓ Verification successful: Private key in output matches input");
         println!("  Input:     {}", master_privkey);
-        println!("  Retrieved: {}", extracted_privkey);
+        println!("  Retrieved: {}", extracted_privkey_b58);
 
         Ok(())
     }
