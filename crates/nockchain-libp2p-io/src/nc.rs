@@ -534,13 +534,13 @@ impl NockchainRequest {
     }
 }
 
-#[derive(Debug, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 /// Responses to Nockchain requests
 pub enum NockchainResponse {
     /// The requested block or raw-tx
     Result { message: ByteBuf },
     /// If the request was a gossip, no actual response is needed
-    Ack,
+    Ack { acked: bool },
 }
 
 impl NockchainResponse {
@@ -1012,7 +1012,7 @@ async fn handle_request_response(
 
                     let send_response: tokio::task::JoinHandle<Result<(), NockAppError>> =
                         tokio::spawn(async move {
-                            let response = NockchainResponse::Ack;
+                            let response = NockchainResponse::Ack { acked: true };
                             swarm_tx
                                 .send(SwarmAction::SendResponse { channel, response })
                                 .await
@@ -1279,8 +1279,11 @@ async fn handle_request_response(
                 }
                 trace!("handle_request_response: Poke successful");
             }
-            NockchainResponse::Ack => {
+            NockchainResponse::Ack { acked } => {
                 trace!("Received acknowledgement from peer {}", peer);
+                if !acked {
+                    warn!("Peer {} did not acknowledge the response", peer);
+                }
             }
         },
     }

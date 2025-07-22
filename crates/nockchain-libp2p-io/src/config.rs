@@ -64,6 +64,9 @@ const IDENTIFY_PROTOCOL_VERSION: &str = "/nockchain-1-identify";
 
 const PEER_STORE_RECORD_CAPACITY: usize = 1024;
 
+// Default timeout for network-originating pokes
+const POKE_TIMEOUT_SECS: u64 = 20;
+
 /// Configuration struct that allows overriding default constants from environment variables
 #[derive(Debug, Deserialize, Clone)]
 pub struct LibP2PConfig {
@@ -243,7 +246,7 @@ fn default_seen_tx_clear_interval() -> u64 {
 }
 
 fn default_poke_timeout_secs() -> u64 {
-    20 // Timeout for pokes
+    POKE_TIMEOUT_SECS // Timeout for pokes
 }
 
 // Do _not_ use this default implementation in production code. It's just a fallback.
