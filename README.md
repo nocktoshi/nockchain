@@ -17,6 +17,10 @@ Ensure you have these dependencies installed if running on Debian/Ubuntu:
 sudo apt update
 sudo apt install clang llvm-dev libclang-dev make
 ```
+Clone the repo and cd into it:
+```
+git clone https://github.com/zorp-corp/nockchain.git && cd nockchain
+```
 
 Copy the example environment file and rename it to `.env`:
 ```
