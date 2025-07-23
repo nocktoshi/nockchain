@@ -23,7 +23,7 @@ const KEEP_ALIVE_INTERVAL: Duration = Duration::from_secs(10);
 /** How long should we wait before timing out the handshake */
 const HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(15);
 /** How often we should send an identify message to a peer */
-const IDENTIFY_INTERVAL: Duration = Duration::from_secs(120);
+const IDENTIFY_INTERVAL: Duration = Duration::from_secs(60);
 
 /** Maximum number of established *incoming* connections */
 const MAX_ESTABLISHED_INCOMING_CONNECTIONS: u32 = 96;

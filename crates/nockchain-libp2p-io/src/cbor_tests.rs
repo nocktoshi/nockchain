@@ -1,7 +1,7 @@
 use quickcheck::{Arbitrary, Gen};
 use serde_bytes::ByteBuf;
 
-use crate::nc::{NockchainRequest, NockchainResponse};
+use crate::messages::{NockchainRequest, NockchainResponse};
 
 /// Test-only enum that mimics the old NockchainResponse structure before fix
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]

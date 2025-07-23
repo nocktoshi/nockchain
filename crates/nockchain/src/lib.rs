@@ -474,7 +474,7 @@ pub async fn init_with_kernel<J: Jammer + Send + 'static>(
         crate::mining::create_mining_driver(mining_config, mine, threads, Some(mining_init_tx));
     nockapp.add_io_driver(mining_driver).await;
 
-    let libp2p_driver = nockchain_libp2p_io::nc::make_libp2p_driver(
+    let libp2p_driver = nockchain_libp2p_io::driver::make_libp2p_driver(
         keypair,
         bind_multiaddrs,
         allowed,
