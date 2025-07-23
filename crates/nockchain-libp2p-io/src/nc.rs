@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 use std::mem::size_of;
+use std::pin::Pin;
 use std::str::FromStr;
 use std::sync::Arc;
 
@@ -567,9 +568,11 @@ async fn send_timer_poke(
     let timer_noun = T(&mut slab, &[D(tas!(b"command")), D(tas!(b"timer")), D(0)]);
     slab.set_root(timer_noun);
     let wire = nockapp::drivers::timer::TimerWire::Tick.to_wire();
+    let enable_fut = Box::pin(async { true });
     let (timing, timing_rx) = tokio::sync::oneshot::channel();
-    let permit = traffic_cop.poke_high_priority_permit().await?;
-    permit.poke_high_priority(wire, slab, Some(timing)).await?;
+    traffic_cop
+        .poke_high_priority(None, wire, slab, enable_fut, Some(timing))
+        .await?;
     let elapsed = timing_rx.await?;
     let _ = metrics.timer_poke_time.add_timing(&elapsed);
     drop(guard);
@@ -899,7 +902,7 @@ async fn handle_request_response(
                         (cache_result, true)
                     } else {
                         let scry_slab = request_to_scry_slab(data_request.clone())?;
-                        let Some(scry_res_slab) = (match traffic.peek(scry_slab).await {
+                        let Some(scry_res_slab) = (match traffic.peek(Some(peer), scry_slab).await {
                             Ok(Some(res_slab)) => {
                                 metrics.requests_peeked_some.increment();
                                 Some(res_slab)
@@ -1021,36 +1024,47 @@ async fn handle_request_response(
                         });
 
                     let poke_kernel = tokio::task::spawn(async move {
-                        let permit = traffic.poke_high_priority_permit().await?;
                         let gossip = NockchainFact::from_noun_slab(&request_slab)?;
-                        match gossip {
+                        let tracker_arc = message_tracker.clone();
+                        let metrics_arc = metrics.clone();
+                        let enable_fut: Pin<Box<dyn Future<Output = bool> + Send>> = match gossip {
                             NockchainFact::HeardBlock(ref id, _) => {
-                                let tracker = message_tracker.lock().await;
-                                if tracker.seen_blocks.contains(id) {
-                                    trace!("Block already seen, not processing: {:?}", id);
-                                    metrics.block_seen_cache_hits.increment();
-                                    return Ok(());
-                                } else {
-                                    trace!("block not seen, processing: {:?}", id);
-                                    metrics.block_seen_cache_misses.increment();
-                                }
+                                let block_id = id.clone();
+                                Box::pin(async move {
+                                    let tracker = tracker_arc.lock().await;
+                                    if tracker.seen_blocks.contains(&block_id) {
+                                        trace!(
+                                            "Block already seen, not processing: {:?}", &block_id
+                                        );
+                                        metrics_arc.block_seen_cache_hits.increment();
+                                        false
+                                    } else {
+                                        trace!("block not seen, processing: {:?}", &block_id);
+                                        metrics_arc.block_seen_cache_misses.increment();
+                                        true
+                                    }
+                                })
                             }
                             NockchainFact::HeardTx(ref id, _) => {
-                                let tracker = message_tracker.lock().await;
-                                if tracker.seen_txs.contains(id) {
-                                    trace!("Tx already seen, not processing: {:?}", id);
-                                    metrics.tx_seen_cache_hits.increment();
-                                    return Ok(());
-                                } else {
-                                    trace!("tx not seen, processing: {:?}", id);
-                                    metrics.tx_seen_cache_misses.increment();
-                                }
+                                let tx_id = id.clone();
+                                Box::pin(async move {
+                                    let tracker = tracker_arc.lock().await;
+                                    if tracker.seen_txs.contains(&tx_id) {
+                                        trace!("Tx already seen, not processing: {:?}", tx_id);
+                                        metrics_arc.tx_seen_cache_hits.increment();
+                                        false
+                                    } else {
+                                        trace!("tx not seen, processing: {:?}", tx_id);
+                                        metrics_arc.tx_seen_cache_misses.increment();
+                                        true
+                                    }
+                                })
                             }
                             NockchainFact::HeardElders(..) => {
                                 warn!("Heard elders over gossip, should not happen!");
-                                return Ok(());
+                                Box::pin(async { true })
                             }
-                        }
+                        };
 
                         let wire = Libp2pWire::Gossip(peer);
 
@@ -1062,8 +1076,14 @@ async fn handle_request_response(
 
                         let poke = gossip.fact_poke();
                         let (timing, timing_rx) = tokio::sync::oneshot::channel();
-                        let poke_result = permit
-                            .poke_high_priority(wire.to_wire(), poke.clone(), Some(timing))
+                        let poke_result = traffic
+                            .poke_high_priority(
+                                Some(peer),
+                                wire.to_wire(),
+                                poke.clone(),
+                                enable_fut,
+                                Some(timing),
+                            )
                             .await;
                         let elapsed = timing_rx.await?;
                         match gossip {
@@ -1153,28 +1173,11 @@ async fn handle_request_response(
         }
         Response { response, .. } => match response {
             NockchainResponse::Result { message } => {
-                let permit = traffic.poke_high_priority_permit().await?;
                 trace!("handle_request_response: Response result received");
                 let mut response_slab = NounSlab::new();
                 let message_bytes = Bytes::from(message.to_vec());
                 let response_noun = response_slab.cue_into(message_bytes)?;
                 response_slab.set_root(response_noun);
-
-                trace!("Received response from peer");
-
-                let response_cell = response_noun.as_cell()?;
-                if response_cell.head().eq_bytes(b"heard-elders") {
-                    let elders_p_cell = response_cell.tail().as_cell()?;
-                    let elders_list_cell = elders_p_cell.tail().as_cell()?;
-                    let top_block_id = tip5_hash_to_base58(elders_list_cell.head())?;
-
-                    let mut tracker = message_tracker.lock().await;
-                    if tracker.seen_elders.contains(&top_block_id) {
-                        return Ok(());
-                    } else {
-                        tracker.seen_elders.insert(top_block_id);
-                    }
-                }
 
                 trace!(
                     "Response noun: {:?}",
@@ -1182,28 +1185,69 @@ async fn handle_request_response(
                 );
 
                 let response = NockchainFact::from_noun_slab(&response_slab)?;
-                match response {
+                let response_cell = unsafe { response_slab.root().as_cell() }?;
+                let tracker_arc = message_tracker.clone();
+                let metrics_arc = metrics.clone();
+                let enable: Pin<Box<dyn Future<Output = bool> + Send>> = match response {
                     NockchainFact::HeardBlock(ref id, _) => {
-                        let tracker = message_tracker.lock().await;
-                        if tracker.seen_blocks.contains(id) {
-                            trace!("Block already seen, not processing: {:?}", id);
-                            metrics.block_seen_cache_hits.increment();
-                            return Ok(());
+                        let block_id = id.clone();
+                        Box::pin(async move {
+                            let tracker = tracker_arc.lock().await;
+                            if tracker.seen_blocks.contains(&block_id) {
+                                trace!("Block already seen, not processing: {:?}", block_id);
+                                false
+                            } else {
+                                trace!("block not seen, processing: {:?}", block_id);
+                                metrics_arc.block_seen_cache_misses.increment();
+                                true
+                            }
+                        })
+                    }
+                    NockchainFact::HeardTx(ref id, ..) => {
+                        let tx_id = id.clone();
+                        Box::pin(async move {
+                            let tracker = tracker_arc.lock().await;
+                            if tracker.seen_blocks.contains(&tx_id) {
+                                trace!("Block already seen, not processing: {:?}", tx_id);
+                                false
+                            } else {
+                                trace!("block not seen, processing: {:?}", tx_id);
+                                metrics_arc.block_seen_cache_misses.increment();
+                                true
+                            }
+                        })
+                    }
+                    NockchainFact::HeardElders(_, ref elders, _) => {
+                        if let Some(elders_head) = elders.first().cloned() {
+                            Box::pin(async move {
+                                let mut tracker = tracker_arc.lock().await;
+                                if tracker.seen_elders.contains(&elders_head) {
+                                    trace!("Elder already seen, not processing: {:?}", elders_head);
+                                    false
+                                } else {
+                                    trace!("Elder not seen, processing: {:?}", elders_head);
+                                    tracker.seen_elders.insert(elders_head);
+                                    true
+                                }
+                            })
                         } else {
-                            trace!("block not seen, processing: {:?}", id);
-                            metrics.block_seen_cache_misses.increment();
+                            Box::pin(async { true })
                         }
                     }
-                    NockchainFact::HeardTx(..) => {}
-                    NockchainFact::HeardElders(..) => {}
-                }
+                };
 
                 let wire = Libp2pWire::Response(peer);
                 let poke_slab = response.fact_poke();
 
                 let (timing, timing_rx) = tokio::sync::oneshot::channel();
-                let poke_result = permit
-                    .poke_high_priority(wire.to_wire(), poke_slab.clone(), Some(timing))
+                let poke_result = traffic
+                    .poke_high_priority(
+                        Some(peer),
+                        wire.to_wire(),
+                        poke_slab.clone(),
+                        enable,
+                        Some(timing),
+                    )
                     .await;
                 let elapsed = timing_rx.await?;
 
@@ -2317,37 +2361,14 @@ fn dial_peers(
 }
 
 mod traffic_cop {
+    use std::pin::Pin;
     use std::time::Instant;
 
     use tokio::select;
     use tokio::sync::oneshot;
 
     use super::*;
-
-    const TRAFFIC_COP_BUFFER_SIZE: usize = 50;
-
-    pub(crate) struct HighPriorityPermit<'a> {
-        permit: mpsc::Permit<'a, TrafficCopPoke>,
-    }
-
-    impl<'a> HighPriorityPermit<'a> {
-        pub(crate) async fn poke_high_priority(
-            self,
-            wire: WireRepr,
-            cause: NounSlab,
-            timing: Option<oneshot::Sender<Duration>>,
-        ) -> Result<PokeResult, NockAppError> {
-            let (result_tx, result_rx) = oneshot::channel();
-            let poke = TrafficCopPoke {
-                wire,
-                cause,
-                timing,
-                result: result_tx,
-            };
-            self.permit.send(poke);
-            result_rx.await?
-        }
-    }
+    use crate::p2p_util::key_fair_queue;
 
     enum TrafficCopAction {
         Poke(TrafficCopPoke),
@@ -2361,13 +2382,14 @@ mod traffic_cop {
         wire: WireRepr,
         cause: NounSlab,
         timing: Option<oneshot::Sender<Duration>>,
+        enable: Pin<Box<dyn Future<Output = bool> + Send>>,
         result: oneshot::Sender<Result<PokeResult, NockAppError>>,
     }
 
     #[derive(Clone)]
     pub(crate) struct TrafficCop {
-        high_priority_pokes: mpsc::Sender<TrafficCopPoke>,
-        low_priority: mpsc::Sender<TrafficCopAction>,
+        high_priority_pokes: key_fair_queue::Sender<Option<PeerId>, TrafficCopPoke>,
+        low_priority: key_fair_queue::Sender<Option<PeerId>, TrafficCopAction>,
     }
 
     impl TrafficCop {
@@ -2376,8 +2398,8 @@ mod traffic_cop {
             join_set: &mut TrackedJoinSet<Result<(), NockAppError>>,
             poke_timeout: Duration,
         ) -> Self {
-            let (high_priority_pokes, high) = mpsc::channel(1);
-            let (low_priority, low) = mpsc::channel(TRAFFIC_COP_BUFFER_SIZE);
+            let (high_priority_pokes, high) = key_fair_queue::channel();
+            let (low_priority, low) = key_fair_queue::channel();
             join_set.spawn(
                 "traffic_cop".to_string(),
                 traffic_cop_task(handle, high, low, poke_timeout),
@@ -2388,22 +2410,38 @@ mod traffic_cop {
             }
         }
 
-        pub(crate) async fn poke_high_priority_permit(
+        /// enable: Future which is polled just prior to poking, intended to allow checking block/tx caches
+        pub(crate) async fn poke_high_priority(
             &self,
-        ) -> Result<HighPriorityPermit, NockAppError> {
-            let permit = self
-                .high_priority_pokes
-                .reserve()
-                .await
-                .map_err(|_| NockAppError::ChannelClosedError)?;
-            Ok(HighPriorityPermit { permit })
+            peer_id: Option<PeerId>,
+            wire: WireRepr,
+            cause: NounSlab,
+            enable: Pin<Box<dyn Future<Output = bool> + Send>>,
+            timing: Option<oneshot::Sender<std::time::Duration>>,
+        ) -> Result<PokeResult, NockAppError> {
+            let (result_tx, result_rx) = oneshot::channel();
+            let action = TrafficCopPoke {
+                wire,
+                cause,
+                timing,
+                enable,
+                result: result_tx,
+            };
+            self.high_priority_pokes
+                .send(peer_id, action)
+                .map_err(|e| match e {
+                    key_fair_queue::Error::SendError(_) => NockAppError::ChannelClosedError,
+                })?;
+            result_rx.await?
         }
 
         #[allow(dead_code)]
         pub(crate) async fn poke_low_priority(
             &self,
+            peer_id: Option<PeerId>,
             wire: WireRepr,
             cause: NounSlab,
+            enable: Pin<Box<dyn Future<Output = bool> + Send>>,
             timing: Option<oneshot::Sender<std::time::Duration>>,
         ) -> Result<PokeResult, NockAppError> {
             let (result_tx, result_rx) = oneshot::channel();
@@ -2411,45 +2449,54 @@ mod traffic_cop {
                 wire,
                 cause,
                 timing,
+                enable,
                 result: result_tx,
             });
-            self.low_priority.try_send(action).map_err(|e| match e {
-                mpsc::error::TrySendError::Full(_) => NockAppError::IoError(std::io::Error::new(
-                    std::io::ErrorKind::Other,
-                    "dropping poke: queue full",
-                )),
-                mpsc::error::TrySendError::Closed(_) => NockAppError::ChannelClosedError,
-            })?;
+            self.low_priority
+                .send(peer_id, action)
+                .map_err(|e| match e {
+                    key_fair_queue::Error::SendError(_) => NockAppError::ChannelClosedError,
+                })?;
             result_rx.await?
         }
 
-        pub(crate) async fn peek(&self, path: NounSlab) -> Result<Option<NounSlab>, NockAppError> {
+        pub(crate) async fn peek(
+            &self,
+            peer_id: Option<PeerId>,
+            path: NounSlab,
+        ) -> Result<Option<NounSlab>, NockAppError> {
             let (result_tx, result_rx) = oneshot::channel();
             let action = TrafficCopAction::Peek {
                 path,
                 result: result_tx,
             };
-            self.low_priority.try_send(action).map_err(|e| match e {
-                mpsc::error::TrySendError::Full(_) => NockAppError::IoError(std::io::Error::new(
-                    std::io::ErrorKind::Other,
-                    "dropping peek: queue full",
-                )),
-                mpsc::error::TrySendError::Closed(_) => NockAppError::ChannelClosedError,
-            })?;
+            self.low_priority
+                .send(peer_id, action)
+                .map_err(|e| match e {
+                    key_fair_queue::Error::SendError(_) => NockAppError::ChannelClosedError,
+                })?;
             result_rx.await?
         }
     }
 
     async fn traffic_cop_task(
         handle: NockAppHandle,
-        mut high: mpsc::Receiver<TrafficCopPoke>,
-        mut low: mpsc::Receiver<TrafficCopAction>,
+        mut high: key_fair_queue::Receiver<Option<PeerId>, TrafficCopPoke>,
+        mut low: key_fair_queue::Receiver<Option<PeerId>, TrafficCopAction>,
         poke_timeout: Duration,
     ) -> Result<(), NockAppError> {
         loop {
             select! { biased;
                 high_priority_poke = high.recv() => match high_priority_poke {
-                    Some(TrafficCopPoke { wire, cause, result, timing }) => {
+                    Some((_peer_id,TrafficCopPoke { wire, cause, result, enable, timing })) => {
+                        let enabled = enable.await;
+                        if !(enabled) {
+                            let _ = result.send(Ok(PokeResult::Nack)).map_err(|e| {
+                                error!("Failed to send high priority poke result");
+                                e
+                            });
+                            continue;
+                        }
                         let now = Instant::now();
                         let res = handle.poke_timeout(wire, cause, poke_timeout).await;
                         timing.map(|c| c.send(now.elapsed()));
@@ -2464,7 +2511,15 @@ mod traffic_cop {
                     }
                 },
                 low_priority_action = low.recv() => match low_priority_action {
-                    Some(TrafficCopAction::Poke(TrafficCopPoke { wire, cause, result, timing })) => {
+                    Some((_peer_id, TrafficCopAction::Poke(TrafficCopPoke { wire, cause, result, enable, timing }))) => {
+                        let enabled = enable.await;
+                        if !enabled {
+                            let _ = result.send(Ok(PokeResult::Nack)).map_err(|e| {
+                                error!("Failed to send low priority peek result");
+                                e
+                            });
+                            continue;
+                        }
                         let now = Instant::now();
                         let res = handle.poke_timeout(wire, cause, poke_timeout).await;
                         let elapsed = now.elapsed();
@@ -2474,7 +2529,7 @@ mod traffic_cop {
                             e
                         });
                     }
-                    Some(TrafficCopAction::Peek { path, result }) => {
+                    Some((_peer_id, TrafficCopAction::Peek { path, result })) => {
                         let res = handle.peek(path).await;
                         let _ = result.send(res).map_err(|e| {
                             error!("Failed to send low priority peek result");

@@ -11,6 +11,7 @@ nockvm_macros = { workspace = true }
 bs58 = { workspace = true }
 bytes = { workspace = true }
 config = { workspace = true }
+dashmap = { workspace = true }
 either = { workspace = true }
 equix.workspace = true
 futures = { workspace = true }
