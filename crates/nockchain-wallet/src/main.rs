@@ -206,6 +206,9 @@ pub enum Commands {
         /// Optional key index to use for signing [0, 2^31)
         #[arg(short, long, value_parser = clap::value_parser!(u64).range(0..2 << 31))]
         index: Option<u64>,
+        /// Hardened or unhardened child key
+        #[arg(short, long, default_value = "false")]
+        hardened: bool,
     },
 
     /// Generate a master private key from a seed phrase
@@ -272,9 +275,8 @@ pub enum Commands {
         /// Transaction fee
         #[arg(long)]
         fee: u64,
-        /// Optional key index to use for signing [0, 2^32)
-        /// if hardened index must have 2^31 already added to the index
-        #[arg(short, long, value_parser = clap::value_parser!(u64).range(0..2 << 32))]
+        /// Optional key index to use for signing [0, 2^31), if not provided, we use the master key
+        #[arg(short, long, value_parser = clap::value_parser!(u64).range(0..2 << 31))]
         index: Option<u64>,
         /// Type of timelock intent: "absolute", "relative", or "none"
         #[arg(long, default_value = "none")]
@@ -282,6 +284,9 @@ pub enum Commands {
         /// Minimum block height for absolute timelock or relative delay in blocks
         #[arg(long)]
         timelock_min: Option<u64>,
+        /// Hardened or unhardened child key
+        #[arg(short, long, default_value = "false")]
+        hardened: bool,
     },
 
     /// Create a transaction from a draft file
@@ -481,13 +486,15 @@ impl Wallet {
     ///
     /// * `draft_path` - Path to the draft file
     /// * `index` - Optional index of the key to use for signing
-    fn sign_tx(draft_path: &str, index: Option<u64>) -> CommandNoun<NounSlab> {
+    fn sign_tx(draft_path: &str, index: Option<u64>, hardened: bool) -> CommandNoun<NounSlab> {
         let mut slab = NounSlab::new();
 
         // Validate index is within range (though clap should prevent this)
         if let Some(idx) = index {
-            if idx > 255 {
-                return Err(CrownError::Unknown("Key index must not exceed 255".into()).into());
+            if idx >= 2 << 31 {
+                return Err(
+                    CrownError::Unknown("Key index must not exceed 2^31 - 1".into()).into(),
+                );
             }
         }
 
@@ -500,8 +507,13 @@ impl Wallet {
             .cue_into(draft_data.as_bytes()?)
             .map_err(|e| CrownError::Unknown(format!("Failed to decode draft: {}", e)))?;
 
-        let index_noun = match index {
-            Some(i) => T(&mut slab, &[D(0), D(i)]),
+        // Format information about signing key
+        let sign_key_noun = match index {
+            Some(i) => {
+                let inner = D(i);
+                let hardened_noun = if hardened { YES } else { NO };
+                T(&mut slab, &[D(0), inner, hardened_noun])
+            }
             None => D(0),
         };
 
@@ -512,7 +524,7 @@ impl Wallet {
 
         Self::wallet(
             "sign-tx",
-            &[draft_noun, index_noun, entropy],
+            &[draft_noun, sign_key_noun, entropy],
             Operation::Poke,
             &mut slab,
         )
@@ -666,6 +678,7 @@ impl Wallet {
         gifts: String,
         fee: u64,
         index: Option<u64>,
+        hardened: bool,
         timelock_intents: Vec<TimelockIntent>,
     ) -> CommandNoun<NounSlab> {
         let mut slab = NounSlab::new();
@@ -727,13 +740,19 @@ impl Wallet {
 
         let gifts_vec: Vec<u64> = gifts.split(',').filter_map(|s| s.parse().ok()).collect();
 
-        // Verify equal lengths
-        if names_vec.len() != recipients_vec.len() || names_vec.len() != gifts_vec.len() {
-            return Err(CrownError::Unknown(
-                "Invalid input - names, recipients, and gifts must have the same length"
-                    .to_string(),
-            )
-            .into());
+        // Verify lengths based on single vs multiple mode
+        if recipients_vec.len() == 1 && gifts_vec.len() == 1 {
+            // Single mode: can spend from multiple notes to single recipient
+            // No additional validation needed - any number of names is allowed
+        } else {
+            // Multiple mode: all lengths must match
+            if names_vec.len() != recipients_vec.len() || names_vec.len() != gifts_vec.len() {
+                return Err(CrownError::Unknown(
+                    "Multiple recipient mode requires names, recipients, and gifts to have the same length"
+                        .to_string(),
+                )
+                .into());
+            }
         }
 
         // Use the first timelock intent if provided, or a default one
@@ -758,34 +777,64 @@ impl Wallet {
                 Cell::new(&mut slab, name_pair, acc).as_noun()
             });
 
-        // Convert recipients to list
-        let recipients_noun = recipients_vec
-            .into_iter()
-            .rev()
-            .fold(D(0), |acc, (num, pubkeys)| {
-                // Create the inner list of pubkeys
-                let pubkeys_noun = pubkeys.into_iter().rev().fold(D(0), |acc, pubkey| {
+        let fee_noun = D(fee);
+
+        // Format information about signing key
+        let sign_key_noun = match index {
+            Some(i) => {
+                let inner = D(i);
+                let hardened_noun = if hardened { YES } else { NO };
+                T(&mut slab, &[D(0), inner, hardened_noun])
+            }
+            None => D(0),
+        };
+
+        // Create the order noun - use single or multiple mode based on input
+        let order_noun = if recipients_vec.len() == 1 && gifts_vec.len() == 1 {
+            // Single mode: [%single recipient_data gift_amount]
+            let single_tag = make_tas(&mut slab, "single").as_noun();
+            let single_recipient = recipients_vec.into_iter().next().unwrap();
+            let single_gift = gifts_vec.into_iter().next().unwrap();
+
+            // Create the recipient data [number pubkeys_list] for single case
+            let pubkeys_noun = single_recipient
+                .1
+                .into_iter()
+                .rev()
+                .fold(D(0), |acc, pubkey| {
                     let pubkey_noun = make_tas(&mut slab, &pubkey).as_noun();
                     Cell::new(&mut slab, pubkey_noun, acc).as_noun()
                 });
+            let recipient_data = T(&mut slab, &[D(single_recipient.0), pubkeys_noun]);
 
-                // Create the pair of [number pubkeys_list]
-                let pair = T(&mut slab, &[D(num), pubkeys_noun]);
-                Cell::new(&mut slab, pair, acc).as_noun()
+            T(&mut slab, &[single_tag, recipient_data, D(single_gift)])
+        } else {
+            // Multiple mode: [%multiple recipients_list gifts_list]
+            let multiple_tag = make_tas(&mut slab, "multiple").as_noun();
+
+            // Convert recipients to list
+            let recipients_noun =
+                recipients_vec
+                    .into_iter()
+                    .rev()
+                    .fold(D(0), |acc, (num, pubkeys)| {
+                        // Create the inner list of pubkeys
+                        let pubkeys_noun = pubkeys.into_iter().rev().fold(D(0), |acc, pubkey| {
+                            let pubkey_noun = make_tas(&mut slab, &pubkey).as_noun();
+                            Cell::new(&mut slab, pubkey_noun, acc).as_noun()
+                        });
+
+                        // Create the pair of [number pubkeys_list]
+                        let pair = T(&mut slab, &[D(num), pubkeys_noun]);
+                        Cell::new(&mut slab, pair, acc).as_noun()
+                    });
+
+            // Convert gifts to list
+            let gifts_noun = gifts_vec.into_iter().rev().fold(D(0), |acc, amount| {
+                Cell::new(&mut slab, D(amount), acc).as_noun()
             });
 
-        // Convert gifts to list
-        let gifts_noun = gifts_vec.into_iter().rev().fold(D(0), |acc, amount| {
-            Cell::new(&mut slab, D(amount), acc).as_noun()
-        });
-
-        let fee_noun = D(fee);
-        let index_noun = match index {
-            Some(i) => {
-                let inner = D(i);
-                T(&mut slab, &[D(0), inner])
-            }
-            None => D(0),
+            T(&mut slab, &[multiple_tag, recipients_noun, gifts_noun])
         };
 
         // Convert timelock intent to noun
@@ -793,9 +842,7 @@ impl Wallet {
 
         Self::wallet(
             "simple-spend",
-            &[
-                names_noun, recipients_noun, gifts_noun, fee_noun, index_noun, timelock_intent_noun,
-            ],
+            &[names_noun, order_noun, fee_noun, sign_key_noun, timelock_intent_noun],
             Operation::Poke,
             &mut slab,
         )
@@ -992,8 +1039,11 @@ async fn main() -> Result<(), NockAppError> {
             hardened,
             label,
         } => Wallet::derive_child(*index, *hardened, label),
-
-        Commands::SignTx { draft, index } => Wallet::sign_tx(draft, *index),
+        Commands::SignTx {
+            draft,
+            index,
+            hardened,
+        } => Wallet::sign_tx(draft, *index, *hardened),
         Commands::ImportKeys { file, key } => {
             if let Some(file_path) = file {
                 Wallet::import_keys(file_path)
@@ -1035,6 +1085,7 @@ async fn main() -> Result<(), NockAppError> {
             gifts,
             fee,
             index,
+            hardened,
             timelock_intent,
             timelock_min,
         } => {
@@ -1061,6 +1112,7 @@ async fn main() -> Result<(), NockAppError> {
                 gifts.clone(),
                 *fee,
                 *index,
+                *hardened,
                 vec![parsed_timelock_intent],
             )
         }
@@ -1260,11 +1312,12 @@ mod tests {
         let wire = WalletWire::Command(Commands::SignTx {
             draft: bundle_path.to_string(),
             index: None,
+            hardened: false,
         })
         .to_wire();
 
         // Test signing with valid indices
-        let (noun, op) = Wallet::sign_tx(bundle_path, None)?;
+        let (noun, op) = Wallet::sign_tx(bundle_path, None, false)?;
         let sign_result = wallet.app.poke(wire, noun.clone()).await?;
 
         println!("sign_result: {:?}", sign_result);
@@ -1272,10 +1325,11 @@ mod tests {
         let wire = WalletWire::Command(Commands::SignTx {
             draft: bundle_path.to_string(),
             index: Some(1),
+            hardened: false,
         })
         .to_wire();
 
-        let (noun, op) = Wallet::sign_tx(bundle_path, Some(1))?;
+        let (noun, op) = Wallet::sign_tx(bundle_path, Some(1), false)?;
         let sign_result = wallet.app.poke(wire, noun.clone()).await?;
 
         println!("sign_result: {:?}", sign_result);
@@ -1283,10 +1337,11 @@ mod tests {
         let wire = WalletWire::Command(Commands::SignTx {
             draft: bundle_path.to_string(),
             index: Some(255),
+            hardened: false,
         })
         .to_wire();
 
-        let (noun, op) = Wallet::sign_tx(bundle_path, Some(255))?;
+        let (noun, op) = Wallet::sign_tx(bundle_path, Some(255), false)?;
         let sign_result = wallet.app.poke(wire, noun.clone()).await?;
 
         println!("sign_result: {:?}", sign_result);
@@ -1502,6 +1557,7 @@ mod tests {
             gifts.clone(),
             fee,
             None,
+            false,
             vec![TimelockIntent::none()],
         )?;
         let wire = WalletWire::Command(Commands::SimpleSpend {
@@ -1510,6 +1566,7 @@ mod tests {
             gifts: gifts.clone(),
             fee: fee.clone(),
             index: None,
+            hardened: false,
             timelock_intent: "none".to_string(),
             timelock_min: None,
         })
@@ -1545,6 +1602,7 @@ mod tests {
             gifts.clone(),
             fee,
             None,
+            false,
             vec![TimelockIntent::none()],
         )?;
 
@@ -1561,6 +1619,7 @@ mod tests {
             gifts: gifts.clone(),
             fee: fee.clone(),
             index: None,
+            hardened: false,
             timelock_intent: "none".to_string(),
             timelock_min: None,
         })
