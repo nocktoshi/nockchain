@@ -1121,13 +1121,9 @@ impl Serf {
                     self.context.stack.preserve(&mut fec);
                     self.preserve_event_update_leftovers();
                 }
-                Ok(self.poke_bail(eve, eve, ovo, fec))
+                Ok(fec)
             }
-            Err(goof_crud) => {
-                let stack = &mut self.context.stack;
-                let lud = T(stack, &[goof_crud, goof, D(0)]);
-                Ok(self.poke_bail_noun(lud))
-            }
+            Err(goof_crud) => Err(CrownError::KernelError(Some(goof_crud))),
         }
     }
 
