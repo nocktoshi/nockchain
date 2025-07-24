@@ -26,19 +26,19 @@ const HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(15);
 const IDENTIFY_INTERVAL: Duration = Duration::from_secs(60);
 
 /** Maximum number of established *incoming* connections */
-const MAX_ESTABLISHED_INCOMING_CONNECTIONS: u32 = 80;
+const MAX_ESTABLISHED_INCOMING_CONNECTIONS: u32 = 256;
 
 /** Maximum number of established *incoming* connections */
-const MAX_ESTABLISHED_OUTGOING_CONNECTIONS: u32 = 16;
+const MAX_ESTABLISHED_OUTGOING_CONNECTIONS: u32 = 32;
 
 /** Maximum number of established connections */
-const MAX_ESTABLISHED_CONNECTIONS: u32 = 96;
+const MAX_ESTABLISHED_CONNECTIONS: u32 = 290;
 
 /** Maximum number of established connections with a single peer ID */
 const MAX_ESTABLISHED_CONNECTIONS_PER_PEER: u32 = 2;
 
 /** Maximum pending incoming connections */
-const MAX_PENDING_INCOMING_CONNECTIONS: u32 = 32;
+const MAX_PENDING_INCOMING_CONNECTIONS: u32 = 64;
 
 /** Maximum pending outcoing connections */
 const MAX_PENDING_OUTGOING_CONNECTIONS: u32 = 32;
