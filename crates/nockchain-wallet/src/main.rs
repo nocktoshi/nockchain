@@ -200,7 +200,6 @@ pub enum Commands {
     /// Signs a transaction
     SignTx {
         /// Path to input bundle file
-        #[arg(short, long)]
         draft: String,
 
         /// Optional key index to use for signing [0, 2^31)
@@ -214,7 +213,6 @@ pub enum Commands {
     /// Generate a master private key from a seed phrase
     GenMasterPrivkey {
         /// Seed phrase to generate master private key
-        #[arg(short, long)]
         seedphrase: String,
     },
 
@@ -250,14 +248,12 @@ pub enum Commands {
     /// List notes by public key
     ListNotesByPubkey {
         /// Optional public key to filter notes
-        #[arg(short, long)]
         pubkey: Option<String>,
     },
 
     /// List notes by public key in CSV format
     ListNotesByPubkeyCsv {
         /// Public key to filter notes
-        #[arg(short, long)]
         pubkey: String,
     },
 
@@ -292,7 +288,6 @@ pub enum Commands {
     /// Create a transaction from a draft file
     SendTx {
         /// Draft file to create transaction from
-        #[arg(short, long)]
         draft: String,
     },
 
@@ -305,7 +300,6 @@ pub enum Commands {
     /// Import a master public key
     ImportMasterPubkey {
         // Path to keys file generated from export-master-pubkey
-        #[arg(short, long)]
         key_path: String,
     },
 
@@ -1166,8 +1160,16 @@ async fn main() -> Result<(), NockAppError> {
         wallet.app.add_io_driver(markdown_driver()).await;
         wallet.app.add_io_driver(exit_driver()).await;
 
-        wallet.app.run().await?;
-        Ok(())
+        match wallet.app.run().await {
+            Ok(_) => {
+                info!("Command executed successfully");
+                Ok(())
+            }
+            Err(e) => {
+                error!("Command failed: {}", e);
+                Err(e)
+            }
+        }
     }
 }
 

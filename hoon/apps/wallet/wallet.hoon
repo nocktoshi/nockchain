@@ -1033,14 +1033,14 @@
       =+  (to-b58:nname:transact name.note)
       :((cury cat 3) '[' first ' ' last ']')
       '\0a- assets: '
-      (scot %ui assets.note)
+      (format-ui assets.note)
       '\0a- block height: '
-      (scot %ui origin-page.note)
+      (format-ui origin-page.note)
       '\0a- source: '
       (to-b58:hash:transact p.source.note)
       '\0a## lock'
       '\0a- m: '
-      (scot %ui m.lock.note)
+      (format-ui m.lock.note)
       '\0a- signers: '
     ==
   %-  crip
@@ -1059,6 +1059,11 @@
   %-  need
   %-  de:md
   (display-note-cord note)
+::
+++  format-ui
+  |=  @
+  ^-  @t
+  (rsh [3 2] (scot %ui +<))
 ::
 ++  show
   |=  [=state =path]
@@ -1164,8 +1169,7 @@
   =/  cause=(unit cause)
     %-  (soft cause)
     cause.input.ovum
-  =/  success  [%exit 0]
-  =/  failure  [%exit 1]
+  =/  failure=effect  [%markdown '## Poke failed']
   ?~  cause
     %-  (debug "input does not have a proper cause: {<cause.input.ovum>}")
     [~[failure] state]
@@ -1175,7 +1179,8 @@
     =^  effs  state  process
     ::  check for pending balance commands and execute them
     =^  pending-effs  state  handle-pending-commands
-    [(weld effs pending-effs) state]
+    :_  state
+    (weld effs pending-effs)
   ?-  -.cause
       %npc-bind              (handle-npc cause)
       %show                  (show state path.cause)
@@ -1663,6 +1668,7 @@
 
         - import key: {(trip extended-key)}
         - pubkey: {<(en:base58:wrap p.key.master-pubkey-coil)>}
+        - private key: {<(en:base58:wrap p.key.master-privkey-coil)>}
         - chaincode: {<(en:base58:wrap cc.master-pubkey-coil)>}
         """
         [%exit 0]
@@ -1700,7 +1706,7 @@
         """
         ## pubkeys
 
-        {<base58-keys>}
+        {?~(base58-keys "No pubkeys found" <base58-keys>)}
         """
         [%exit 0]
     ==
@@ -1867,6 +1873,7 @@
       ## wallet notes
 
       """
+      =-  ?:  =("" -)  "No notes found"  -
       %-  zing
       %+  turn  ~(val z-by:zo balance.state)
       |=  =nnote:transact
@@ -1893,6 +1900,7 @@
           ## wallet notes for pubkey {<(to-b58:schnorr-pubkey:transact target-pubkey)>}
 
           """
+        =-  ?:  =("" -)  "No notes found"  -
         %-  zing
         %+  turn  matching-notes
         |=  [* =nnote:transact]

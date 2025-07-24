@@ -18,10 +18,13 @@ The wallet supports importing and exporting keys:
 nockchain-wallet export-keys
 
 # Import keys from the exported file
-nockchain-wallet import-keys --input keys.export
+nockchain-wallet import-keys --file keys.export
 
-# Import a master public key and chain code
-nockchain-wallet import-master-pubkey --key <base58-key> --chain-code <base58-chain-code>
+# Import an extended key string
+nockchain-wallet import-keys --key "zprv..."
+
+# Import a master public key from exported file
+nockchain-wallet import-master-pubkey keys.export
 ```
 
 The exported keys file contains all wallet keys as a `jam` file that can be imported on another instance.
@@ -50,7 +53,7 @@ Note: Make sure nockchain is running and the socket path matches your nockchain 
 ### Generate Master Private Key from Seed Phrase
 
 ```bash
-nockchain-wallet gen-master-privkey --seedphrase "your seed phrase here"
+nockchain-wallet gen-master-privkey "your seed phrase here"
 ```
 
 Creates a master private key deterministically from a BIP39-style seed phrase.
@@ -58,7 +61,7 @@ Creates a master private key deterministically from a BIP39-style seed phrase.
 ### Generate Master Public Key from Private Key
 
 ```bash
-nockchain-wallet gen-master-pubkey --master-privkey <private-key>
+nockchain-wallet gen-master-pubkey --master-privkey <private-key> --chain-code <chain-code>
 ```
 
 Derives the master public key from a master private key.
@@ -66,7 +69,7 @@ Derives the master public key from a master private key.
 ### Derive Child Key
 
 ```bash
-nockchain-wallet derive-child --key-type <pub|priv> --index <0-255>
+nockchain-wallet derive-child --index <0-2147483647> --hardened --label <label>
 ```
 
 Derives a child public or private key at the given index from the current master key.
@@ -87,10 +90,18 @@ Displays all notes (UTXOs) currently managed by the wallet, sorted by assets.
 ### List Notes by Public Key
 
 ```bash
-nockchain-wallet list-notes-by-pubkey --pubkey <public-key>
+nockchain-wallet list-notes-by-pubkey <public-key>
 ```
 
 Shows only the notes associated with the specified public key. Useful for filtering wallet contents by address or for multisig scenarios.
+
+### List Notes by Public Key (CSV format)
+
+```bash
+nockchain-wallet list-notes-by-pubkey-csv <public-key>
+```
+
+Outputs matching notes in CSV format suitable for analysis or reporting.
 
 
 ## Transaction Creation
@@ -122,10 +133,13 @@ nockchain-wallet simple-spend \
 
 ```bash
 # Sign the transaction
-nockchain-wallet sign-tx --draft path/to/draft.draft
+nockchain-wallet sign-tx path/to/draft.draft
+
+# Optionally specify a key index for signing
+nockchain-wallet sign-tx path/to/draft.draft --index 5
 
 # Make and broadcast the signed transaction
-nockchain-wallet send-tx --draft path/to/draft.draft
+nockchain-wallet send-tx path/to/draft.draft
 ```
 
 Note: The draft file will be saved in `./drafts/` directory with a `.draft` extension.
