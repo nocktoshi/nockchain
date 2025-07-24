@@ -821,7 +821,7 @@ impl fmt::Debug for DebugPath<'_> {
                     } else if atom.is_indirect() {
                         write!(f, "{:?}", atom.as_indirect())?;
                     } else {
-                        write!(f, "{:?}", atom)?;
+                        write!(f, "{atom:?}")?;
                     }
                 }
                 Err(_) => {

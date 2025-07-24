@@ -282,7 +282,7 @@ pub mod util {
                 break;
             }
             tsil = T(stack, &[b_noun, tsil]);
-            a_mut = a_mut - 1;
+            a_mut -= 1;
         }
         Ok(tsil)
     }
@@ -329,7 +329,7 @@ pub mod util {
 
                 // try next position
                 hstk = hstk.as_cell()?.tail();
-                i = i + 1;
+                i += 1;
                 break;
             }
         }
@@ -351,7 +351,7 @@ pub mod util {
             }
             res.push(current_cell.head());
             list = current_cell.tail();
-            pos = pos + 1
+            pos += 1;
         }
 
         let mut res_cell = D(0);
