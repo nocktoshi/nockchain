@@ -348,7 +348,7 @@ fn serf_loop<C: SerfCheckpoint>(
                     ker_hash: serf.ker_hash,
                     event_num: serf.event_num.load(Ordering::SeqCst),
                 });
-                let _ = result.send(load_state).inspect_err(|err| {
+                let _ = result.send(load_state).inspect_err(|_err| {
                     debug!("Failed to send to dropped channel");
                 });
             }
@@ -388,7 +388,7 @@ fn serf_loop<C: SerfCheckpoint>(
                         Ok(slab)
                     },
                 );
-                let _ = result.send(kernel_state_slab).inspect_err(|e| {
+                let _ = result.send(kernel_state_slab).inspect_err(|_e| {
                     debug!("Tried to send to dropped result channel");
                 });
                 let action_elapsed = action_start.elapsed();
@@ -405,7 +405,7 @@ fn serf_loop<C: SerfCheckpoint>(
                     slab.copy_into(cold_state_noun);
                     slab
                 };
-                let _ = result.send(cold_state_slab).inspect_err(|e| {
+                let _ = result.send(cold_state_slab).inspect_err(|_e| {
                     debug!("Could not send cold state to dropped channel.");
                 });
                 let action_elapsed = action_start.elapsed();
@@ -435,7 +435,7 @@ fn serf_loop<C: SerfCheckpoint>(
                 if inhibit.load(Ordering::SeqCst) {
                     let _ = result
                         .send(Err(CrownError::Unknown("Serf stopping".to_string())))
-                        .inspect_err(|e| {
+                        .inspect_err(|_e| {
                             debug!("Tried to send inhibited peek state to dropped channel");
                         });
                 } else {
@@ -446,7 +446,7 @@ fn serf_loop<C: SerfCheckpoint>(
                         slab.copy_into(noun);
                         slab
                     });
-                    let _ = result.send(noun_slab_res).inspect_err(|e| {
+                    let _ = result.send(noun_slab_res).inspect_err(|_e| {
                         debug!("Tried to send peek state to dropped channel");
                     });
                 };
@@ -464,7 +464,7 @@ fn serf_loop<C: SerfCheckpoint>(
                 if inhibit.load(Ordering::SeqCst) {
                     let _ = result
                         .send(Err(CrownError::Unknown("Serf stopping".to_string())))
-                        .inspect_err(|e| {
+                        .inspect_err(|_e| {
                             debug!("Failed to send inihibited poke result from serf thread");
                         });
                 } else {
@@ -475,7 +475,7 @@ fn serf_loop<C: SerfCheckpoint>(
                         slab.copy_into(noun);
                         slab
                     });
-                    let _ = result.send(noun_slab_res).inspect_err(|e| {
+                    let _ = result.send(noun_slab_res).inspect_err(|_e| {
                         debug!("Failed to send poke result from serf thread");
                     });
                 };
@@ -486,7 +486,7 @@ fn serf_loop<C: SerfCheckpoint>(
             }
             SerfAction::ProvideMetrics { metrics, result } => {
                 serf.metrics = Some(metrics);
-                let _ = result.send(()).inspect_err(|e| {
+                let _ = result.send(()).inspect_err(|_e| {
                     debug!("Failed to send metric-provision result from serf thread");
                 });
                 let action_elapsed = action_start.elapsed();

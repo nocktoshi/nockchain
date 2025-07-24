@@ -802,6 +802,13 @@ async fn handle_request_response(
                                 Err(err)?
                             }
                         }) else {
+                            swarm_tx
+                                .send(SwarmAction::SendResponse {
+                                    channel,
+                                    response: NockchainResponse::Ack { acked: true },
+                                })
+                                .await
+                                .map_err(|_| NockAppError::OtherError)?;
                             return Ok(());
                         };
                         (scry_res_slab, false)
@@ -814,7 +821,7 @@ async fn handle_request_response(
                             match create_scry_response(scry_res, "heard-block", &mut res_slab) {
                                 Left(()) => {
                                     trace!("No data found for incoming block by-height request");
-                                    return Ok(());
+                                    NockchainResponse::Ack { acked: true }
                                 }
                                 Right(result) => {
                                     if !cache_hit {
@@ -832,7 +839,7 @@ async fn handle_request_response(
                                     trace!("No data found for incoming elders request");
                                     let mut tracker = message_tracker.lock().await;
                                     tracker.elders_negative_cache.insert(id.clone());
-                                    return Ok(());
+                                    NockchainResponse::Ack { acked: true }
                                 }
                                 Right(result) => {
                                     if !cache_hit {
@@ -848,7 +855,7 @@ async fn handle_request_response(
                             match create_scry_response(scry_res, "heard-tx", &mut res_slab) {
                                 Left(()) => {
                                     trace!("No data found for incoming raw-tx request");
-                                    return Ok(());
+                                    NockchainResponse::Ack { acked: true }
                                 }
                                 Right(result) => {
                                     if !cache_hit {
