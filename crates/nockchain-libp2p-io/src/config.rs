@@ -9,7 +9,7 @@ use serde::Deserialize;
 const KADEMLIA_BOOTSTRAP_INTERVAL: Duration = Duration::from_secs(300);
 
 // If the --force-peer cli arg is passed, we will force dial it every FORCE_PEER_BOOT_INTERVAL
-const FORCE_PEER_DIAL_INTERVAL: Duration = Duration::from_secs(600);
+const FORCE_PEER_DIAL_INTERVAL: Duration = Duration::from_secs(1200);
 
 /** How long we should keep a peer connection alive with no traffic */
 const SWARM_IDLE_TIMEOUT: Duration = Duration::from_secs(60);
@@ -19,11 +19,11 @@ const SWARM_IDLE_TIMEOUT: Duration = Duration::from_secs(60);
 // TODO: Make command-line configurable
 const INITIAL_PEER_RETRIES: u32 = 5;
 /** How often we should send a keep-alive message to a peer */
-const KEEP_ALIVE_INTERVAL: Duration = Duration::from_secs(10);
+const KEEP_ALIVE_INTERVAL: Duration = Duration::from_secs(12);
 /** How long should we wait before timing out the handshake */
-const HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(15);
+const HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(20);
 /** How often we should send an identify message to a peer */
-const IDENTIFY_INTERVAL: Duration = Duration::from_secs(60);
+const IDENTIFY_INTERVAL: Duration = Duration::from_secs(120);
 
 /** Maximum number of established *incoming* connections */
 const MAX_ESTABLISHED_INCOMING_CONNECTIONS: u32 = 256;
@@ -32,7 +32,7 @@ const MAX_ESTABLISHED_INCOMING_CONNECTIONS: u32 = 256;
 const MAX_ESTABLISHED_OUTGOING_CONNECTIONS: u32 = 32;
 
 /** Maximum number of established connections */
-const MAX_ESTABLISHED_CONNECTIONS: u32 = 290;
+const MAX_ESTABLISHED_CONNECTIONS: u32 = 288;
 
 /** Maximum number of established connections with a single peer ID */
 const MAX_ESTABLISHED_CONNECTIONS_PER_PEER: u32 = 2;
