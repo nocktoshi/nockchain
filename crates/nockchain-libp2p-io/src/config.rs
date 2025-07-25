@@ -12,7 +12,7 @@ const KADEMLIA_BOOTSTRAP_INTERVAL: Duration = Duration::from_secs(300);
 const FORCE_PEER_DIAL_INTERVAL: Duration = Duration::from_secs(1200);
 
 /** How long we should keep a peer connection alive with no traffic */
-const SWARM_IDLE_TIMEOUT: Duration = Duration::from_secs(60);
+const SWARM_IDLE_TIMEOUT: Duration = Duration::from_secs(180);
 
 // Core protocol (QUIC/ping/etc) constants
 /** How many times we should retry dialing our initial peers if we can't get Kademlia initialized */
@@ -359,7 +359,7 @@ impl LibP2PConfig {
 
     /// Get request response max concurrent streams
     pub fn request_response_max_concurrent_streams(&self) -> usize {
-        self.max_established_connections as usize * 2
+        self.max_established_connections as usize * 8
     }
 
     pub fn peer_status_interval_secs(&self) -> std::time::Duration {

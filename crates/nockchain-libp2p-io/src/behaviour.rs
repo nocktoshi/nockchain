@@ -9,7 +9,6 @@ use libp2p::{
 };
 
 use crate::config::LibP2PConfig;
-use crate::keepalive::behaviour::KeepAliveBehaviour;
 use crate::messages::{NockchainRequest, NockchainResponse};
 
 #[derive(NetworkBehaviour)]
@@ -34,8 +33,6 @@ pub(crate) struct NockchainBehaviour {
     pub peer_store: libp2p::peer_store::Behaviour<libp2p::peer_store::memory_store::MemoryStore>,
     /// Actual comms with custom connection handler that keeps connections alive
     pub request_response: cbor::Behaviour<NockchainRequest, NockchainResponse>,
-    /// Simple keep-alive behavior to prevent connection churn
-    keep_alive: KeepAliveBehaviour,
 }
 
 impl NockchainBehaviour {
@@ -102,7 +99,6 @@ impl NockchainBehaviour {
                 connection_limits: connection_limits_behaviour,
                 memory_connection_limits,
                 peer_store: peer_store_behaviour,
-                keep_alive: KeepAliveBehaviour,
             }
         }
     }
@@ -159,12 +155,5 @@ impl From<request_response::Event<NockchainRequest, NockchainResponse>> for Nock
 impl From<libp2p::peer_store::memory_store::Event> for NockchainEvent {
     fn from(event: libp2p::peer_store::memory_store::Event) -> Self {
         Self::PeerStore(event)
-    }
-}
-
-impl From<()> for NockchainEvent {
-    fn from(_: ()) -> Self {
-        // KeepAliveBehaviour doesn't emit any events, so this should never be called
-        unreachable!("KeepAliveBehaviour doesn't emit events")
     }
 }
