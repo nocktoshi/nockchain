@@ -6,7 +6,7 @@ include .env
 
 # Set default env variables if not set in .env
 export RUST_BACKTRACE ?= full
-export RUST_LOG ?= info,nockchain=info,nockchain_libp2p_io=info,libp2p=info,libp2p_quic=info
+export RUST_LOG ?= info
 export MINIMAL_LOG_FORMAT ?= true
 export MINING_PUBKEY ?= 2qwq9dQRZfpFx8BDicghpMRnYGKZsZGxxhh9m362pzpM9aeo276pR1yHZPS41y3CW3vPKxeYM8p8fzZS8GXmDGzmNNCnVNekjrSYogqfEFMqwhHh5iCjaKPaDTwhupWqiXj6
 export
@@ -93,19 +93,19 @@ HOON_SRCS := $(find hoon -type file -name '*.hoon')
 assets/dumb.jam: ensure-dirs hoon/apps/dumbnet/outer.hoon $(HOON_SRCS)
 	$(call show_env_vars)
 	rm -f assets/dumb.jam
-	RUST_LOG=trace hoonc hoon/apps/dumbnet/outer.hoon hoon
+	hoonc hoon/apps/dumbnet/outer.hoon hoon
 	mv out.jam assets/dumb.jam
 
 ## Build wal.jam with hoonc
 assets/wal.jam: ensure-dirs hoon/apps/wallet/wallet.hoon $(HOON_SRCS)
 	$(call show_env_vars)
 	rm -f assets/wal.jam
-	RUST_LOG=trace hoonc hoon/apps/wallet/wallet.hoon hoon
+	hoonc hoon/apps/wallet/wallet.hoon hoon
 	mv out.jam assets/wal.jam
 
 ## Build mining.jam with hoonc
 assets/miner.jam: ensure-dirs hoon/apps/dumbnet/miner.hoon $(HOON_SRCS)
 	$(call show_env_vars)
 	rm -f assets/miner.jam
-	RUST_LOG=trace hoonc hoon/apps/dumbnet/miner.hoon hoon
+	hoonc hoon/apps/dumbnet/miner.hoon hoon
 	mv out.jam assets/miner.jam
