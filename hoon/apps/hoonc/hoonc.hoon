@@ -4,7 +4,7 @@
 |%
 +$  state-0  [%0 *]
 +$  state-1  [%1 *]
-+$  state-2  [%2 *]
++$  state-2  [%2 cached-hoon=(unit (trap vase)) *]
 +$  state-3  [%3 cached-hoon=(unit (trap vase)) bc=build-cache pc=parse-cache]
 +$  versioned-state
   $%  state-0
@@ -131,8 +131,10 @@
     *choo-state
   ::
       %2
-    ~>  %slog.[0 leaf+"update 2-to-3, starting from scratch"]
-    *choo-state
+    ~>  %slog.[0 leaf+"update 2-to-3, erasing caches but keeping honc"]
+    %*  .  *choo-state
+      cached-hoon  cached-hoon.old
+    ==
   ::
       %3
     ~>  %slog.[0 leaf+"no upgrade"]
@@ -769,6 +771,7 @@
 ::    dependencies will leak into the result.
 ::
 ++  shot
+  ~/  %shot
   |=  [gat=(trap vase) sam=(trap vase)]
   ^-  (trap vase)
   =/  [typ=type gen=hoon]
@@ -785,6 +788,7 @@
 ::  the resulting trap vases.
 ::
 ++  swet
+  ~/  %swet
   |=  [tap=(trap vase) gen=hoon]
   ^-  (trap vase)
   =/  gun  (~(mint ut p:$:tap) %noun gen)
