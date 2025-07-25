@@ -747,7 +747,15 @@ async fn handle_request_response(
                             }
                             Ok(CacheResponse::NegativeCached) => {
                                 trace!("Negative-cached response for request");
-                                return Ok(()); // short-circuit
+                                // short-circuit
+                                swarm_tx
+                                    .send(SwarmAction::SendResponse {
+                                        channel,
+                                        response: NockchainResponse::Ack { acked: true },
+                                    })
+                                    .await
+                                    .map_err(|_| NockAppError::OtherError)?;
+                                return Ok(());
                             }
                             Ok(CacheResponse::NotCached) => None,
                             Err(e) => {
