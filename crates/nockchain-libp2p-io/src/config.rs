@@ -67,6 +67,9 @@ const PEER_STORE_RECORD_CAPACITY: usize = 1024;
 // Default timeout for network-originating pokes
 const POKE_TIMEOUT_SECS: u64 = 20;
 
+// Default max failed pings before closing connection
+const FAILED_PINGS_BEFORE_CLOSE: u64 = 4;
+
 /// Configuration struct that allows overriding default constants from environment variables
 #[derive(Debug, Deserialize, Clone)]
 pub struct LibP2PConfig {
@@ -172,6 +175,10 @@ pub struct LibP2PConfig {
     /// Timeout for pokes
     #[serde(default = "default_poke_timeout_secs")]
     pub poke_timeout_secs: u64,
+
+    /// Number of failed pings before closing connection
+    #[serde(default = "default_failed_pings_before_close")]
+    pub failed_pings_before_close: u64,
 }
 
 // Default value functions
@@ -249,6 +256,10 @@ fn default_poke_timeout_secs() -> u64 {
     POKE_TIMEOUT_SECS // Timeout for pokes
 }
 
+fn default_failed_pings_before_close() -> u64 {
+    FAILED_PINGS_BEFORE_CLOSE // Number of failed pings before closing connection
+}
+
 // Do _not_ use this default implementation in production code. It's just a fallback.
 // Use from_env() to load from environment variables with sensible defaults.
 impl Default for LibP2PConfig {
@@ -276,6 +287,7 @@ impl Default for LibP2PConfig {
             elders_debounce_reset_secs: default_elders_debounce_reset_secs(),
             seen_tx_clear_interval: default_seen_tx_clear_interval(),
             poke_timeout_secs: default_poke_timeout_secs(),
+            failed_pings_before_close: default_failed_pings_before_close(),
         }
     }
 }
@@ -384,5 +396,9 @@ impl LibP2PConfig {
 
     pub fn poke_timeout(&self) -> Duration {
         Duration::from_secs(self.poke_timeout_secs)
+    }
+
+    pub fn failed_pings_before_close(&self) -> u64 {
+        self.failed_pings_before_close
     }
 }

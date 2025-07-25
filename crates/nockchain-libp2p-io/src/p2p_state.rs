@@ -1,5 +1,5 @@
 use std::collections::{BTreeMap, BTreeSet};
-use std::net::Ipv4Addr;
+use std::net::IpAddr;
 use std::sync::Arc;
 
 use libp2p::core::ConnectedPoint;
@@ -9,11 +9,28 @@ use nockapp::noun::slab::NounSlab;
 use nockapp::NockAppError;
 use nockvm::noun::Noun;
 use rand::prelude::SliceRandom;
-use tracing::{info, trace};
+use tracing::{debug, info, trace, warn};
 
 use crate::messages::NockchainDataRequest;
 use crate::metrics::NockchainP2PMetrics;
+use crate::p2p_util::MultiaddrExt;
 use crate::tip5_util::tip5_hash_to_base58;
+
+struct IpInfo {
+    request_count: u64,
+    ping_failure_count: u64,
+    connections: BTreeSet<ConnectionId>,
+}
+
+impl Default for IpInfo {
+    fn default() -> Self {
+        IpInfo {
+            request_count: 0,
+            ping_failure_count: 0,
+            connections: BTreeSet::new(),
+        }
+    }
+}
 
 pub struct P2PState {
     metrics: Arc<NockchainP2PMetrics>,
@@ -24,7 +41,7 @@ pub struct P2PState {
     // subset of connections: all inbound connections
     inbound_connections: BTreeMap<ConnectionId, PeerId>,
     pub(crate) peer_connections: BTreeMap<PeerId, BTreeMap<ConnectionId, Multiaddr>>,
-    request_counts_by_ip: BTreeMap<Ipv4Addr, u64>,
+    ip_info: BTreeMap<IpAddr, IpInfo>,
     pub seen_blocks: BTreeSet<String>,
     pub seen_txs: BTreeSet<String>,
     pub block_cache: BTreeMap<u64, NounSlab>,
@@ -47,7 +64,7 @@ impl P2PState {
             connections: BTreeMap::new(),
             inbound_connections: BTreeMap::new(),
             peer_connections: BTreeMap::new(),
-            request_counts_by_ip: BTreeMap::new(),
+            ip_info: BTreeMap::new(),
             seen_blocks: BTreeSet::new(),
             seen_txs: BTreeSet::new(),
             block_cache: BTreeMap::new(),
@@ -79,6 +96,22 @@ impl P2PState {
             new_map.insert(connection_id, addr.clone());
             self.peer_connections.insert(peer_id, new_map);
         }
+        if let Some(ip) = addr.ip_addr() {
+            if let Some(info) = self.ip_info.get_mut(&ip) {
+                info.connections.insert(connection_id);
+            } else {
+                let mut connections = BTreeSet::new();
+                connections.insert(connection_id);
+                self.ip_info.insert(
+                    ip,
+                    IpInfo {
+                        connections: BTreeSet::new(),
+                        request_count: 0,
+                        ping_failure_count: 0,
+                    },
+                );
+            }
+        }
         let peer_count = self.peer_connections.len() as f64;
         let _ = self.metrics.peer_count.swap(peer_count);
     }
@@ -87,10 +120,20 @@ impl P2PState {
         if let Some(peer_id) = self.connections.remove(&connection_id) {
             self.inbound_connections.remove(&connection_id);
             if let Some(c) = self.peer_connections.get_mut(&peer_id) {
-                c.remove(&connection_id);
+                let addr = c.remove(&connection_id);
                 if c.is_empty() {
                     self.peer_connections.remove(&peer_id);
                     self.remove_peer(&peer_id);
+                }
+                if let Some(addr) = addr {
+                    if let Some(ip) = addr.ip_addr() {
+                        if let Some(info) = self.ip_info.get_mut(&ip) {
+                            info.connections.remove(&connection_id);
+                            if info.connections.is_empty() {
+                                self.ip_info.remove(&ip);
+                            }
+                        }
+                    }
                 }
             }
         }
@@ -118,26 +161,57 @@ impl P2PState {
         }
     }
 
-    pub(crate) fn requested(&mut self, ip4: Ipv4Addr, threshhold: u64) -> Option<u64> {
-        if let Some(count) = self.request_counts_by_ip.get_mut(&ip4) {
-            *count += 1;
-            if *count >= threshhold {
-                Some(*count)
+    pub(crate) fn requested(&mut self, ip: IpAddr, threshhold: u64) -> Option<u64> {
+        if let Some(info) = self.ip_info.get_mut(&ip) {
+            info.request_count += 1;
+            if info.request_count >= threshhold {
+                Some(info.request_count)
             } else {
                 None
             }
         } else {
-            self.request_counts_by_ip.insert(ip4, 1);
-            if threshhold <= 1 {
-                Some(1)
-            } else {
-                None
-            }
+            warn!("Not tracking {ip} but it is connected. Please inform the developers.");
+            None
         }
     }
 
     pub(crate) fn reset_requests(&mut self) {
-        self.request_counts_by_ip.clear();
+        for (_ip, info) in self.ip_info.iter_mut() {
+            info.request_count = 0;
+        }
+    }
+
+    pub(crate) fn ping_succeeded(&mut self, connection: ConnectionId) {
+        let addr = self.connection_address(connection);
+        let Some(addr) = addr else {
+            warn!("No address for connection {connection}. Please inform the developers.");
+            return;
+        };
+        let Some(ip) = addr.ip_addr() else {
+            debug!("No IP address for connection {connection}.");
+            return;
+        };
+        if let Some(info) = self.ip_info.get_mut(&ip) {
+            info.ping_failure_count = 0;
+        }
+    }
+
+    pub(crate) fn ping_failed(&mut self, connection: ConnectionId) -> u64 {
+        let addr = self.connection_address(connection);
+        let Some(addr) = addr else {
+            warn!("No address for connection {connection}. Please inform the developers.");
+            return 0;
+        };
+        let Some(ip) = addr.ip_addr() else {
+            debug!("No IP address for connection {connection}.");
+            return 0;
+        };
+        if let Some(info) = self.ip_info.get_mut(&ip) {
+            info.ping_failure_count += 1;
+            info.ping_failure_count
+        } else {
+            0
+        }
     }
 
     pub(crate) fn connection_address(&self, connection_id: ConnectionId) -> Option<Multiaddr> {
@@ -345,7 +419,7 @@ pub enum CacheResponse {
 
 #[cfg(test)]
 mod tests {
-    use std::net::Ipv6Addr;
+    use std::net::{Ipv4Addr, Ipv6Addr};
     use std::sync::LazyLock;
 
     use nockapp::noun::slab::NounSlab;

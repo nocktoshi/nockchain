@@ -1,7 +1,7 @@
-use std::net::{Ipv4Addr, Ipv6Addr};
+use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 use std::str::FromStr;
 
-use libp2p::PeerId;
+use libp2p::{Multiaddr, PeerId};
 use nockapp::{AtomExt, NockAppError};
 use nockvm::noun::Noun;
 use tracing::warn;
@@ -24,5 +24,19 @@ impl PeerIdExt for PeerId {
         let peer_id_bytes = noun.as_atom()?.to_bytes_until_nul()?;
         let peer_id_str = String::from_utf8(peer_id_bytes)?;
         PeerId::from_str(&peer_id_str).map_err(|_| NockAppError::OtherError)
+    }
+}
+
+pub trait MultiaddrExt {
+    fn ip_addr(&self) -> Option<IpAddr>;
+}
+
+impl MultiaddrExt for Multiaddr {
+    fn ip_addr(&self) -> Option<IpAddr> {
+        self.iter().find_map(|component| match component {
+            libp2p::multiaddr::Protocol::Ip4(ip) => Some(IpAddr::V4(ip)),
+            libp2p::multiaddr::Protocol::Ip6(ip) => Some(IpAddr::V6(ip)),
+            _ => None,
+        })
     }
 }
