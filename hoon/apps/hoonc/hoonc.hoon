@@ -407,6 +407,7 @@
 ++  build-honc
   |=  hoon-txt=cord
   ^-  (trap vase)
+  ~&  "Please be patient, compiling hoon for the first time takes a while."
   (swet empty-trap-vase (ream hoon-txt))
 ::
 ::
