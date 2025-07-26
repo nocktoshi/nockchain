@@ -25,7 +25,7 @@ use crate::utils::error::{CrownError, ExternalError};
 use crate::{default_data_dir, AtomExt, NockApp};
 
 const DEFAULT_SAVE_INTERVAL: u64 = 120000;
-const DEFAULT_LOG_FILTER: &str = "info,slogger=trace";
+const DEFAULT_LOG_FILTER: &str = "info";
 
 #[derive(Debug, Clone, ValueEnum)]
 pub enum NockStackSize {
