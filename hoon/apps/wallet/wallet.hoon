@@ -33,7 +33,17 @@
 ::  .key:  public or private key
 ::  .cc: associated entropy (chain code)
 ::
-+$  coil  [%coil =key =cc]
+++  coil
+  =<  form
+  |%
+    +$  form  [%coil =key =cc]
+    ::
+    ++  to-b58
+      |=  =form
+      ^-  [key-b58=@t cc-b58=@t]
+      :-  (crip (en:base58:wrap p.key.form))
+      (crip (en:base58:wrap cc.form))
+  --
 ::
 ::    $meta: stored metadata for a key
 +$  meta
@@ -664,8 +674,6 @@
       ?:  ?=(%prv key-type)
         =/  public-key=@
           public-key:(from-private:s10 [p.key cc]:meta)
-        ~&  >  ['public-key' public-key]
-        ~&  >  ['master-pub' p.key:(public:^master master.state)]
         ?:  =(public-key p.key:(public:^master master.state))
           meta
         ~|("private key does not match public key" !!)
@@ -1204,7 +1212,6 @@
   |=  =ovum:moat
   |^
   ^-  [(list effect) ^state]
-  %-  (warn "debug printing may expose sensitive information")
   =/  =wire  wire.ovum
   =+  [@ src=@ta ver=@ rest=*]=wire.ovum
   %-  (debug "wire: {<[src ver `path`rest]>}")
@@ -1213,7 +1220,7 @@
     cause.input.ovum
   =/  failure=effect  [%markdown '## Poke failed']
   ?~  cause
-    %-  (debug "input does not have a proper cause: {<cause.input.ovum>}")
+    %-  (warn "input does not have a proper cause: {<cause.input.ovum>}")
     [~[failure] state]
   =/  cause  u.cause
   %-  (debug "cause: {<-.cause>}")
@@ -1259,7 +1266,6 @@
     ::
       %file
     ?>  ?=(%write +<.cause)
-    ~&  >  "%file %write: {<cause>}"
     [[%exit 0]~ state]
   ==
   ::
@@ -1478,17 +1484,25 @@
       %+  murn  ~(tap of new-keys)
       |=  [t=trek m=meta]
       ^-  (unit tape)
-      ?:  ?=(%coil -.m)
-        `(en:base58:wrap p.key.m)
-      ~
+      ?.  ?=(%coil -.m)  ~
+      =/  key-type=tape  ?:(?=(%pub -.key.m) "Public Key" "Private Key")
+      =/  key=@t  (slav %t (snag 1 (pout t)))
+      =+  (to-b58:coil m)
+      %-  some
+      """
+      - {key-type}: {(trip key-b58)}
+      - Parent Key: {(trip key)}
+      ---
+
+      """
     =.  master.state  `master-key
     :_  state(keys new-keys)
     :~  :-  %markdown
         %-  crip
         """
-        ## imported keys
+        ## Imported Keys
 
-        {<key-list>}
+        {(zing key-list)}
         """
         [%exit 0]
     ==
@@ -1562,12 +1576,12 @@
       :~  :-  %markdown
           %-  crip
           """
-          ## import failed
+          ## Import Failed
 
-          imported key at index {<ind:core>} does not match expected child of master key
+          Imported key at index {<ind:core>} does not match expected child of master key
 
-          - imported pubkey: {<imported-pubkey>}
-          - expected pubkey: {<expected-pubkey>}
+          - Imported Public Key: {<imported-pubkey>}
+          - Expected Public Key: {<expected-pubkey>}
           """
           [%exit 1]
       ==
@@ -1578,12 +1592,12 @@
     :~  :-  %markdown
         %-  crip
         """
-        ## imported import {extended-type} key
+        ## Imported {extended-type} Key
 
-        - import key: {(trip extended-key.cause)}
-        - label: {(trip key-label)}
-        - index: {<ind:core>}
-        - verified as child of master key
+        - Import Key: {(trip extended-key.cause)}
+        - Label: {(trip key-label)}
+        - Index: {<ind:core>}
+        - Verified as child of master key
         """
         [%exit 0]
     ==
@@ -1601,9 +1615,9 @@
         :-  %markdown
         %-  crip
         """
-        ## exported keys
+        ## Exported Keys
 
-        - path: {<path>}
+        - Path: {<path>}
         """
         [%exit 0]
     ==
@@ -1613,11 +1627,11 @@
     ?>  ?=(%export-master-pubkey -.cause)
     %-  (debug "export-master-pubkey")
     ?~  master.state
-      ~&  "wallet warning: no master keys available for export"
+      %-  (warn "wallet: no master keys available for export")
       [[%exit 0]~ state]
     =/  master-coil=coil  ~(master get:v %pub)
     ?.  ?=(%pub -.key.master-coil)
-      ~&  "wallet fatal: master pubkey malformed"
+      %-  (warn "wallet: fatal: master pubkey malformed")
       [[%exit 0]~ state]
     =/  dat-jam=@  (jam master-coil)
     =/  key-b58=tape  (en:base58:wrap p.key.master-coil)
@@ -1625,19 +1639,20 @@
     =/  extended-key=@t
       =/  core  (from-public:s10 [p.key cc]:master-coil)
       extended-public-key:core
+    =/  file-path=@t  'master-pubkey.export'
     :_  state
     :~  :-  %markdown
         %-  crip
         """
-        ## exported master public key:
+        ## Exported Master Public Key
 
-        - import key: {(trip extended-key)}
-        - pubkey: {key-b58}
-        - chaincode: {cc-b58}
-
+        - Import Key: {(trip extended-key)}
+        - Public Key: {key-b58}
+        - Chain Code: {cc-b58}
+        - File: {(trip file-path)}
         """
         [%exit 0]
-        [%file %write 'master-pubkey.export' dat-jam]
+        [%file %write file-path dat-jam]
     ==
   ::
   ++  do-import-master-pubkey
@@ -1655,10 +1670,10 @@
     :~  :-  %markdown
         %-  crip
         """
-        ## imported master public key:
+        ## Imported Master Public Key
 
-            - pubkey: {key-b58}
-            - chaincode: {cc-b58}
+        - Public Key: {key-b58}
+        - Chain Code: {cc-b58}
         """
         [%exit 0]
     ==
@@ -1680,7 +1695,19 @@
     =.  keys.state  (key:put:v master-pubkey-coil ~ public-label)
     =.  keys.state  (seed:put:v seedphrase.cause)
     %-  (debug "master.state: {<master.state>}")
-    [[%exit 0]~ state]
+    :_  state
+    :~  :-  %markdown
+        %-  crip
+        """
+        ## Master Key (Imported)
+
+        - Seed Phrase: {<seedphrase.cause>}
+        - Master Public Key: {(en:base58:wrap p.key.master-pubkey-coil)}
+        - Master Private Key: {(en:base58:wrap p.key.master-privkey-coil)}
+        - Chain Code: {(en:base58:wrap cc.master-privkey-coil)}
+        """
+        [%exit 0]
+    ==
   ::
   ++  do-gen-master-pubkey
     |=  =cause
@@ -1706,12 +1733,12 @@
     :~  :-  %markdown
         %-  crip
         """
-        ## master public key (import)
+        ## Master Public Key (Imported)
 
-        - import key: {(trip extended-key)}
-        - pubkey: {<(en:base58:wrap p.key.master-pubkey-coil)>}
-        - private key: {<(en:base58:wrap p.key.master-privkey-coil)>}
-        - chaincode: {<(en:base58:wrap cc.master-pubkey-coil)>}
+        - Import Key: {(trip extended-key)}
+        - Public Key: {(en:base58:wrap p.key.master-pubkey-coil)}
+        - Private Key: {(en:base58:wrap p.key.master-privkey-coil)}
+        - Chain Code: {(en:base58:wrap cc.master-pubkey-coil)}
         """
         [%exit 0]
     ==
@@ -1739,16 +1766,20 @@
     =/  base58-keys=(list tape)
       %+  turn  pubkeys
       |=  =coil
-      =/  pubkey=schnorr-pubkey:transact  pub:(from-public:s10 [p.key cc]:coil)
-      %-  trip
-      (to-b58:schnorr-pubkey:transact pubkey)
+      =/  [key-b58=@t cc-b58=@t]  (to-b58:^coil coil)
+      """
+      - Public Key: {<key-b58>}
+      - Chain Code: {<cc-b58>}
+      ---
+
+      """
     :_  state
     :~  :-  %markdown
         %-  crip
         """
-        ## pubkeys
+        ## Public Keys
 
-        {?~(base58-keys "No pubkeys found" <base58-keys>)}
+        {?~(base58-keys "No pubkeys found" (zing base58-keys))}
         """
         [%exit 0]
     ==
@@ -1767,7 +1798,7 @@
     :~  :-  %markdown
         %-  crip
         """
-        ## seedphrase
+        ## Seed Phrase
 
         {<seedphrase>}
         """
@@ -1787,11 +1818,11 @@
     :~  :-  %markdown
         %-  crip
         """
-        ## master public key
+        ## Master Public Key
 
-        - import key: {(trip extended-key)}
-        - pubkey: {<p.key.meta>}
-        - chaincode: {<cc.meta>}
+        - Import Key: {<extended-key>}
+        - Public Key: {(en:base58:wrap p.key.meta)}
+        - Chain Code: {(en:base58:wrap cc.meta)}
         """
         [%exit 0]
     ==
@@ -1811,14 +1842,15 @@
     :~  :-  %markdown
         %-  crip
         """
-        ## master private key
+        ## Master Private Key
 
-        - import key: {(trip extended-key)}
-        - private key: {key-b58}
-        - chaincode: {cc-b58}
+        - Import Key: {<extended-key>}
+        - Private Key: {(en:base58:wrap p.key.meta)}
+        - Chain Code: {(en:base58:wrap cc.meta)}
         """
         [%exit 0]
     ==
+  ::
   ++  do-scan
     |=  =cause
     ?>  ?=(%scan -.cause)
@@ -1912,7 +1944,7 @@
       %-  crip
       %+  welp
       """
-      ## wallet notes
+      ## Wallet Notes
 
       """
       =-  ?:  =("" -)  "No notes found"  -
@@ -1939,7 +1971,7 @@
         %-  crip
         %+  welp
           """
-          ## wallet notes for pubkey {<(to-b58:schnorr-pubkey:transact target-pubkey)>}
+          ## Wallet Notes for Public Key {<(to-b58:schnorr-pubkey:transact target-pubkey)>}
 
           """
         =-  ?:  =("" -)  "No notes found"  -
@@ -2371,8 +2403,32 @@
       |=  [=coil keys=_keys.state]
       =.  keys.state  keys
       (key:put:v coil `index label.cause)
-    :-  [%exit 0]~
-    state
+    ::
+    =/  key-text=tape
+      %-  zing
+      %+  turn  ~(tap in derived-keys)
+      |=  =coil
+      =/  [key-b58=@t cc-b58=@t]  (to-b58:^coil coil)
+      =/  key-type=tape
+        ?:  ?=(%pub -.key.coil)
+          "Public Key"
+        "Private Key"
+      """
+      - {key-type}: {<key-b58>}
+      - Chain Code: {<cc-b58>}
+      """
+    :_  state
+    :~
+      :-  %markdown
+      %-  crip
+      """
+      ## Derive Child
+
+      ### Derived Keys
+      {key-text}
+      """
+      [%exit 0]
+    ==
   ::
   ++  do-sign-tx
     |=  =cause

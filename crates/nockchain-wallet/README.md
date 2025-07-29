@@ -23,6 +23,12 @@ nockchain-wallet import-keys --file keys.export
 # Import an extended key string
 nockchain-wallet import-keys --key "zprv..."
 
+# Generate master private key from seed phrase
+nockchain-wallet import-keys --seedphrase "your seed phrase here"
+
+# Generate master public key from private key and chain code
+nockchain-wallet import-keys --master-privkey <private-key> --chain-code <chain-code>
+
 # Import a master public key from exported file
 nockchain-wallet import-master-pubkey keys.export
 ```
@@ -49,27 +55,16 @@ Note: Make sure nockchain is running and the socket path matches your nockchain 
 
 # Advanced Options
 
-
-### Generate Master Private Key from Seed Phrase
-
-```bash
-nockchain-wallet gen-master-privkey "your seed phrase here"
-```
-
-Creates a master private key deterministically from a BIP39-style seed phrase.
-
-### Generate Master Public Key from Private Key
-
-```bash
-nockchain-wallet gen-master-pubkey --master-privkey <private-key> --chain-code <chain-code>
-```
-
-Derives the master public key from a master private key.
-
 ### Derive Child Key
 
 ```bash
-nockchain-wallet derive-child --index <0-2147483647> --hardened --label <label>
+# Derive child key with index as positional argument
+nockchain-wallet derive-child <0-2147483647> --hardened --label <label>
+
+# Examples:
+nockchain-wallet derive-child 42
+nockchain-wallet derive-child 42 --hardened
+nockchain-wallet derive-child 42 --hardened --label "my-key"
 ```
 
 Derives a child public or private key at the given index from the current master key.

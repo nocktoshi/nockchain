@@ -170,7 +170,7 @@ pub enum Commands {
     /// Derive child key (pub, private or both) from the current master key
     DeriveChild {
         /// Index of the child key to derive, should be in range [0, 2^31)
-        #[arg(short, long, value_parser = clap::value_parser!(u64).range(0..2 << 31))]
+        #[arg(value_parser = clap::value_parser!(u64).range(0..2 << 31))]
         index: u64,
 
         /// Hardened or unhardened child key
@@ -182,8 +182,8 @@ pub enum Commands {
         label: Option<String>,
     },
 
-    /// Import keys from a file or extended key
-    #[command(group = clap::ArgGroup::new("import_source").required(true).args(&["file", "key"]))]
+    /// Import keys from a file, extended key, seed phrase, or master private key
+    #[command(group = clap::ArgGroup::new("import_source").required(true).args(&["file", "key", "seedphrase", "master_privkey"]))]
     ImportKeys {
         /// Path to the jammed keys file
         #[arg(short = 'f', long = "file", value_name = "FILE")]
@@ -192,6 +192,18 @@ pub enum Commands {
         /// Extended key string (e.g., "zprv..." or "zpub...")
         #[arg(short = 'k', long = "key", value_name = "EXTENDED_KEY")]
         key: Option<String>,
+
+        /// Seed phrase to generate master private key
+        #[arg(short = 's', long = "seedphrase", value_name = "SEEDPHRASE")]
+        seedphrase: Option<String>,
+
+        /// Master private key (base58-encoded) - requires --chain-code
+        #[arg(short = 'm', long = "master-privkey", value_name = "MASTER_PRIVKEY")]
+        master_privkey: Option<String>,
+
+        /// Chain code (base58-encoded) - required with --master-privkey
+        #[arg(short = 'c', long = "chain-code", value_name = "CHAIN_CODE")]
+        chain_code: Option<String>,
     },
 
     /// Export keys to a file
@@ -208,22 +220,6 @@ pub enum Commands {
         /// Hardened or unhardened child key
         #[arg(short, long, default_value = "false")]
         hardened: bool,
-    },
-
-    /// Generate a master private key from a seed phrase
-    GenMasterPrivkey {
-        /// Seed phrase to generate master private key
-        seedphrase: String,
-    },
-
-    /// Generate a master public key from a master private key
-    GenMasterPubkey {
-        /// Master private key (base58-encoded)
-        #[arg(short, long)]
-        master_privkey: String,
-        /// Chain code (base58-encoded)
-        #[arg(short, long)]
-        chain_code: String,
     },
 
     /// Perform a simple scan of the blockchain
@@ -324,8 +320,6 @@ impl Commands {
             Commands::ImportKeys { .. } => "import-keys",
             Commands::ExportKeys => "export-keys",
             Commands::SignTx { .. } => "sign-tx",
-            Commands::GenMasterPrivkey { .. } => "gen-master-privkey",
-            Commands::GenMasterPubkey { .. } => "gen-master-pubkey",
             Commands::Scan { .. } => "scan",
             Commands::ListNotes => "list-notes",
             Commands::ListNotesByPubkey { .. } => "list-notes-by-pubkey",
@@ -998,8 +992,6 @@ async fn main() -> Result<(), NockAppError> {
         | Commands::ImportKeys { .. }
         | Commands::ExportKeys
         | Commands::SignTx { .. }
-        | Commands::GenMasterPrivkey { .. }
-        | Commands::GenMasterPubkey { .. }
         | Commands::ExportMasterPubkey
         | Commands::ImportMasterPubkey { .. }
         | Commands::ListPubkeys
@@ -1038,24 +1030,39 @@ async fn main() -> Result<(), NockAppError> {
             index,
             hardened,
         } => Wallet::sign_tx(draft, *index, *hardened),
-        Commands::ImportKeys { file, key } => {
+        Commands::ImportKeys {
+            file,
+            key,
+            seedphrase,
+            master_privkey,
+            chain_code,
+        } => {
             if let Some(file_path) = file {
                 Wallet::import_keys(file_path)
             } else if let Some(extended_key) = key {
                 Wallet::import_extended(extended_key)
+            } else if let Some(seed) = seedphrase {
+                Wallet::gen_master_privkey(&seed)
+            } else if let (Some(privkey), Some(chain)) = (master_privkey, chain_code) {
+                Wallet::gen_master_pubkey(&privkey, &chain)
+            } else if master_privkey.is_some() && chain_code.is_none() {
+                return Err(CrownError::Unknown(
+                    "--master-privkey requires --chain-code to be provided".to_string(),
+                )
+                .into());
+            } else if chain_code.is_some() && master_privkey.is_none() {
+                return Err(CrownError::Unknown(
+                    "--chain-code requires --master-privkey to be provided".to_string(),
+                )
+                .into());
             } else {
                 return Err(CrownError::Unknown(
-                    "Either --file or --key must be provided for import-keys".to_string(),
+                    "One of --file, --key, --seedphrase, or --master-privkey must be provided for import-keys".to_string(),
                 )
                 .into());
             }
         }
         Commands::ExportKeys => Wallet::export_keys(),
-        Commands::GenMasterPrivkey { seedphrase } => Wallet::gen_master_privkey(seedphrase),
-        Commands::GenMasterPubkey {
-            master_privkey,
-            chain_code,
-        } => Wallet::gen_master_pubkey(master_privkey, chain_code),
         Commands::Scan {
             master_pubkey,
             search_depth,
@@ -1284,11 +1291,11 @@ mod tests {
         let derive_result = wallet.app.poke(wire, noun.clone()).await?;
 
         assert!(
-            derive_result.len() == 1,
-            "Expected derive result to be a list of 1 noun slab"
+            derive_result.len() == 2,
+            "Expected derive result to be a list of 2 noun slabs - markdown and exit"
         );
 
-        let exit_cause = unsafe { derive_result[0].root() };
+        let exit_cause = unsafe { derive_result[1].root() };
         let code = exit_cause.as_cell()?.tail();
         assert!(unsafe { code.raw_equals(&D(0)) }, "Expected exit code 0");
 
@@ -1366,8 +1373,12 @@ mod tests {
         let seedphrase = "correct horse battery staple";
         let (noun, op) = Wallet::gen_master_privkey(seedphrase)?;
         println!("privkey_slab: {:?}", noun);
-        let wire = WalletWire::Command(Commands::GenMasterPrivkey {
-            seedphrase: seedphrase.to_string(),
+        let wire = WalletWire::Command(Commands::ImportKeys {
+            file: None,
+            key: None,
+            seedphrase: Some(seedphrase.to_string()),
+            master_privkey: None,
+            chain_code: None,
         })
         .to_wire();
         let privkey_result = wallet.app.poke(wire, noun.clone()).await?;
@@ -1398,9 +1409,12 @@ mod tests {
 
         // Generate master public key from the private key and chain code
         let (noun, op) = Wallet::gen_master_pubkey(master_privkey, chain_code)?;
-        let wire = WalletWire::Command(Commands::GenMasterPubkey {
-            master_privkey: master_privkey.to_string(),
-            chain_code: chain_code.to_string(),
+        let wire = WalletWire::Command(Commands::ImportKeys {
+            file: None,
+            key: None,
+            seedphrase: None,
+            master_privkey: Some(master_privkey.to_string()),
+            chain_code: Some(chain_code.to_string()),
         })
         .to_wire();
         let pubkey_result = wallet.app.poke(wire, noun.clone()).await?;
@@ -1446,7 +1460,7 @@ mod tests {
         // Extract the private key from the markdown - it should be on a line with "- private key: "
         let extracted_privkey_line = markdown_text
             .lines()
-            .find(|line| line.trim().contains("private key: "))
+            .find(|line| line.trim().contains("Private Key: "))
             .ok_or_else(|| {
                 CrownError::Unknown("Private key not found in markdown output".to_string())
             })?
@@ -1454,7 +1468,7 @@ mod tests {
 
         // remove the "- private key: " prefix and get the base58 value directly
         let extracted_privkey_b58 = extracted_privkey_line
-            .trim_start_matches("- private key: ")
+            .trim_start_matches("- Private Key: ")
             .trim()
             .to_string();
 
@@ -1495,7 +1509,14 @@ mod tests {
         ));
 
         let (noun, op) = Wallet::import_keys(test_path)?;
-        let wire = SystemWire.to_wire();
+        let wire = WalletWire::Command(Commands::ImportKeys {
+            file: Some(test_path.to_string()),
+            key: None,
+            seedphrase: None,
+            master_privkey: None,
+            chain_code: None,
+        })
+        .to_wire();
         let import_result = wallet.app.poke(wire, noun.clone()).await?;
 
         fs::remove_file(test_path).expect(&format!(
@@ -1608,8 +1629,12 @@ mod tests {
             vec![TimelockIntent::none()],
         )?;
 
-        let wire1 = WalletWire::Command(Commands::GenMasterPrivkey {
-            seedphrase: "correct horse battery staple".to_string(),
+        let wire1 = WalletWire::Command(Commands::ImportKeys {
+            file: None,
+            key: None,
+            seedphrase: Some("correct horse battery staple".to_string()),
+            master_privkey: None,
+            chain_code: None,
         })
         .to_wire();
         let genkey_result = wallet.app.poke(wire1, genkey_noun.clone()).await?;
