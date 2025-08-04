@@ -1,9 +1,9 @@
 # Nockchain
 
-**Nockchain is a lightweight blockchain for heavyweight verifiable applications.**
+**Nockchain is programmable sound money that scales.**
 
+Nockchain is a ZK-Proof of Work L1 that combines sound money incentives with modern research into data availability, app-rollups, and intent-based composability.
 
-We believe the future of blockchains is lightweight trustless settlement of heavyweight verifiable computation. The only way to get there is by replacing verifiability-via-public-replication with verifiability-via-private-proving. Proving happens off-chain; verification is on-chain.
 
 *Nockchain is entirely experimental and many parts are unaudited. We make no representations or guarantees as to the behavior of this software.*
 
@@ -273,7 +273,7 @@ Stack samples are roughly speaking the "native" or Rust part of the application 
 What makes this especially powerful is:
 
 - The profiling data is now unified into a single tool. Previously we used `samply` for Rust/native code and the JSON (nockvm) traces for the Hoon.
-- Tracy can attribute what native stack samples 
+- Tracy can attribute what native stack samples
 
 #### OK, but how do I get started?
 
