@@ -301,7 +301,7 @@
     (most ;~(plug com gaw) taut-rule)
   ::
     %+  stag  %tssg
-    (most gap tall:(vang & pax))
+    (most gap tall:(vang | pax))
   ==
   ::
   ++  pant
