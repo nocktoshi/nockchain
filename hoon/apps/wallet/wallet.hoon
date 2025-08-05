@@ -1040,8 +1040,9 @@
   =/  acc=@t
     %-  crip
     """
-    ## transaction
-    - {<name>}
+    ## Transaction
+    Name: {(trip name)}
+    Inputs:
     """
   |=  [[recipient=lock:transact amt=coins:transact] acc=_acc]
   =/  r58  (to-b58:lock:transact recipient)
@@ -1049,15 +1050,15 @@
   %^  cat  3
     ;:  (cury cat 3)
       acc
-      '\0a\0a- assets: '
+      '\0a\0a- Assets: '
       (rsh [3 2] (scot %ui amt))
-      '\0a  - nocks: '
+      '\0a  - Nocks: '
       (rsh [3 2] (scot %ui p.amtdiv))
-      '\0a  - nicks: '
+      '\0a  - Nicks: '
       (rsh [3 2] (scot %ui q.amtdiv))
-      '\0a- m: '
+      '\0a- Required Signatures: '
       (rsh [3 2] (scot %ui m.recipient))
-      '\0a- signers: '
+      '\0a- Signers: '
     ==
   %-  crip
   %+  join  ' '
@@ -1070,22 +1071,22 @@
    ;:  (cury cat 3)
       '''
 
-      ## details
+      ## Details
 
       '''
-      '- name: '
+      '- Name: '
       =+  (to-b58:nname:transact name.note)
       :((cury cat 3) '[' first ' ' last ']')
-      '\0a- assets: '
+      '\0a- Assets: '
       (format-ui assets.note)
-      '\0a- block height: '
+      '\0a- Block Height: '
       (format-ui origin-page.note)
-      '\0a- source: '
+      '\0a- Source: '
       (to-b58:hash:transact p.source.note)
-      '\0a## lock'
-      '\0a- m: '
+      '\0a## Lock'
+      '\0a- Required Signatures: '
       (format-ui m.lock.note)
-      '\0a- signers: '
+      '\0a- Signers: '
     ==
   %-  crip
   %+  join  ' '
@@ -1147,12 +1148,12 @@
     """
     ~[(make-markdown-effect nodes)]
   --
-  ::
-  ++  ui-to-tape
-    |=  @
-    ^-  tape
-    %-  trip
-    (rsh [3 2] (scot %ui +<))
+::
+++  ui-to-tape
+  |=  @
+  ^-  tape
+  %-  trip
+  (rsh [3 2] (scot %ui +<))
 --
 ::
 %-  (moat &)
@@ -1234,7 +1235,7 @@
       %list-notes            (do-list-notes cause)
       %list-notes-by-pubkey  (do-list-notes-by-pubkey cause)
       %list-notes-by-pubkey-csv  (do-list-notes-by-pubkey-csv cause)
-      %spend          (do-spend cause)
+      %spend                 (do-spend cause)
       %update-balance        (do-update-balance cause)
       %update-block          (do-update-block cause)
       %import-keys           (do-import-keys cause)
@@ -2099,20 +2100,28 @@
       ^-  (list lock:transact)
       %+  turn  raw-recipients
       |=  [m=@ pks=(list @t)]
-      %+  m-of-n:new:lock:transact  m
-      %-  ~(gas z-in:zo *(z-set:zo schnorr-pubkey:transact))
-      %+  turn  pks
-      |=  pk=@t
-      (from-b58:schnorr-pubkey:transact pk)
+      =/  lk=lock:transact
+        %+  m-of-n:new:lock:transact  m
+        %-  ~(gas z-in:zo *(z-set:zo schnorr-pubkey:transact))
+        %+  turn  pks
+        |=  pk=@t
+        (from-b58:schnorr-pubkey:transact pk)
+      ?.  (spendable:lock:transact lk)
+        ~|("recipient {<(to-b58:lock:transact lk)>} is not spendable" !!)
+      lk
     ::
     ++  parse-recipient
       |=  raw-recipient=[m=@ pks=(list @t)]
       ^-  lock:transact
-      %+  m-of-n:new:lock:transact  m.raw-recipient
-      %-  ~(gas z-in:zo *(z-set:zo schnorr-pubkey:transact))
-      %+  turn  pks.raw-recipient
-      |=  pk=@t
-      (from-b58:schnorr-pubkey:transact pk)
+      =/  lk=lock:transact
+        %+  m-of-n:new:lock:transact  m.raw-recipient
+        %-  ~(gas z-in:zo *(z-set:zo schnorr-pubkey:transact))
+        %+  turn  pks.raw-recipient
+        |=  pk=@t
+        (from-b58:schnorr-pubkey:transact pk)
+      ?.  (spendable:lock:transact lk)
+        ~|("recipient {<(to-b58:lock:transact lk)>} is not spendable" !!)
+      lk
     ::
     ++  create-inputs
       |=  [=ledger names=(list nname:transact) mode=?(%multiple %single)]
@@ -2145,10 +2154,10 @@
             ==
           ::  we can subtract the fee from this note
           :_  %.y
-          (create-input-with-fee note recipient gift timelock-intent)
+          (create-input note recipient gift timelock-intent fee.cause)
         ::  we cannot subtract the fee from this note
         :_  spent-fee
-        (create-input-no-fee note recipient gift timelock-intent)
+        (create-input note recipient gift timelock-intent 0)
       ?.  spent-fee
         ~|("no note suitable to subtract fee from, aborting operation" !!)
       ins
@@ -2249,11 +2258,12 @@
       ::
     --
     ::
-    ++  create-input-with-fee
+    ++  create-input
       |=  $:  note=nnote:transact
               recipient=lock:transact
               gifts=coins:transact
               =timelock-intent:transact
+              fee=coins:transact
           ==
       ^-  input:transact
       =/  gift-seed=seed:transact
@@ -2264,7 +2274,7 @@
             gifts
             (hash:nnote:transact note)
         ==
-      =/  refund=coins:transact  (sub assets.note (add gifts fee.cause))
+      =/  refund=coins:transact  (sub assets.note (add gifts fee))
       =/  refund-address=lock:transact  lock.note
       =/  seed-list=(list seed:transact)
         ?:  =(0 refund)  ~[gift-seed]
@@ -2278,27 +2288,7 @@
             ==
         ==
       =/  seeds-set=seeds:transact  (new:seeds:transact seed-list)
-      =/  spend-obj=spend:transact  (new:spend:transact seeds-set fee.cause)
-      =.  spend-obj  (sign:spend:transact spend-obj get-sender-key)
-      [note spend-obj]
-    ::
-    ++  create-input-no-fee
-      |=  $:  note=nnote:transact
-              recipient=lock:transact
-              gifts=coins:transact
-              =timelock-intent:transact
-          ==
-      ^-  input:transact
-      =/  gift-seed=seed:transact
-        %-  new:seed:transact
-        :*  *(unit source:transact)
-            recipient
-            timelock-intent
-            gifts
-            (hash:nnote:transact note)
-        ==
-      =/  seeds-set=seeds:transact  (new:seeds:transact ~[gift-seed])
-      =/  spend-obj=spend:transact  (new:spend:transact seeds-set 0)
+      =/  spend-obj=spend:transact  (new:spend:transact seeds-set fee)
       =.  spend-obj  (sign:spend:transact spend-obj get-sender-key)
       [note spend-obj]
     ::
@@ -2306,24 +2296,62 @@
       ^-  schnorr-seckey:transact
       (sign-key:get:v sign-key.cause)
     ::
+    ++  validate-inputs
+      |=  =inputs:transact
+      ^-  ?
+      ?&  (validate:inputs:transact inputs)
+          %+  levy  ~(tap z-by:zo inputs)
+          |=  [name=nname:transact inp=input:transact]
+          (spendable:lock:transact lock.note.inp)
+      ==
+    ::
     ++  save-transaction
       |=  ins=(list input:transact)
       ^-  [(list effect) ^state]
       =/  ins-transaction=inputs:transact  (multi:new:inputs:transact ins)
-      ?:  ?=(~ last-block.state)
-        ~|("last-block unknown!" !!)
-      ::  name is the b58-encoded name of the first input
+      ~&  "Validating transaction before saving"
+      ::  we fallback to the hash of the inputs as the transaction name
+      ::  if the tx is invalid. this is just for display
+      ::  in the error message, as an invalid tx is not saved.
       =/  transaction-name=@t
-        %-  head
-        %+  turn  ~(tap z-by:zo (names:inputs:transact ins-transaction))
-        |=  =nname:transact
-        =<  last
-        (to-b58:nname:transact nname)
+        %-  to-b58:hash:transact
+        =-  %+  fall  -
+            (hash:inputs:transact ins-transaction)
+        %-  mole
+        |.
+        ::  TODO: this also calls validate:inputs, but we need it to
+        ::  get the id of the transaction. we should deduplicate this.
+        id:(new:raw-tx:transact ins-transaction)
       ::  jam inputs and save as transaction
       =/  =transaction
         %*  .  *transaction
           p  ins-transaction
           name  transaction-name
+        ==
+      ?.  (validate-inputs ins-transaction)
+        =/  msg=@t
+          %^  cat  3
+            %-  crip
+            """
+            # TX Validation Failed
+
+            Failed to validate the correctness of transaction {(trip transaction-name)}.
+
+            Check that the note(s) you are spending from:
+
+            1. Can be spent by the public key you are signing with.
+            2. Have enough assets to cover the gift and fee.
+            3. Have the correct timelock intent.
+
+            ---
+
+
+            """
+          (display-transaction-cord transaction-name ins-transaction)
+        %-  (debug "{(trip msg)}")
+        :_  state
+        :~  [%markdown msg]
+            [%exit 1]
         ==
       =/  transaction-jam  (jam transaction)
       =/  markdown-text=@t  (display-transaction-cord transaction-name ins-transaction)

@@ -1217,14 +1217,14 @@
     $~  [m=1 pubkeys=*(z-set schnorr-pubkey)]
     [m=@udD pubkeys=(z-set schnorr-pubkey)]
   ::
-  ++  validate
+  ++  spendable
     |=  =form
     ^-  ?
-    ?&  (validate-intermediate form)
+    ?&  (spendable-intermediate form)
         (lte m.form ~(wyt z-in pubkeys.form))
     ==
   ::
-  ++  validate-intermediate
+  ++  spendable-intermediate
     |=  form
     ^-  ?
     =/  num-keys=@  ~(wyt z-in pubkeys)
@@ -1246,7 +1246,7 @@
   ++  check
     |=  =form
     ^-  ^form
-    ?.  (validate-intermediate form)
+    ?.  (spendable-intermediate form)
       !!
     form
   ::
@@ -1558,7 +1558,7 @@
         %+  levy  ~(tap z-by form)
         |=  [=lock s=@]
         ?&  !=(s 0)
-            (validate:^lock lock)
+            (spendable:^lock lock)
         ==
     ==
   --

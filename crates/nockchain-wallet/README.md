@@ -111,14 +111,45 @@ Outputs matching notes in CSV format suitable for analysis or reporting.
 
 ### Create a Transaction
 
+The spend command supports two modes: single recipient and multiple recipients.
+
+#### Single Recipient Transaction
+
 ```bash
-# Create a draft using spend
+# Send to a single recipient
+nockchain-wallet spend \
+  --names "[first1 last1]" \
+  --recipient "[1 pk1]" \
+  --gift 100 \
+  --fee 10
+```
+
+For single recipient transactions:
+- `--recipient` specifies one recipient as `[<num-of-signatures> <public-key-1>,<public-key-2>,...]`
+- `--gift` specifies the amount to send to that recipient
+- Multiple names can still be provided to use funds from multiple notes
+
+#### Multiple Recipients Transaction
+
+```bash
+# Send to multiple recipients
 nockchain-wallet spend \
   --names "[first1 last1],[first2 last2]" \
   --recipients "[1 pk1],[2 pk2,pk3]" \
   --gifts "100,200" \
   --fee 10
 ```
+
+For multiple recipient transactions:
+- `--recipients` specifies a list of recipients, each as `[<num-of-signatures> <public-key-1>,<public-key-2>,...]`
+- `--gifts` specifies a list of amounts, one for each recipient (must match the number of recipients)
+
+#### Common Parameters
+
+- The number of signatures required is specified as the first number in each recipient specification
+- The `names` argument is a list of `[first-name last-name]` pairs specifying funding notes
+- The `fee` argument is the transaction fee to pay
+- For multisig recipients, list multiple public keys after the signature count
 
 ### Make Transaction from Transaction File
 
