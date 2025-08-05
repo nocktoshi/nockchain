@@ -1070,7 +1070,7 @@
   %^  cat  3
    ;:  (cury cat 3)
       '''
-
+      \0a
       ## Details
 
       '''
