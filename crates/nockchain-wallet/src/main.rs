@@ -212,7 +212,7 @@ pub enum Commands {
     /// Signs a transaction
     SignTx {
         /// Path to input bundle file
-        draft: String,
+        transaction: String,
 
         /// Optional key index to use for signing [0, 2^31)
         #[arg(short, long, value_parser = clap::value_parser!(u64).range(0..2 << 31))]
@@ -253,8 +253,8 @@ pub enum Commands {
         pubkey: String,
     },
 
-    /// Perform a simple spend operation
-    SimpleSpend {
+    /// Perform a spend operation
+    Spend {
         /// Names of notes to spend (comma-separated)
         #[arg(long)]
         names: String,
@@ -281,10 +281,16 @@ pub enum Commands {
         hardened: bool,
     },
 
-    /// Create a transaction from a draft file
+    /// Create a transaction from a transaction file
     SendTx {
-        /// Draft file to create transaction from
-        draft: String,
+        /// Transaction file to create transaction from
+        transaction: String,
+    },
+
+    /// Display a transaction file contents
+    ShowTx {
+        /// Transaction file to display
+        transaction: String,
     },
 
     /// Update the wallet balance
@@ -324,8 +330,9 @@ impl Commands {
             Commands::ListNotes => "list-notes",
             Commands::ListNotesByPubkey { .. } => "list-notes-by-pubkey",
             Commands::ListNotesByPubkeyCsv { .. } => "list-notes-by-pubkey-csv",
-            Commands::SimpleSpend { .. } => "simple-spend",
+            Commands::Spend { .. } => "spend",
             Commands::SendTx { .. } => "send-tx",
+            Commands::ShowTx { .. } => "show-tx",
             Commands::UpdateBalance => "update-balance",
             Commands::ExportMasterPubkey => "export-master-pubkey",
             Commands::ImportMasterPubkey { .. } => "import-master-pubkey",
@@ -472,9 +479,13 @@ impl Wallet {
     ///
     /// # Arguments
     ///
-    /// * `draft_path` - Path to the draft file
+    /// * `transaction_path` - Path to the transaction file
     /// * `index` - Optional index of the key to use for signing
-    fn sign_tx(draft_path: &str, index: Option<u64>, hardened: bool) -> CommandNoun<NounSlab> {
+    fn sign_tx(
+        transaction_path: &str,
+        index: Option<u64>,
+        hardened: bool,
+    ) -> CommandNoun<NounSlab> {
         let mut slab = NounSlab::new();
 
         // Validate index is within range (though clap should prevent this)
@@ -487,13 +498,13 @@ impl Wallet {
         }
 
         // Read and decode the input bundle
-        let draft_data = fs::read(draft_path)
-            .map_err(|e| CrownError::Unknown(format!("Failed to read draft: {}", e)))?;
+        let transaction_data = fs::read(transaction_path)
+            .map_err(|e| CrownError::Unknown(format!("Failed to read transaction: {}", e)))?;
 
         // Convert the bundle data into a noun using cue
-        let draft_noun = slab
-            .cue_into(draft_data.as_bytes()?)
-            .map_err(|e| CrownError::Unknown(format!("Failed to decode draft: {}", e)))?;
+        let transaction_noun = slab
+            .cue_into(transaction_data.as_bytes()?)
+            .map_err(|e| CrownError::Unknown(format!("Failed to decode transaction: {}", e)))?;
 
         // Format information about signing key
         let sign_key_noun = match index {
@@ -512,7 +523,7 @@ impl Wallet {
 
         Self::wallet(
             "sign-tx",
-            &[draft_noun, sign_key_noun, entropy],
+            &[transaction_noun, sign_key_noun, entropy],
             Operation::Poke,
             &mut slab,
         )
@@ -616,7 +627,7 @@ impl Wallet {
         )
     }
 
-    /// Performs a simple spend operation by creating transaction inputs from notes.
+    /// Performs a spend operation by creating transaction inputs from notes.
     ///
     /// Takes a list of note names, recipient addresses, and gift amounts to create
     /// transaction inputs. The fee is subtracted from the first note that has sufficient
@@ -641,7 +652,7 @@ impl Wallet {
     /// # Returns
     ///
     /// Returns a `CommandNoun` containing:
-    /// - A `NounSlab` with the encoded simple-spend command
+    /// - A `NounSlab` with the encoded spend command
     /// - The `Operation` type (Poke)
     ///
     /// # Errors
@@ -658,9 +669,9 @@ impl Wallet {
     /// let recipients = "[1 pk1],[2 pk2,pk3,pk4]";
     /// let gifts = "100,200";
     /// let fee = 10;
-    /// wallet.simple_spend(names.to_string(), recipients.to_string(), gifts.to_string(), fee)?;
+    /// wallet.spend(names.to_string(), recipients.to_string(), gifts.to_string(), fee)?;
     /// ```
-    fn simple_spend(
+    fn spend(
         names: String,
         recipients: String,
         gifts: String,
@@ -829,7 +840,7 @@ impl Wallet {
         let timelock_intent_noun = timelock_intent.to_noun(&mut slab);
 
         Self::wallet(
-            "simple-spend",
+            "spend",
             &[names_noun, order_noun, fee_noun, sign_key_noun, timelock_intent_noun],
             Operation::Poke,
             &mut slab,
@@ -883,22 +894,40 @@ impl Wallet {
         )
     }
 
-    /// Creates a transaction from a draft file.
+    /// Creates a transaction from a transaction file.
     ///
     /// # Arguments
     ///
-    /// * `draft_path` - Path to the draft file to create transaction from
-    fn send_tx(draft_path: &str) -> CommandNoun<NounSlab> {
-        // Read and decode the draft file
-        let draft_data = fs::read(draft_path)
-            .map_err(|e| CrownError::Unknown(format!("Failed to read draft file: {}", e)))?;
+    /// * `transaction_path` - Path to the transaction file to create transaction from
+    fn send_tx(transaction_path: &str) -> CommandNoun<NounSlab> {
+        // Read and decode the transaction file
+        let transaction_data = fs::read(transaction_path)
+            .map_err(|e| CrownError::Unknown(format!("Failed to read transaction file: {}", e)))?;
 
         let mut slab = NounSlab::new();
-        let draft_noun = slab
-            .cue_into(draft_data.as_bytes()?)
-            .map_err(|e| CrownError::Unknown(format!("Failed to decode draft data: {}", e)))?;
+        let transaction_noun = slab.cue_into(transaction_data.as_bytes()?).map_err(|e| {
+            CrownError::Unknown(format!("Failed to decode transaction data: {}", e))
+        })?;
 
-        Self::wallet("send-tx", &[draft_noun], Operation::Poke, &mut slab)
+        Self::wallet("send-tx", &[transaction_noun], Operation::Poke, &mut slab)
+    }
+
+    /// Displays a transaction file contents.
+    ///
+    /// # Arguments
+    ///
+    /// * `transaction_path` - Path to the transaction file to display
+    fn show_tx(transaction_path: &str) -> CommandNoun<NounSlab> {
+        // Read and decode the transaction file
+        let transaction_data = fs::read(transaction_path)
+            .map_err(|e| CrownError::Unknown(format!("Failed to read transaction file: {}", e)))?;
+
+        let mut slab = NounSlab::new();
+        let transaction_noun = slab.cue_into(transaction_data.as_bytes()?).map_err(|e| {
+            CrownError::Unknown(format!("Failed to decode transaction data: {}", e))
+        })?;
+
+        Self::wallet("show-tx", &[transaction_noun], Operation::Poke, &mut slab)
     }
 
     /// Lists all public keys in the wallet.
@@ -998,7 +1027,8 @@ async fn main() -> Result<(), NockAppError> {
         | Commands::ShowSeedphrase
         | Commands::ShowMasterPubkey
         | Commands::ShowMasterPrivkey
-        | Commands::SimpleSpend { .. } => false,
+        | Commands::Spend { .. }
+        | Commands::ShowTx { .. } => false,
 
         // All other commands DO need sync
         _ => true,
@@ -1026,10 +1056,10 @@ async fn main() -> Result<(), NockAppError> {
             label,
         } => Wallet::derive_child(*index, *hardened, label),
         Commands::SignTx {
-            draft,
+            transaction,
             index,
             hardened,
-        } => Wallet::sign_tx(draft, *index, *hardened),
+        } => Wallet::sign_tx(transaction, *index, *hardened),
         Commands::ImportKeys {
             file,
             key,
@@ -1080,7 +1110,7 @@ async fn main() -> Result<(), NockAppError> {
             }
         }
         Commands::ListNotesByPubkeyCsv { pubkey } => Wallet::list_notes_by_pubkey_csv(pubkey),
-        Commands::SimpleSpend {
+        Commands::Spend {
             names,
             recipients,
             gifts,
@@ -1107,7 +1137,7 @@ async fn main() -> Result<(), NockAppError> {
                 }
             };
 
-            Wallet::simple_spend(
+            Wallet::spend(
                 names.clone(),
                 recipients.clone(),
                 gifts.clone(),
@@ -1117,7 +1147,8 @@ async fn main() -> Result<(), NockAppError> {
                 vec![parsed_timelock_intent],
             )
         }
-        Commands::SendTx { draft } => Wallet::send_tx(draft),
+        Commands::SendTx { transaction } => Wallet::send_tx(transaction),
+        Commands::ShowTx { transaction } => Wallet::show_tx(transaction),
         Commands::UpdateBalance => Wallet::update_balance(),
         Commands::ExportMasterPubkey => Wallet::export_master_pubkey(),
         Commands::ImportMasterPubkey { key_path } => Wallet::import_master_pubkey(key_path),
@@ -1319,7 +1350,7 @@ mod tests {
         fs::write(bundle_path, &test_data).map_err(|e| NockAppError::IoError(e))?;
 
         let wire = WalletWire::Command(Commands::SignTx {
-            draft: bundle_path.to_string(),
+            transaction: bundle_path.to_string(),
             index: None,
             hardened: false,
         })
@@ -1332,7 +1363,7 @@ mod tests {
         println!("sign_result: {:?}", sign_result);
 
         let wire = WalletWire::Command(Commands::SignTx {
-            draft: bundle_path.to_string(),
+            transaction: bundle_path.to_string(),
             index: Some(1),
             hardened: false,
         })
@@ -1344,7 +1375,7 @@ mod tests {
         println!("sign_result: {:?}", sign_result);
 
         let wire = WalletWire::Command(Commands::SignTx {
-            draft: bundle_path.to_string(),
+            transaction: bundle_path.to_string(),
             index: Some(255),
             hardened: false,
         })
@@ -1561,7 +1592,7 @@ mod tests {
     // TODO: fix this test
     #[tokio::test]
     #[ignore]
-    async fn test_simple_spend_multisig_format() -> Result<(), NockAppError> {
+    async fn test_spend_multisig_format() -> Result<(), NockAppError> {
         init_tracing();
         let cli = BootCli::parse_from(&[""]);
         let nockapp = boot::setup(KERNEL, Some(cli.clone()), &[], "wallet", None)
@@ -1574,7 +1605,7 @@ mod tests {
         let gifts = "1,2".to_string();
         let fee = 1;
 
-        let (noun, op) = Wallet::simple_spend(
+        let (noun, op) = Wallet::spend(
             names.clone(),
             recipients.clone(),
             gifts.clone(),
@@ -1583,7 +1614,7 @@ mod tests {
             false,
             vec![TimelockIntent::none()],
         )?;
-        let wire = WalletWire::Command(Commands::SimpleSpend {
+        let wire = WalletWire::Command(Commands::Spend {
             names: names.clone(),
             recipients: recipients.clone(),
             gifts: gifts.clone(),
@@ -1602,7 +1633,7 @@ mod tests {
 
     #[tokio::test]
     #[cfg_attr(miri, ignore)]
-    async fn test_simple_spend_single_sig_format() -> Result<(), NockAppError> {
+    async fn test_spend_single_sig_format() -> Result<(), NockAppError> {
         let cli = BootCli::parse_from(&[""]);
         let nockapp = boot::setup(KERNEL, Some(cli.clone()), &[], "wallet", None)
             .await
@@ -1619,7 +1650,7 @@ mod tests {
 
         // generate keys
         let (genkey_noun, genkey_op) = Wallet::gen_master_privkey("correct horse battery staple")?;
-        let (spend_noun, spend_op) = Wallet::simple_spend(
+        let (spend_noun, spend_op) = Wallet::spend(
             names.clone(),
             recipients.clone(),
             gifts.clone(),
@@ -1640,7 +1671,7 @@ mod tests {
         let genkey_result = wallet.app.poke(wire1, genkey_noun.clone()).await?;
         println!("genkey_result: {:?}", genkey_result);
 
-        let wire2 = WalletWire::Command(Commands::SimpleSpend {
+        let wire2 = WalletWire::Command(Commands::Spend {
             names: names.clone(),
             recipients: recipients.clone(),
             gifts: gifts.clone(),
@@ -1706,24 +1737,24 @@ mod tests {
             .map_err(|e| CrownError::Unknown(e.to_string()))?;
         let mut wallet = Wallet::new(nockapp);
 
-        // use the draft in .drafts/
-        let draft_path = ".drafts/test_draft.draft";
-        let test_data = vec![0u8; 32]; // TODO: Use real draft data
-        fs::write(draft_path, &test_data).expect(&format!(
+        // use the transaction in txs/
+        let transaction_path = "txs/test_transaction.tx";
+        let test_data = vec![0u8; 32]; // TODO: Use real transaction data
+        fs::write(transaction_path, &test_data).expect(&format!(
             "Called `expect()` at {}:{} (git sha: {})",
             file!(),
             line!(),
             option_env!("GIT_SHA").unwrap_or("unknown")
         ));
 
-        let (noun, op) = Wallet::send_tx(draft_path)?;
+        let (noun, op) = Wallet::send_tx(transaction_path)?;
         let wire = WalletWire::Command(Commands::SendTx {
-            draft: draft_path.to_string(),
+            transaction: transaction_path.to_string(),
         })
         .to_wire();
         let tx_result = wallet.app.poke(wire, noun.clone()).await?;
 
-        fs::remove_file(draft_path).expect(&format!(
+        fs::remove_file(transaction_path).expect(&format!(
             "Called `expect()` at {}:{} (git sha: {})",
             file!(),
             line!(),
@@ -1735,6 +1766,46 @@ mod tests {
             !tx_result.is_empty(),
             "Expected non-empty transaction result"
         );
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    #[ignore]
+    async fn test_show_tx() -> Result<(), NockAppError> {
+        init_tracing();
+        let cli = BootCli::parse_from(&[""]);
+        let nockapp = boot::setup(KERNEL, Some(cli.clone()), &[], "wallet", None)
+            .await
+            .map_err(|e| CrownError::Unknown(e.to_string()))?;
+        let mut wallet = Wallet::new(nockapp);
+
+        // Create a temporary transaction file
+        let transaction_path = "test_show_transaction.tx";
+        let test_data = vec![0u8; 32]; // TODO: Use real transaction data
+        fs::write(transaction_path, &test_data).expect(&format!(
+            "Called `expect()` at {}:{} (git sha: {})",
+            file!(),
+            line!(),
+            option_env!("GIT_SHA").unwrap_or("unknown")
+        ));
+
+        let (noun, op) = Wallet::show_tx(transaction_path)?;
+        let wire = WalletWire::Command(Commands::ShowTx {
+            transaction: transaction_path.to_string(),
+        })
+        .to_wire();
+        let show_result = wallet.app.poke(wire, noun.clone()).await?;
+
+        fs::remove_file(transaction_path).expect(&format!(
+            "Called `expect()` at {}:{} (git sha: {})",
+            file!(),
+            line!(),
+            option_env!("GIT_SHA").unwrap_or("unknown")
+        ));
+
+        println!("show-tx result: {:?}", show_result);
+        assert!(!show_result.is_empty(), "Expected non-empty show-tx result");
 
         Ok(())
     }

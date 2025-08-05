@@ -105,36 +105,35 @@ Outputs matching notes in CSV format suitable for analysis or reporting.
 
 1. **Seeds**: Define where funds are going and how much
 2. **Inputs**: Specify which notes (UTXOs) to spend
-3. **Draft**: Combine inputs into a complete transaction
+3. **Transaction**: Combine inputs into a complete transaction
 4. **Sign**: Authorize the transaction with private keys
-5. **Make Transaction**: Create the final transaction for broadcasting
+5. **Send Transaction**: Send the final transaction for broadcasting
 
-### What is a draft?
-
-A draft represents a transaction that is being prepared for submission to the network. It is a collection of partially assembled `seeds` and `inputs` that can be persisted to disk and later signed and submitted.
-
-### Create a Draft
+### Create a Transaction
 
 ```bash
-# Create a draft using simple-spend
-nockchain-wallet simple-spend \
+# Create a draft using spend
+nockchain-wallet spend \
   --names "[first1 last1],[first2 last2]" \
   --recipients "[1 pk1],[2 pk2,pk3]" \
   --gifts "100,200" \
   --fee 10
 ```
 
-### Make Transaction from Draft
+### Make Transaction from Transaction File
 
 ```bash
 # Sign the transaction
-nockchain-wallet sign-tx path/to/draft.draft
+nockchain-wallet sign-tx txs/transaction.tx
 
 # Optionally specify a key index for signing
-nockchain-wallet sign-tx path/to/draft.draft --index 5
+nockchain-wallet sign-tx txs/transaction.tx --index 5
+
+# Display transaction contents
+nockchain-wallet show-tx txs/transaction.tx
 
 # Make and broadcast the signed transaction
-nockchain-wallet send-tx path/to/draft.draft
+nockchain-wallet send-tx txs/transaction.tx
 ```
 
-Note: The draft file will be saved in `./drafts/` directory with a `.draft` extension.
+Note: The transaction file will be saved in `./txs/` directory with a `.tx` extension.
