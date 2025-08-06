@@ -459,7 +459,7 @@ fn serf_loop<C: SerfCheckpoint>(
                 wire,
                 cause,
                 result,
-                result_ack,
+                result_ack: _,
             } => {
                 if inhibit.load(Ordering::SeqCst) {
                     let _ = result
