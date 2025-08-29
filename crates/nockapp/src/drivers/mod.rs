@@ -12,4 +12,4 @@ pub use http::http::http as http_driver;
 pub use markdown::markdown as markdown_driver;
 pub use one_punch::one_punch_man as one_punch_driver;
 pub use timer::make_timer_driver as timer_driver;
-pub use indexer::make_indexer_driver as indexer_driver;
+//pub use indexer::make_indexer_driver as indexer_driver;
