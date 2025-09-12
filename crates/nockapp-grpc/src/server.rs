@@ -338,31 +338,6 @@ impl NockAppService for NockAppGrpcServer {
         }
     }
 
-    async fn wallet_send_transaction(
-        &self,
-        request: Request<WalletSendTransactionRequest>,
-    ) -> std::result::Result<Response<WalletSendTransactionResponse>, Status> {
-        let req = request.into_inner();
-        debug!("WalletSendTransaction request: pid={}", req.pid);
-
-        // TODO: Implement transaction building and submission
-        // This would involve:
-        // 1. Building a transaction noun from the request
-        // 2. Poking it to the wallet system
-        // 3. Returning the transaction hash and status
-
-        let response = WalletSendTransactionResponse {
-            result: Some(wallet_send_transaction_response::Result::Error(
-                ErrorStatus {
-                    code: ErrorCode::InternalError as i32,
-                    message: "Not yet implemented".to_string(),
-                    details: None,
-                },
-            )),
-        };
-        Ok(Response::new(response))
-    }
-
     async fn wallet_get_transaction_status(
         &self,
         request: Request<WalletGetTransactionStatusRequest>,

@@ -98,12 +98,10 @@ service NockAppService {
   rpc PeekVase(PeekVaseRequest) returns (PeekVaseResponse);
   rpc Poke(PokeRequest) returns (PokeResponse);
 
-  rpc SendTx(SendTxRequest) returns (SendTxResponse);
-
   // Not finished, WILL CHANGE WHEN IT IS
   // ===== Wallet Operations =====
   rpc WalletGetBalance(WalletGetBalanceRequest) returns (WalletGetBalanceResponse);
-  rpc WalletSendTransaction(WalletSendTransactionRequest) returns (WalletSendTransactionResponse);
+
   rpc WalletGetTransactionStatus(WalletGetTransactionStatusRequest) returns (WalletGetTransactionStatusResponse);
   // ===== Mining Operations =====
   rpc MiningGetHeader(MiningGetHeaderRequest) returns (MiningGetHeaderResponse);
@@ -153,30 +151,13 @@ message WalletBalanceData {
   optional string block_id = 3;   // block where balance was computed
   optional uint64 total_balance = 4;  // sum of all notes
 }
-// Send transaction - type-safe wallet operation
-message WalletSendTransactionRequest {
-  int32 pid = 1;        // process ID for tracking
-  repeated string input_names = 2;   // names of notes to spend
-  repeated WalletTransactionOutput outputs = 3;
-  uint64 fee = 4;
-  optional bytes signature = 5;      // for pre-signed transactions
-}
- // Send transaction - type-safe wallet operation
-message WalletSendTransactionRequest {
-  string tx_id = 1;        // base58 encoded transaction ID for tracking
-  bytes raw_tx = 2;        // jammed encoded raw_tx
-}
+
 message WalletTransactionOutput {
   string recipient = 1;   // recipient address/lock
   uint64 amount = 2;
   optional uint64 timelock = 3;  // optional timelock height
 }
 
-message WalletSendTransactionResponse {
-string tx_id = 1;  // base58 encoded transaction ID
-bool acknowledged = 2;  // true if transaction accepted by node
-ErrorStatus error = 3;
-}
 
  message TransactionConfirmationsRequest {
      string tx_id = 1; // base58 encoded transaction ID

@@ -1,0 +1,152 @@
+use std::collections::HashMap;
+use rocksdb::DB;
+use nockvm::noun::{Noun, Cell};
+use nockvm::jets::hot;
+
+#[derive(Debug)]
+pub struct WalletBalance {
+    pub notes: HashMap<String, u64>,
+    pub locked_balances: Vec<u64>,
+    pub block_id: Option<String>,
+    pub total_balance: Option<u64>,
+}
+
+#[derive(Debug)]
+pub struct DbDump {
+    pub balances: HashMap<String, u64>,
+    pub locked_balances: Vec<u64>,
+    pub metadata: HashMap<String, String>,
+}
+
+impl WalletBalance {
+    pub fn dump_db(db: &DB) -> Result<DbDump, Box<dyn std::error::Error>> {
+        let mut dump = DbDump {
+            balances: HashMap::new(),
+            locked_balances: vec![],
+            metadata: HashMap::new(),
+        };
+        
+        let iter = db.iterator(rocksdb::IteratorMode::Start);
+        for item in iter {
+            let (key, value) = item?;
+            let key_str = String::from_utf8_lossy(&key);
+            
+            if key_str.starts_with("balance_") {
+                let address = key_str.strip_prefix("balance_").unwrap();
+                let mut buf = [0u8; 8];
+                buf.copy_from_slice(&value);
+                let balance = u64::from_be_bytes(buf);
+                dump.balances.insert(address.to_string(), balance);
+            } else if key_str.starts_with("locked_") {
+                let mut buf = [0u8; 8];
+                buf.copy_from_slice(&value);
+                let balance = u64::from_be_bytes(buf);
+                dump.locked_balances.push(balance);
+            } else {
+                dump.metadata.insert(
+                    key_str.to_string(),
+                    String::from_utf8_lossy(&value).to_string(),
+                );
+            }
+        }
+        
+        Ok(dump)
+    }
+
+    pub fn from_jammed_data(data: &[u8]) -> Result<Self, Box<dyn std::error::Error>> {
+        let mut stack = nockvm::mem::NockStack::new(1 << 20, 0);
+        let jammed_atom = nockvm::noun::Atom::new(&mut stack, u64::from_be_bytes(data[0..8].try_into()?));
+        let noun = nockvm::serialization::cue(&mut stack, jammed_atom)
+            .map_err(|e| format!("Failed to cue jammed data: {:?}", e))?;
+
+        let mut notes = HashMap::new();
+        let mut locked_balances = Vec::new();
+        let mut block_id = None;
+        let mut total_balance = None;
+
+        if let Ok(cell) = noun.as_cell() {
+            let head = unsafe { cell.raw_head() };
+            if head.is_atom() {
+                let tag = unsafe { head.raw_atom_word() };
+                if tag != hot::tas("wallet-balance") {
+                    return Err("Not a wallet balance".into());
+                }
+            }
+
+            let tail = unsafe { cell.raw_tail() };
+            if tail.is_cell() {
+                let data_cell = unsafe { tail.raw_cell() };
+                // Parse notes
+                let head = unsafe { data_cell.raw_head() };
+                if head.is_cell() {
+                    // Notes are a list of [name balance] pairs
+                    let mut current = unsafe { head.raw_cell() };
+                    while !current.is_atom() {
+                        let note = unsafe { current.raw_head() };
+                        if note.is_cell() {
+                            let note_data = unsafe { note.raw_cell() };
+                            let name_noun = unsafe { note_data.raw_head() };
+                            let balance_noun = unsafe { note_data.raw_tail() };
+                            if name_noun.is_atom() && balance_noun.is_atom() {
+                                let name = unsafe { 
+                                    String::from_utf8_lossy(&name_noun.raw_atom_bytes()).to_string() 
+                                };
+                                let balance = unsafe { balance_noun.raw_atom_word() };
+                                notes.insert(name, balance);
+                            }
+                        }
+                        current = unsafe { current.raw_tail() };
+                    }
+                }
+
+                // Parse locked balances
+                let tail = unsafe { data_cell.raw_tail() };
+                if tail.is_cell() {
+                    let locked_cell = unsafe { tail.raw_cell().raw_head() };
+                    if locked_cell.is_cell() {
+                        let mut current = unsafe { locked_cell.raw_cell() };
+                        while !current.is_atom() {
+                            let head = unsafe { current.raw_head() };
+                            if head.is_atom() {
+                                let balance = unsafe { head.raw_atom_word() };
+                                locked_balances.push(balance);
+                            }
+                            current = unsafe { current.raw_tail() };
+                        }
+                    }
+                }
+
+                // Parse block ID
+                if tail.is_cell() {
+                    let block_cell = unsafe { tail.raw_cell().raw_tail() };
+                    if block_cell.is_cell() {
+                        let block_head = unsafe { block_cell.raw_cell().raw_head() };
+                        if block_head.is_atom() {
+                            block_id = Some(unsafe { 
+                                String::from_utf8_lossy(&block_head.raw_atom_bytes()).to_string() 
+                            });
+                        }
+                    }
+                }
+
+                // Parse total balance
+                if tail.is_cell() {
+                    let total_cell = unsafe { tail.raw_cell().raw_tail() };
+                    if total_cell.is_cell() {
+                        let total_noun = unsafe { total_cell.raw_cell().raw_head() };
+                        if total_noun.is_atom() {
+                            total_balance = Some(unsafe { total_noun.raw_atom_word() });
+                        }
+                    }
+                }
+            }
+        }
+
+        Ok(WalletBalance {
+            notes,
+            locked_balances,
+            block_id,
+            total_balance,
+        })
+    }
+}
