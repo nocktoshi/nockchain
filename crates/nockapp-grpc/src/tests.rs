@@ -18,7 +18,7 @@ mod tests {
 
     #[test]
     fn test_error_codes() {
-        use crate::pb::ErrorCode;
+        use crate::pb::common::v1::ErrorCode;
 
         // Test that error codes are defined
         assert_eq!(ErrorCode::PeekFailed as i32, 2);

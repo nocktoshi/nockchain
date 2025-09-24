@@ -205,6 +205,12 @@ impl<J> NounAllocator for NounSlab<J> {
         self.allocation_start = self.allocation_start.add(word_size);
         new_struct_ptr
     }
+
+    unsafe fn equals(&mut self, a: *mut Noun, b: *mut Noun) -> bool {
+        let a = unsafe { &mut *a };
+        let b = unsafe { &mut *b };
+        slab_noun_equality(a, b)
+    }
 }
 
 /// # Safety: no noun in this slab references a noun outside the slab, except in the PMA
@@ -873,11 +879,20 @@ impl Jammer for NockJammer {
 #[cfg(test)]
 mod tests {
     use bitvec::prelude::*;
+    use ibig::ubig;
     use nockvm::noun::{D, T};
     use nockvm_macros::tas;
 
     use super::*;
     use crate::AtomExt;
+    #[test]
+    fn test_ubig_alloc() {
+        let mut slab: NounSlab = NounSlab::new();
+        let big_exp = ubig!(0xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF);
+        let atom = Atom::from_ubig(&mut slab, &big_exp);
+        let big = atom.as_ubig(&mut slab);
+        assert_eq!(big, big_exp);
+    }
 
     #[test]
     #[cfg_attr(miri, ignore)]

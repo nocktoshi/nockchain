@@ -1,460 +1,365 @@
 #![allow(clippy::doc_overindented_list_items)]
 
+mod command;
+mod connection;
+mod error;
+
 use std::fs;
 use std::path::PathBuf;
 
-use clap::{Parser, Subcommand};
+use clap::Parser;
+#[cfg(test)]
+use command::WalletWire;
+use command::{ClientType, CommandNoun, Commands, TimelockIntent, TimelockRange, WalletCli};
+use kernels::wallet::KERNEL;
+use nockapp::driver::*;
+use nockapp::kernel::boot;
+use nockapp::noun::slab::NounSlab;
 use nockapp::utils::bytes::Byts;
-use nockapp::wire::SystemWire;
-use nockapp::{system_data_dir, CrownError, NockApp, NockAppError, ToBytesExt};
-use nockapp_grpc::client::NockAppGrpcClient;
-use nockapp_grpc::driver::grpc_listener_driver;
+use nockapp::utils::make_tas;
+use nockapp::wire::{SystemWire, Wire};
+use nockapp::{
+    exit_driver, file_driver, markdown_driver, one_punch_driver, system_data_dir, CrownError,
+    NockApp, NockAppError, ToBytesExt,
+};
+use nockapp_grpc::pb::common::v1::Base58Hash as PbBase58Hash;
+use nockapp_grpc::pb::public::v1::transaction_accepted_response;
+use nockapp_grpc::{private_nockapp, public_nockchain};
+use nockchain_types::tx_engine::note::{BalanceUpdate, Hash as DomainHash};
+use nockchain_types::SchnorrPubkey;
 use nockvm::jets::cold::Nounable;
 use nockvm::noun::{Atom, Cell, IndirectAtom, Noun, D, NO, SIG, T, YES};
+use noun_serde::{NounDecode, NounDecodeError, NounEncode};
+use termimad::MadSkin;
 use tokio::fs as tokio_fs;
 use tracing::{error, info};
 use zkvm_jetpack::hot::produce_prover_hot_state;
 
-mod error;
+#[tokio::main]
+async fn main() -> Result<(), NockAppError> {
+    rustls::crypto::aws_lc_rs::default_provider()
+        .install_default()
+        .expect("default provider already set elsewhere");
 
-use kernels::wallet::KERNEL;
-use nockapp::driver::*;
-use nockapp::kernel::boot::{self, Cli as BootCli};
-use nockapp::noun::slab::NounSlab;
-use nockapp::utils::make_tas;
-use nockapp::wire::{Wire, WireRepr};
-use nockapp::{exit_driver, file_driver, markdown_driver, one_punch_driver};
+    let cli = WalletCli::parse();
+    boot::init_default_tracing(&cli.boot.clone()); // Init tracing early
 
-/// Represents a timelock range with optional min and max page numbers
-#[derive(Debug, Clone)]
-pub struct TimelockRange {
-    pub min: Option<u64>,
-    pub max: Option<u64>,
-}
-
-impl TimelockRange {
-    pub fn new(min: Option<u64>, max: Option<u64>) -> Self {
-        Self { min, max }
+    if let Commands::TxAccepted { tx_id } = &cli.command {
+        return run_transaction_accepted(&cli.connection, tx_id).await;
     }
 
-    pub fn none() -> Self {
-        Self {
-            min: None,
-            max: None,
+    let prover_hot_state = produce_prover_hot_state();
+    let data_dir = wallet_data_dir().await?;
+
+    let kernel = boot::setup(
+        KERNEL,
+        cli.boot.clone(),
+        prover_hot_state.as_slice(),
+        "wallet",
+        Some(data_dir),
+    )
+    .await
+    .map_err(|e| CrownError::Unknown(format!("Kernel setup failed: {}", e)))?;
+
+    let mut wallet = Wallet::new(kernel);
+
+    // Determine if this command requires chain synchronization
+
+    let requires_sync = match &cli.command {
+        // Commands that DON'T need syncing either because they don't sync
+        // or they don't interact with the chain
+        Commands::Keygen
+        | Commands::DeriveChild { .. }
+        | Commands::ImportKeys { .. }
+        | Commands::ExportKeys
+        | Commands::SignTx { .. }
+        | Commands::SignMessage { .. }
+        | Commands::VerifyMessage { .. }
+        | Commands::SignHash { .. }
+        | Commands::VerifyHash { .. }
+        | Commands::ExportMasterPubkey
+        | Commands::ImportMasterPubkey { .. }
+        | Commands::ListPubkeys
+        | Commands::ShowSeedphrase
+        | Commands::ShowMasterPubkey
+        | Commands::ShowMasterPrivkey
+        | Commands::CreateTx { .. }
+        | Commands::ShowTx { .. }
+        | Commands::TxAccepted { .. } => false,
+
+        // All other commands DO need sync
+        _ => true,
+    };
+
+    // Generate the command noun and operation
+    let poke = match &cli.command {
+        Commands::Keygen => {
+            let mut entropy = [0u8; 32];
+            let mut salt = [0u8; 16];
+            getrandom::fill(&mut entropy).map_err(|e| CrownError::Unknown(e.to_string()))?;
+            getrandom::fill(&mut salt).map_err(|e| CrownError::Unknown(e.to_string()))?;
+            Wallet::keygen(&entropy, &salt)
         }
-    }
-
-    /// Convert to noun representation: [min=(unit page-number) max=(unit page-number)]
-    pub fn to_noun(&self, slab: &mut NounSlab) -> Noun {
-        let min_noun = match self.min {
-            Some(val) => T(slab, &[D(0), D(val)]), // unit: [~ value]
-            None => D(0),                          // unit: ~
-        };
-        let max_noun = match self.max {
-            Some(val) => T(slab, &[D(0), D(val)]), // unit: [~ value]
-            None => D(0),                          // unit: ~
-        };
-        T(slab, &[min_noun, max_noun])
-    }
-}
-
-/// Represents a timelock intent - optional constraint for output notes
-#[derive(Debug, Clone)]
-pub struct TimelockIntent {
-    pub absolute: Option<TimelockRange>,
-    pub relative: Option<TimelockRange>,
-}
-
-impl TimelockIntent {
-    pub fn new(absolute: Option<TimelockRange>, relative: Option<TimelockRange>) -> Self {
-        Self { absolute, relative }
-    }
-
-    pub fn none() -> Self {
-        Self {
-            absolute: None,
-            relative: None,
+        Commands::DeriveChild {
+            index,
+            hardened,
+            label,
+        } => Wallet::derive_child(*index, *hardened, label),
+        Commands::SignTx {
+            transaction,
+            index,
+            hardened,
+        } => Wallet::sign_tx(transaction, *index, *hardened),
+        Commands::SignMessage {
+            message,
+            message_file,
+            message_pos,
+            index,
+            hardened,
+        } => {
+            let bytes = if let Some(m) = message.clone().or(message_pos.clone()) {
+                m.as_bytes().to_vec()
+            } else if let Some(path) = message_file {
+                fs::read(path).map_err(|e| {
+                    CrownError::Unknown(format!("Failed to read message file: {}", e))
+                })?
+            } else {
+                return Err(CrownError::Unknown(
+                    "either --message or --message-file must be provided".into(),
+                )
+                .into());
+            };
+            Wallet::sign_message(&bytes, *index, *hardened)
         }
-    }
+        Commands::SignHash {
+            hash_b58,
+            index,
+            hardened,
+        } => Wallet::sign_hash(hash_b58, *index, *hardened),
+        Commands::VerifyMessage {
+            message,
+            message_file,
+            message_pos,
+            signature_path,
+            signature_pos,
+            pubkey,
+            pubkey_pos,
+        } => {
+            let msg_bytes = if let Some(m) = message.clone().or(message_pos.clone()) {
+                m.as_bytes().to_vec()
+            } else if let Some(path) = message_file {
+                fs::read(path).map_err(|e| {
+                    CrownError::Unknown(format!("Failed to read message file: {}", e))
+                })?
+            } else {
+                return Err(CrownError::Unknown(
+                    "either --message or --message-file must be provided".into(),
+                )
+                .into());
+            };
+            let sig_path = signature_path
+                .clone()
+                .or(signature_pos.clone())
+                .ok_or_else(|| {
+                    NockAppError::from(CrownError::Unknown(
+                        "--signature or SIGNATURE_FILE positional is required".into(),
+                    ))
+                })?;
+            let pk_b58 = pubkey.clone().or(pubkey_pos.clone()).ok_or_else(|| {
+                NockAppError::from(CrownError::Unknown(
+                    "--pubkey or PUBKEY positional is required".into(),
+                ))
+            })?;
 
-    pub fn absolute_only(range: TimelockRange) -> Self {
-        Self {
-            absolute: Some(range),
-            relative: Some(TimelockRange::none()),
+            let sig_bytes = fs::read(sig_path)
+                .map_err(|e| CrownError::Unknown(format!("Failed to read signature: {}", e)))?;
+            Wallet::verify_message(&msg_bytes, &sig_bytes, &pk_b58)
         }
-    }
-
-    pub fn relative_only(range: TimelockRange) -> Self {
-        Self {
-            absolute: Some(TimelockRange::none()),
-            relative: Some(range),
+        Commands::VerifyHash {
+            hash_b58,
+            signature_path,
+            signature_pos,
+            pubkey,
+            pubkey_pos,
+        } => {
+            let sig_path = signature_path
+                .clone()
+                .or(signature_pos.clone())
+                .ok_or_else(|| {
+                    NockAppError::from(CrownError::Unknown(
+                        "--signature or SIGNATURE_FILE positional is required".into(),
+                    ))
+                })?;
+            let pk_b58 = pubkey.clone().or(pubkey_pos.clone()).ok_or_else(|| {
+                NockAppError::from(CrownError::Unknown(
+                    "--pubkey or PUBKEY positional is required".into(),
+                ))
+            })?;
+            let sig_bytes = fs::read(sig_path)
+                .map_err(|e| CrownError::Unknown(format!("Failed to read signature: {}", e)))?;
+            Wallet::verify_hash(hash_b58, &sig_bytes, &pk_b58)
         }
-    }
-
-    /// Convert to noun representation: (unit [absolute=timelock-range relative=timelock-range])
-    pub fn to_noun(&self, slab: &mut NounSlab) -> Noun {
-        match (&self.absolute, &self.relative) {
-            (None, None) => D(0), // unit: ~ (no intent)
-            (abs, rel) => {
-                let default_abs_range = TimelockRange::none();
-                let default_rel_range = TimelockRange::none();
-                let abs_range = abs.as_ref().unwrap_or(&default_abs_range);
-                let rel_range = rel.as_ref().unwrap_or(&default_rel_range);
-
-                let abs_noun = abs_range.to_noun(slab);
-                let rel_noun = rel_range.to_noun(slab);
-                let content = T(slab, &[abs_noun, rel_noun]);
-                T(slab, &[D(0), content]) // unit: [~ content]
+        Commands::ImportKeys {
+            file,
+            key,
+            seedphrase,
+            master_privkey,
+            watch_only_pubkey,
+            chain_code,
+        } => {
+            if let Some(file_path) = file {
+                Wallet::import_keys(file_path)
+            } else if let Some(extended_key) = key {
+                Wallet::import_extended(extended_key)
+            } else if let Some(seed) = seedphrase {
+                // normalize seedphrase to have exactly one space between words
+                let normalized_seed = seed.split_whitespace().collect::<Vec<&str>>().join(" ");
+                Wallet::gen_master_privkey(&normalized_seed)
+            } else if let Some(pubkey) = watch_only_pubkey {
+                let _ = SchnorrPubkey::from_base58(pubkey)
+                    .map_err(|e| CrownError::Unknown(format!("Invalid public key: {}", e)))?;
+                Wallet::import_watch_only_pubkey(&pubkey)
+            } else if let (Some(privkey), Some(chain)) =
+                (master_privkey.as_deref(), chain_code.as_deref())
+            {
+                Wallet::gen_master_pubkey(privkey, chain)
+            } else if master_privkey.is_some() && chain_code.is_none() {
+                return Err(CrownError::Unknown(
+                    "--master-privkey requires --chain-code to be provided".to_string(),
+                )
+                .into());
+            } else if chain_code.is_some() && master_privkey.is_none() {
+                return Err(CrownError::Unknown(
+                    "--chain-code requires --master-privkey to be provided".to_string(),
+                )
+                .into());
+            } else {
+                return Err(CrownError::Unknown(
+                    "One of --file, --key, --seedphrase, or --master-privkey must be provided for import-keys".to_string(),
+                )
+                .into());
             }
         }
-    }
-}
-
-#[derive(Parser, Debug, Clone)]
-#[command(author, version, about, long_about = None)]
-struct WalletCli {
-    #[command(flatten)]
-    boot: BootCli,
-
-    #[command(subcommand)]
-    command: Commands,
-
-    #[arg(
-        long,
-        value_name = "GRPC_ADDRESS",
-        default_value = "http://localhost:5555"
-    )]
-    pub grpc_address: String,
-}
-
-#[derive(Debug)]
-pub enum WalletWire {
-    ListNotes,
-    UpdateBalance,
-    UpdateBlock,
-    Exit,
-    Command(Commands),
-}
-
-impl Wire for WalletWire {
-    const VERSION: u64 = 1;
-    const SOURCE: &str = "wallet";
-
-    fn to_wire(&self) -> WireRepr {
-        let tags = match self {
-            WalletWire::ListNotes => vec!["list-notes".into()],
-            WalletWire::UpdateBalance => vec!["update-balance".into()],
-            WalletWire::UpdateBlock => vec!["update-block".into()],
-            WalletWire::Exit => vec!["exit".into()],
-            WalletWire::Command(command) => {
-                vec!["command".into(), command.as_wire_tag().into()]
+        Commands::ExportKeys => Wallet::export_keys(),
+        Commands::Scan {
+            master_pubkey,
+            search_depth,
+            include_timelocks,
+            include_multisig,
+        } => Wallet::scan(
+            master_pubkey, *search_depth, *include_timelocks, *include_multisig,
+        ),
+        Commands::ListNotes => Wallet::list_notes(),
+        Commands::ListNotesByPubkey { pubkey } => {
+            if let Some(pk) = pubkey {
+                Wallet::list_notes_by_pubkey(pk)
+            } else {
+                return Err(CrownError::Unknown("Public key is required".into()).into());
             }
-        };
-        WireRepr::new(WalletWire::SOURCE, WalletWire::VERSION, tags)
+        }
+        Commands::ListNotesByPubkeyCsv { pubkey } => Wallet::list_notes_by_pubkey_csv(pubkey),
+        Commands::CreateTx {
+            names,
+            recipients,
+            gifts,
+            fee,
+            index,
+            hardened,
+            timelock_intent,
+            timelock_min,
+        } => {
+            let parsed_timelock_intent = match timelock_intent.as_str() {
+                "absolute" => {
+                    TimelockIntent::absolute_only(TimelockRange::new(*timelock_min, None))
+                }
+                "relative" => {
+                    TimelockIntent::relative_only(TimelockRange::new(*timelock_min, None))
+                }
+                "none" => TimelockIntent::none(),
+                _ => {
+                    return Err(CrownError::Unknown(format!(
+                        "Unknown timelock intent: {}",
+                        timelock_intent
+                    ))
+                    .into())
+                }
+            };
+
+            Wallet::create_tx(
+                names.clone(),
+                recipients.clone(),
+                gifts.clone(),
+                *fee,
+                *index,
+                *hardened,
+                vec![parsed_timelock_intent],
+            )
+        }
+        Commands::SendTx { transaction } => Wallet::send_tx(transaction),
+        Commands::ShowTx { transaction } => Wallet::show_tx(transaction),
+        Commands::ExportMasterPubkey => Wallet::export_master_pubkey(),
+        Commands::ImportMasterPubkey { key_path } => Wallet::import_master_pubkey(key_path),
+        Commands::ListPubkeys => Wallet::list_pubkeys(),
+        Commands::ShowSeedphrase => Wallet::show_seedphrase(),
+        Commands::ShowMasterPubkey => Wallet::show_master_pubkey(),
+        Commands::ShowMasterPrivkey => Wallet::show_master_privkey(),
+        Commands::TxAccepted { .. } => {
+            unreachable!("transaction-accepted handled earlier")
+        }
+    }?;
+
+    // If this command requires sync, update the balance using a synchronous poke
+    if requires_sync {
+        info!(
+            "Command requires syncing the current balance, connecting to Nockchain gRPC server..."
+        );
+        let mut pubkey_peek_slab = NounSlab::new();
+        let tracked_tag = make_tas(&mut pubkey_peek_slab, "tracked-pubkeys").as_noun();
+        let watch_only = cli.include_watch_only.to_noun(&mut pubkey_peek_slab);
+        let path = T(&mut pubkey_peek_slab, &[tracked_tag, watch_only, SIG]);
+        pubkey_peek_slab.set_root(path);
+        let pubkey_slab = wallet.app.peek_handle(pubkey_peek_slab).await?;
+        if let Some(slab) = pubkey_slab {
+            let pubkeys = slab
+                .to_vec()
+                .iter()
+                .map(|key| String::from_noun(unsafe { key.root() }))
+                .collect::<Result<Vec<String>, NounDecodeError>>()?;
+
+            let connection_target = cli.connection.target();
+            let pokes =
+                connection::sync_wallet_balance(&mut wallet, &connection_target, pubkeys).await?;
+
+            for poke in pokes {
+                let _ = wallet.app.poke(SystemWire.to_wire(), poke).await.unwrap();
+            }
+        } else {
+            info!("No pubkeys found, not updating balance")
+        }
     }
-}
 
-/// Represents a Noun that the wallet kernel can handle
-type CommandNoun<T> = Result<(T, Operation), NockAppError>;
+    wallet
+        .app
+        .add_io_driver(one_punch_driver(poke.0, poke.1))
+        .await;
+    wallet.app.add_io_driver(file_driver()).await;
+    wallet.app.add_io_driver(markdown_driver()).await;
+    wallet.app.add_io_driver(exit_driver()).await;
 
-fn validate_label(s: &str) -> Result<String, String> {
-    if s.chars()
-        .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-')
-    {
-        Ok(s.to_string())
-    } else {
-        Err("Label must contain only lowercase letters, numbers, and hyphens".to_string())
-    }
-}
-
-#[derive(Subcommand, Debug, Clone)]
-pub enum Commands {
-    /// Generate a new key pair
-    Keygen,
-
-    /// Derive child key (pub, private or both) from the current master key
-    DeriveChild {
-        /// Index of the child key to derive, should be in range [0, 2^31)
-        #[arg(value_parser = clap::value_parser!(u64).range(0..2 << 31))]
-        index: u64,
-
-        /// Hardened or unhardened child key
-        #[arg(short, long)]
-        hardened: bool,
-
-        /// Label for the child key
-        #[arg(short, long, value_parser = validate_label, default_value = None)]
-        label: Option<String>,
-    },
-
-    /// Import keys from a file, extended key, seed phrase, or master private key
-    #[command(group = clap::ArgGroup::new("import_source").required(true).args(&["file", "key", "seedphrase", "master_privkey"]))]
-    ImportKeys {
-        /// Path to the jammed keys file
-        #[arg(short = 'f', long = "file", value_name = "FILE")]
-        file: Option<String>,
-
-        /// Extended key string (e.g., "zprv..." or "zpub...")
-        #[arg(short = 'k', long = "key", value_name = "EXTENDED_KEY")]
-        key: Option<String>,
-
-        /// Seed phrase to generate master private key
-        #[arg(short = 's', long = "seedphrase", value_name = "SEEDPHRASE")]
-        seedphrase: Option<String>,
-
-        /// Master private key (base58-encoded) - requires --chain-code
-        #[arg(short = 'm', long = "master-privkey", value_name = "MASTER_PRIVKEY")]
-        master_privkey: Option<String>,
-
-        /// Chain code (base58-encoded) - required with --master-privkey
-        #[arg(short = 'c', long = "chain-code", value_name = "CHAIN_CODE")]
-        chain_code: Option<String>,
-    },
-
-    /// Export keys to a file
-    ExportKeys,
-
-    /// Perform a simple scan of the blockchain
-    Scan {
-        /// Master public key to scan for
-        #[arg(short, long)]
-        master_pubkey: String,
-        /// Optional search depth (default 100)
-        #[arg(short, long, default_value = "100")]
-        search_depth: u64,
-        /// Include timelocks in scan
-        #[arg(long, default_value = "false")]
-        include_timelocks: bool,
-        /// Include multisig in scan
-        #[arg(long, default_value = "false")]
-        include_multisig: bool,
-    },
-
-    /// List all notes in the wallet
-    ListNotes,
-
-    /// List notes by public key
-    ListNotesByPubkey {
-        /// Optional public key to filter notes
-        pubkey: Option<String>,
-    },
-
-    /// List notes by public key in CSV format
-    ListNotesByPubkeyCsv {
-        /// Public key to filter notes
-        pubkey: String,
-    },
-
-    /// Create a transaction from a transaction file
-    SendTx {
-        /// Transaction file to create transaction from
-        transaction: String,
-    },
-
-    /// Display a transaction file contents
-    ShowTx {
-        /// Transaction file to display
-        transaction: String,
-    },
-
-    /// Signs a transaction (for multisigs only)
-    SignTx {
-        /// Path to input bundle file
-        transaction: String,
-
-        /// Optional key index to use for signing [0, 2^31)
-        #[arg(short, long, value_parser = clap::value_parser!(u64).range(0..2 << 31))]
-        index: Option<u64>,
-        /// Hardened or unhardened child key
-        #[arg(short, long, default_value = "false")]
-        hardened: bool,
-    },
-
-    /// Create a transaction
-    CreateTx {
-        /// Names of notes to spend (comma-separated)
-        #[arg(long)]
-        names: String,
-        /// Recipient addresses (comma-separated)
-        #[arg(long)]
-        recipients: String,
-        /// Amounts to send (comma-separated)
-        #[arg(long)]
-        gifts: String,
-        /// Transaction fee
-        #[arg(long)]
-        fee: u64,
-        /// Optional key index to use for signing [0, 2^31), if not provided, we use the master key
-        #[arg(short, long, value_parser = clap::value_parser!(u64).range(0..2 << 31))]
-        index: Option<u64>,
-        /// Type of timelock intent: "absolute", "relative", or "none"
-        #[arg(long, default_value = "none")]
-        timelock_intent: String,
-        /// Minimum block height for absolute timelock or relative delay in blocks
-        #[arg(long)]
-        timelock_min: Option<u64>,
-        /// Hardened or unhardened child key
-        #[arg(short, long, default_value = "false")]
-        hardened: bool,
-    },
-
-    /// Export a master public key
-    ExportMasterPubkey,
-
-    /// Import a master public key
-    ImportMasterPubkey {
-        // Path to keys file generated from export-master-pubkey
-        key_path: String,
-    },
-
-    /// Lists all public keys in the wallet
-    ListPubkeys,
-
-    /// Show the seed phrase for the current master key
-    ShowSeedphrase,
-
-    /// Show the master public key
-    ShowMasterPubkey,
-
-    /// Show the master private key
-    ShowMasterPrivkey,
-
-    /// Sign an arbitrary message
-    #[command(group = clap::ArgGroup::new("message_source").required(true).args(&["message", "message_file", "message_pos"]))]
-    SignMessage {
-        /// Message to sign (raw string)
-        #[arg(short = 'm', long = "message", group = "message_source")]
-        message: Option<String>,
-
-        /// Path to file containing raw bytes to sign
-        #[arg(short = 'f', long = "message-file", group = "message_source")]
-        message_file: Option<String>,
-
-        /// Positional message to sign (equivalent to --message)
-        #[arg(value_name = "MESSAGE", group = "message_source")]
-        message_pos: Option<String>,
-
-        /// Optional key index to use for signing [0, 2^31)
-        #[arg(short, long, value_parser = clap::value_parser!(u64).range(0..2 << 31))]
-        index: Option<u64>,
-        /// Hardened or unhardened child key
-        #[arg(short, long, default_value = "false")]
-        hardened: bool,
-    },
-
-    /// Sign an already-computed tip5 hash (base58)
-    SignHash {
-        /// Positional base58-encoded tip5 hash to sign
-        #[arg(value_name = "HASH")]
-        hash_b58: String,
-
-        /// Optional key index to use for signing [0, 2^31)
-        #[arg(short, long, value_parser = clap::value_parser!(u64).range(0..2 << 31))]
-        index: Option<u64>,
-        /// Hardened or unhardened child key
-        #[arg(short, long, default_value = "false")]
-        hardened: bool,
-    },
-
-    /// Verify an arbitrary message signature
-    VerifyMessage {
-        /// Message to verify (raw string)
-        #[arg(short = 'm', long = "message")]
-        message: Option<String>,
-
-        /// Path to file containing raw bytes of message to verify
-        #[arg(short = 'f', long = "message-file")]
-        message_file: Option<String>,
-
-        /// Positional message to verify (equivalent to --message)
-        #[arg(value_name = "MESSAGE", conflicts_with_all = ["message", "message_file"])]
-        message_pos: Option<String>,
-
-        /// Path to jammed signature file produced by sign-message
-        #[arg(short = 's', long = "signature")]
-        signature_path: Option<String>,
-
-        /// Positional signature path (equivalent to --signature)
-        #[arg(value_name = "SIGNATURE_FILE")]
-        signature_pos: Option<String>,
-
-        /// Base58-encoded schnorr public key
-        #[arg(short = 'p', long = "pubkey")]
-        pubkey: Option<String>,
-
-        /// Positional public key (equivalent to --pubkey)
-        #[arg(value_name = "PUBKEY")]
-        pubkey_pos: Option<String>,
-    },
-
-    /// Verify a signature against an already-computed tip5 hash (base58)
-    VerifyHash {
-        /// Positional base58-encoded tip5 hash
-        #[arg(value_name = "HASH")]
-        hash_b58: String,
-
-        /// Path to jammed signature file produced by signing
-        #[arg(short = 's', long = "signature")]
-        signature_path: Option<String>,
-        /// Positional signature path
-        #[arg(value_name = "SIGNATURE_FILE")]
-        signature_pos: Option<String>,
-
-        /// Base58-encoded schnorr public key
-        #[arg(short = 'p', long = "pubkey")]
-        pubkey: Option<String>,
-        /// Positional public key
-        #[arg(value_name = "PUBKEY")]
-        pubkey_pos: Option<String>,
-    },
-}
-
-impl Commands {
-    fn as_wire_tag(&self) -> &'static str {
-        match self {
-            Commands::Keygen => "keygen",
-            Commands::DeriveChild { .. } => "derive-child",
-            Commands::ImportKeys { .. } => "import-keys",
-            Commands::ExportKeys => "export-keys",
-            Commands::SignTx { .. } => "sign-tx",
-            Commands::Scan { .. } => "scan",
-            Commands::ListNotes => "list-notes",
-            Commands::ListNotesByPubkey { .. } => "list-notes-by-pubkey",
-            Commands::ListNotesByPubkeyCsv { .. } => "list-notes-by-pubkey-csv",
-            Commands::CreateTx { .. } => "create-tx",
-            Commands::SendTx { .. } => "send-tx",
-            Commands::ShowTx { .. } => "show-tx",
-            Commands::ExportMasterPubkey => "export-master-pubkey",
-            Commands::ImportMasterPubkey { .. } => "import-master-pubkey",
-            Commands::ListPubkeys => "list-pubkeys",
-            Commands::ShowSeedphrase => "show-seedphrase",
-            Commands::ShowMasterPubkey => "show-master-pubkey",
-            Commands::ShowMasterPrivkey => "show-master-privkey",
-            Commands::SignMessage { .. } => "sign-message",
-            Commands::VerifyMessage { .. } => "verify-message",
-            Commands::SignHash { .. } => "sign-hash",
-            Commands::VerifyHash { .. } => "verify-hash",
+    match wallet.app.run().await {
+        Ok(_) => {
+            info!("Command executed successfully");
+            Ok(())
+        }
+        Err(e) => {
+            error!("Command failed: {}", e);
+            Err(e)
         }
     }
 }
 
 pub struct Wallet {
     app: NockApp,
-}
-
-#[derive(Debug, Clone)]
-pub enum KeyType {
-    Pub,
-    Prv,
-}
-
-impl KeyType {
-    pub fn to_string(&self) -> &'static str {
-        match self {
-            KeyType::Pub => "pub",
-            KeyType::Prv => "prv",
-        }
-    }
 }
 
 impl Wallet {
@@ -761,6 +666,22 @@ impl Wallet {
         Self::wallet("import-extended", &[key_noun], Operation::Poke, &mut slab)
     }
 
+    /// Imports a watch-only public key.
+    ///
+    /// # Arguments
+    ///
+    /// * `watch_pubkey` - Watch-only b58 encoded public key string
+    fn import_watch_only_pubkey(watch_pubkey: &str) -> CommandNoun<NounSlab> {
+        let mut slab = NounSlab::new();
+        let key_noun = make_tas(&mut slab, watch_pubkey).as_noun();
+        Self::wallet(
+            "import-watch-only-pubkey",
+            &[key_noun],
+            Operation::Poke,
+            &mut slab,
+        )
+    }
+
     /// Exports keys to a file.
     fn export_keys() -> CommandNoun<NounSlab> {
         let mut slab = NounSlab::new();
@@ -1016,21 +937,54 @@ impl Wallet {
         )
     }
 
-    async fn update_balance_grpc(
-        client: &mut nockapp_grpc::client::NockAppGrpcClient,
-    ) -> Result<CommandNoun<NounSlab>, NockAppError> {
-        let mut slab = NounSlab::new();
-        let path = vec![String::from("current-balance")];
-        let response = client.peek(1, path).await.map_err(|e| {
-            NockAppError::OtherError(format!("Failed to peek current balance: {}", e))
-        })?;
-        let balance = slab.cue_into(response.as_bytes()?)?;
-        Ok(Self::wallet(
-            "update-balance-grpc",
-            &[balance],
-            Operation::Poke,
-            &mut slab,
-        ))
+    async fn update_balance_grpc_public(
+        client: &mut public_nockchain::PublicNockchainGrpcClient,
+        pubkeys: Vec<String>,
+    ) -> Result<Vec<NounSlab>, NockAppError> {
+        let mut results = Vec::new();
+
+        for (_index, key) in pubkeys.iter().enumerate() {
+            let mut slab = NounSlab::new(); // Define slab - adjust as needed
+            let response = client
+                .wallet_get_balance(key.to_owned())
+                .await
+                .map_err(|e| {
+                    NockAppError::OtherError(format!("Failed to request current balance: {}", e))
+                })?;
+            let balance = BalanceUpdate::try_from(response).map_err(|e| {
+                NockAppError::OtherError(format!("Failed to parse balance update: {}", e))
+            })?;
+            let wrapped_balance = Some(Some(balance));
+            let balance_noun = wrapped_balance.to_noun(&mut slab);
+            let head = make_tas(&mut slab, "update-balance-grpc").as_noun();
+            let full = T(&mut slab, &[head, balance_noun]);
+            slab.set_root(full);
+            results.push(slab);
+        }
+
+        Ok(results)
+    }
+
+    async fn update_balance_grpc_private(
+        client: &mut private_nockapp::PrivateNockAppGrpcClient,
+        pubkeys: Vec<String>,
+    ) -> Result<Vec<NounSlab>, NockAppError> {
+        let mut results = Vec::new();
+
+        for (index, key) in pubkeys.iter().enumerate() {
+            let mut slab = NounSlab::new(); // Define slab - adjust as needed
+            let peek_path = vec!["balance-by-pubkey".to_string(), key.clone()];
+            let response = client.peek(index as i32, peek_path).await.map_err(|e| {
+                NockAppError::OtherError(format!("Failed to peek current balance: {}", e))
+            })?;
+            let balance = slab.cue_into(response.as_bytes()?)?;
+            let head = make_tas(&mut slab, "update-balance-grpc").as_noun();
+            let full = T(&mut slab, &[head, balance]);
+            slab.set_root(full);
+            results.push(slab);
+        }
+
+        Ok(results)
     }
 
     /// Lists all notes in the wallet.
@@ -1172,297 +1126,79 @@ pub async fn wallet_data_dir() -> Result<PathBuf, NockAppError> {
     Ok(wallet_data_dir)
 }
 
-#[tokio::main]
-async fn main() -> Result<(), NockAppError> {
-    let cli = WalletCli::parse();
-    boot::init_default_tracing(&cli.boot.clone()); // Init tracing early
+async fn run_transaction_accepted(
+    connection: &connection::ConnectionCli,
+    tx_id: &str,
+) -> Result<(), NockAppError> {
+    if connection.client != ClientType::Public {
+        return Err(NockAppError::OtherError(
+            "transaction-accepted command requires the public client (--client public)".to_string(),
+        ));
+    }
 
-    let prover_hot_state = produce_prover_hot_state();
-    let data_dir = wallet_data_dir().await?;
+    let endpoint = connection.public_grpc_server_addr.to_string();
+    let mut client = public_nockchain::PublicNockchainGrpcClient::connect(endpoint.clone())
+        .await
+        .map_err(|err| {
+            NockAppError::OtherError(format!(
+                "Failed to connect to public Nockchain gRPC server at {}: {}",
+                endpoint, err
+            ))
+        })?;
 
-    let kernel = boot::setup(
-        KERNEL,
-        Some(cli.boot.clone()),
-        prover_hot_state.as_slice(),
-        "wallet",
-        Some(data_dir),
-    )
-    .await
-    .map_err(|e| CrownError::Unknown(format!("Kernel setup failed: {}", e)))?;
+    DomainHash::from_base58(tx_id).map_err(|_| {
+        NockAppError::OtherError(format!(
+            "Invalid transaction ID (expected base58-encoded hash): {}",
+            tx_id
+        ))
+    })?;
 
-    let mut wallet = Wallet::new(kernel);
-
-    // Determine if this command requires chain synchronization
-
-    let requires_sync = match &cli.command {
-        // Commands that DON'T need syncing either because they don't sync
-        // or they don't interact with the chain
-        Commands::Keygen
-        | Commands::DeriveChild { .. }
-        | Commands::ImportKeys { .. }
-        | Commands::ExportKeys
-        | Commands::SignTx { .. }
-        | Commands::SignMessage { .. }
-        | Commands::VerifyMessage { .. }
-        | Commands::SignHash { .. }
-        | Commands::VerifyHash { .. }
-        | Commands::ExportMasterPubkey
-        | Commands::ImportMasterPubkey { .. }
-        | Commands::ListPubkeys
-        | Commands::ShowSeedphrase
-        | Commands::ShowMasterPubkey
-        | Commands::ShowMasterPrivkey
-        | Commands::CreateTx { .. }
-        | Commands::ShowTx { .. } => false,
-
-        // All other commands DO need sync
-        _ => true,
+    let request = PbBase58Hash {
+        hash: tx_id.to_string(),
     };
 
-    // Generate the command noun and operation
-    let poke = match &cli.command {
-        Commands::Keygen => {
-            let mut entropy = [0u8; 32];
-            let mut salt = [0u8; 16];
-            getrandom::fill(&mut entropy).map_err(|e| CrownError::Unknown(e.to_string()))?;
-            getrandom::fill(&mut salt).map_err(|e| CrownError::Unknown(e.to_string()))?;
-            Wallet::keygen(&entropy, &salt)
-        }
-        Commands::DeriveChild {
-            index,
-            hardened,
-            label,
-        } => Wallet::derive_child(*index, *hardened, label),
-        Commands::SignTx {
-            transaction,
-            index,
-            hardened,
-        } => Wallet::sign_tx(transaction, *index, *hardened),
-        Commands::SignMessage {
-            message,
-            message_file,
-            message_pos,
-            index,
-            hardened,
-        } => {
-            let bytes = if let Some(m) = message.clone().or(message_pos.clone()) {
-                m.as_bytes().to_vec()
-            } else if let Some(path) = message_file {
-                fs::read(path).map_err(|e| {
-                    CrownError::Unknown(format!("Failed to read message file: {}", e))
-                })?
-            } else {
-                return Err(CrownError::Unknown(
-                    "either --message or --message-file must be provided".into(),
-                )
-                .into());
-            };
-            Wallet::sign_message(&bytes, *index, *hardened)
-        }
-        Commands::SignHash {
-            hash_b58,
-            index,
-            hardened,
-        } => Wallet::sign_hash(hash_b58, *index, *hardened),
-        Commands::VerifyMessage {
-            message,
-            message_file,
-            message_pos,
-            signature_path,
-            signature_pos,
-            pubkey,
-            pubkey_pos,
-        } => {
-            let msg_bytes = if let Some(m) = message.clone().or(message_pos.clone()) {
-                m.as_bytes().to_vec()
-            } else if let Some(path) = message_file {
-                fs::read(path).map_err(|e| {
-                    CrownError::Unknown(format!("Failed to read message file: {}", e))
-                })?
-            } else {
-                return Err(CrownError::Unknown(
-                    "either --message or --message-file must be provided".into(),
-                )
-                .into());
-            };
-            let sig_path = signature_path
-                .clone()
-                .or(signature_pos.clone())
-                .ok_or_else(|| {
-                    NockAppError::from(CrownError::Unknown(
-                        "--signature or SIGNATURE_FILE positional is required".into(),
-                    ))
-                })?;
-            let pk_b58 = pubkey.clone().or(pubkey_pos.clone()).ok_or_else(|| {
-                NockAppError::from(CrownError::Unknown(
-                    "--pubkey or PUBKEY positional is required".into(),
-                ))
-            })?;
+    let response = client.transaction_accepted(request).await.map_err(|err| {
+        NockAppError::OtherError(format!(
+            "Transaction accepted query failed for {}: {}",
+            tx_id, err
+        ))
+    })?;
 
-            let sig_bytes = fs::read(sig_path)
-                .map_err(|e| CrownError::Unknown(format!("Failed to read signature: {}", e)))?;
-            Wallet::verify_message(&msg_bytes, &sig_bytes, &pk_b58)
+    let accepted = match response.result {
+        Some(transaction_accepted_response::Result::Accepted(value)) => value,
+        Some(transaction_accepted_response::Result::Error(err)) => {
+            return Err(NockAppError::OtherError(format!(
+                "Transaction accepted query returned error code {}: {}",
+                err.code, err.message
+            )))
         }
-        Commands::VerifyHash {
-            hash_b58,
-            signature_path,
-            signature_pos,
-            pubkey,
-            pubkey_pos,
-        } => {
-            let sig_path = signature_path
-                .clone()
-                .or(signature_pos.clone())
-                .ok_or_else(|| {
-                    NockAppError::from(CrownError::Unknown(
-                        "--signature or SIGNATURE_FILE positional is required".into(),
-                    ))
-                })?;
-            let pk_b58 = pubkey.clone().or(pubkey_pos.clone()).ok_or_else(|| {
-                NockAppError::from(CrownError::Unknown(
-                    "--pubkey or PUBKEY positional is required".into(),
-                ))
-            })?;
-            let sig_bytes = fs::read(sig_path)
-                .map_err(|e| CrownError::Unknown(format!("Failed to read signature: {}", e)))?;
-            Wallet::verify_hash(hash_b58, &sig_bytes, &pk_b58)
+        None => {
+            return Err(NockAppError::OtherError(
+                "Transaction accepted query returned an empty result".to_string(),
+            ))
         }
-        Commands::ImportKeys {
-            file,
-            key,
-            seedphrase,
-            master_privkey,
-            chain_code,
-        } => {
-            if let Some(file_path) = file {
-                Wallet::import_keys(file_path)
-            } else if let Some(extended_key) = key {
-                Wallet::import_extended(extended_key)
-            } else if let Some(seed) = seedphrase {
-                // normalize seedphrase to have exactly one space between words
-                let normalized_seed = seed.split_whitespace().collect::<Vec<&str>>().join(" ");
-                Wallet::gen_master_privkey(&normalized_seed)
-            } else if let (Some(privkey), Some(chain)) = (master_privkey, chain_code) {
-                Wallet::gen_master_pubkey(&privkey, &chain)
-            } else if master_privkey.is_some() && chain_code.is_none() {
-                return Err(CrownError::Unknown(
-                    "--master-privkey requires --chain-code to be provided".to_string(),
-                )
-                .into());
-            } else if chain_code.is_some() && master_privkey.is_none() {
-                return Err(CrownError::Unknown(
-                    "--chain-code requires --master-privkey to be provided".to_string(),
-                )
-                .into());
-            } else {
-                return Err(CrownError::Unknown(
-                    "One of --file, --key, --seedphrase, or --master-privkey must be provided for import-keys".to_string(),
-                )
-                .into());
-            }
-        }
-        Commands::ExportKeys => Wallet::export_keys(),
-        Commands::Scan {
-            master_pubkey,
-            search_depth,
-            include_timelocks,
-            include_multisig,
-        } => Wallet::scan(
-            master_pubkey, *search_depth, *include_timelocks, *include_multisig,
-        ),
-        Commands::ListNotes => Wallet::list_notes(),
-        Commands::ListNotesByPubkey { pubkey } => {
-            if let Some(pk) = pubkey {
-                Wallet::list_notes_by_pubkey(pk)
-            } else {
-                return Err(CrownError::Unknown("Public key is required".into()).into());
-            }
-        }
-        Commands::ListNotesByPubkeyCsv { pubkey } => Wallet::list_notes_by_pubkey_csv(pubkey),
-        Commands::CreateTx {
-            names,
-            recipients,
-            gifts,
-            fee,
-            index,
-            hardened,
-            timelock_intent,
-            timelock_min,
-        } => {
-            let parsed_timelock_intent = match timelock_intent.as_str() {
-                "absolute" => {
-                    TimelockIntent::absolute_only(TimelockRange::new(*timelock_min, None))
-                }
-                "relative" => {
-                    TimelockIntent::relative_only(TimelockRange::new(*timelock_min, None))
-                }
-                "none" => TimelockIntent::none(),
-                _ => {
-                    return Err(CrownError::Unknown(format!(
-                        "Unknown timelock intent: {}",
-                        timelock_intent
-                    ))
-                    .into())
-                }
-            };
+    };
 
-            Wallet::create_tx(
-                names.clone(),
-                recipients.clone(),
-                gifts.clone(),
-                *fee,
-                *index,
-                *hardened,
-                vec![parsed_timelock_intent],
-            )
-        }
-        Commands::SendTx { transaction } => Wallet::send_tx(transaction),
-        Commands::ShowTx { transaction } => Wallet::show_tx(transaction),
-        Commands::ExportMasterPubkey => Wallet::export_master_pubkey(),
-        Commands::ImportMasterPubkey { key_path } => Wallet::import_master_pubkey(key_path),
-        Commands::ListPubkeys => Wallet::list_pubkeys(),
-        Commands::ShowSeedphrase => Wallet::show_seedphrase(),
-        Commands::ShowMasterPubkey => Wallet::show_master_pubkey(),
-        Commands::ShowMasterPrivkey => Wallet::show_master_privkey(),
-    }?;
+    let markdown = format_transaction_accepted_markdown(tx_id, accepted);
+    let skin = MadSkin::default_dark();
+    println!("{}", skin.term_text(&markdown));
 
-    // If this command requires sync, update the balance using a synchronous poke
-    if requires_sync {
-        info!(
-            "Command requires syncing the current balance, connecting to Nockchain gRPC server..."
-        );
-        let mut client = NockAppGrpcClient::connect(cli.grpc_address.clone())
-            .await
-            .map_err(|_e| {
-                NockAppError::OtherError(format!("Failed to connect to Nockchain gRPC server, make sure you have a nockchain node running locally and the grpc_address matches"))
-            })?;
-        info!("Connected to NockApp gRPC server");
-        let poke = Wallet::update_balance_grpc(&mut client).await??;
-        let _ = wallet.app.poke(SystemWire.to_wire(), poke.0).await?;
-    }
+    Ok(())
+}
 
-    wallet
-        .app
-        .add_io_driver(one_punch_driver(poke.0, poke.1))
-        .await;
-    wallet
-        .app
-        .add_io_driver(grpc_listener_driver(cli.grpc_address.clone()))
-        .await;
-    wallet.app.add_io_driver(file_driver()).await;
-    wallet.app.add_io_driver(markdown_driver()).await;
-    wallet.app.add_io_driver(exit_driver()).await;
+fn format_transaction_accepted_markdown(tx_id: &str, accepted: bool) -> String {
+    let status_line = if accepted {
+        "- status: **accepted by node**"
+    } else {
+        "- status: **not yet accepted**"
+    };
 
-    match wallet.app.run().await {
-        Ok(_) => {
-            info!("Command executed successfully");
-            Ok(())
-        }
-        Err(e) => {
-            error!("Command failed: {}", e);
-            Err(e)
-        }
-    }
+    [
+        "## Transaction Acceptance".to_string(),
+        format!("- tx id: `{}`", tx_id),
+        status_line.to_string(),
+    ]
+    .join("\n")
 }
 
 pub fn from_bytes(stack: &mut NounSlab, bytes: &[u8]) -> Atom {
@@ -1504,7 +1240,7 @@ mod tests {
         let prover_hot_state = produce_prover_hot_state();
         let nockapp = boot::setup(
             KERNEL,
-            Some(cli.clone()),
+            cli.clone(),
             prover_hot_state.as_slice(),
             "wallet",
             None,
@@ -1543,7 +1279,7 @@ mod tests {
         let prover_hot_state = produce_prover_hot_state();
         let nockapp = boot::setup(
             KERNEL,
-            Some(cli.clone()),
+            cli.clone(),
             prover_hot_state.as_slice(),
             "wallet",
             None,
@@ -1551,7 +1287,6 @@ mod tests {
         .await
         .map_err(|e| CrownError::Unknown(e.to_string()))?;
         let mut wallet = Wallet::new(nockapp);
-        let key_type = KeyType::Prv;
 
         // Generate a new key pair
         let mut entropy = [0u8; 32];
@@ -1593,7 +1328,7 @@ mod tests {
     async fn test_sign_tx() -> Result<(), NockAppError> {
         init_tracing();
         let cli = BootCli::parse_from(&[""]);
-        let nockapp = boot::setup(KERNEL, Some(cli.clone()), &[], "wallet", None)
+        let nockapp = boot::setup(KERNEL, cli.clone(), &[], "wallet", None)
             .await
             .map_err(|e| CrownError::Unknown(e.to_string()))?;
         let mut wallet = Wallet::new(nockapp);
@@ -1651,7 +1386,7 @@ mod tests {
     async fn test_gen_master_privkey() -> Result<(), NockAppError> {
         init_tracing();
         let cli = BootCli::parse_from(&[""]);
-        let nockapp = boot::setup(KERNEL, Some(cli.clone()), &[], "wallet", None)
+        let nockapp = boot::setup(KERNEL, cli.clone(), &[], "wallet", None)
             .await
             .map_err(|e| CrownError::Unknown(e.to_string()))?;
         let mut wallet = Wallet::new(nockapp);
@@ -1663,6 +1398,7 @@ mod tests {
             key: None,
             seedphrase: Some(seedphrase.to_string()),
             master_privkey: None,
+            watch_only_pubkey: None,
             chain_code: None,
         })
         .to_wire();
@@ -1680,7 +1416,7 @@ mod tests {
         let prover_hot_state = produce_prover_hot_state();
         let nockapp = boot::setup(
             KERNEL,
-            Some(cli.clone()),
+            cli.clone(),
             prover_hot_state.as_slice(),
             "wallet",
             None,
@@ -1699,6 +1435,7 @@ mod tests {
             key: None,
             seedphrase: None,
             master_privkey: Some(master_privkey.to_string()),
+            watch_only_pubkey: None,
             chain_code: Some(chain_code.to_string()),
         })
         .to_wire();
@@ -1778,7 +1515,7 @@ mod tests {
     async fn test_import_keys() -> Result<(), NockAppError> {
         init_tracing();
         let cli = BootCli::parse_from(&["--new"]);
-        let nockapp = boot::setup(KERNEL, Some(cli.clone()), &[], "wallet", None)
+        let nockapp = boot::setup(KERNEL, cli.clone(), &[], "wallet", None)
             .await
             .map_err(|e| CrownError::Unknown(e.to_string()))?;
         let mut wallet = Wallet::new(nockapp);
@@ -1799,6 +1536,7 @@ mod tests {
             key: None,
             seedphrase: None,
             master_privkey: None,
+            watch_only_pubkey: None,
             chain_code: None,
         })
         .to_wire();
@@ -1825,7 +1563,7 @@ mod tests {
     async fn test_simple_scan() -> Result<(), NockAppError> {
         init_tracing();
         let cli = BootCli::parse_from(&[""]);
-        let nockapp = boot::setup(KERNEL, Some(cli.clone()), &[], "wallet", None)
+        let nockapp = boot::setup(KERNEL, cli.clone(), &[], "wallet", None)
             .await
             .map_err(|e| CrownError::Unknown(e.to_string()))?;
         let mut wallet = Wallet::new(nockapp);
@@ -1849,7 +1587,7 @@ mod tests {
     async fn test_spend_multisig_format() -> Result<(), NockAppError> {
         init_tracing();
         let cli = BootCli::parse_from(&[""]);
-        let nockapp = boot::setup(KERNEL, Some(cli.clone()), &[], "wallet", None)
+        let nockapp = boot::setup(KERNEL, cli.clone(), &[], "wallet", None)
             .await
             .map_err(|e| CrownError::Unknown(e.to_string()))?;
         let mut wallet = Wallet::new(nockapp);
@@ -1889,7 +1627,7 @@ mod tests {
     #[cfg_attr(miri, ignore)]
     async fn test_spend_single_sig_format() -> Result<(), NockAppError> {
         let cli = BootCli::parse_from(&[""]);
-        let nockapp = boot::setup(KERNEL, Some(cli.clone()), &[], "wallet", None)
+        let nockapp = boot::setup(KERNEL, cli.clone(), &[], "wallet", None)
             .await
             .map_err(|e| CrownError::Unknown(e.to_string()))?;
         init_tracing();
@@ -1919,6 +1657,7 @@ mod tests {
             key: None,
             seedphrase: Some("correct horse battery staple".to_string()),
             master_privkey: None,
+            watch_only_pubkey: None,
             chain_code: None,
         })
         .to_wire();
@@ -1947,7 +1686,7 @@ mod tests {
     async fn test_list_notes() -> Result<(), NockAppError> {
         init_tracing();
         let cli = BootCli::parse_from(&[""]);
-        let nockapp = boot::setup(KERNEL, Some(cli.clone()), &[], "wallet", None)
+        let nockapp = boot::setup(KERNEL, cli.clone(), &[], "wallet", None)
             .await
             .map_err(|e| CrownError::Unknown(e.to_string()))?;
         let mut wallet = Wallet::new(nockapp);
@@ -1967,7 +1706,7 @@ mod tests {
     async fn test_make_tx_from_draft() -> Result<(), NockAppError> {
         init_tracing();
         let cli = BootCli::parse_from(&[""]);
-        let nockapp = boot::setup(KERNEL, Some(cli.clone()), &[], "wallet", None)
+        let nockapp = boot::setup(KERNEL, cli.clone(), &[], "wallet", None)
             .await
             .map_err(|e| CrownError::Unknown(e.to_string()))?;
         let mut wallet = Wallet::new(nockapp);
@@ -2010,7 +1749,7 @@ mod tests {
     async fn test_show_tx() -> Result<(), NockAppError> {
         init_tracing();
         let cli = BootCli::parse_from(&[""]);
-        let nockapp = boot::setup(KERNEL, Some(cli.clone()), &[], "wallet", None)
+        let nockapp = boot::setup(KERNEL, cli.clone(), &[], "wallet", None)
             .await
             .map_err(|e| CrownError::Unknown(e.to_string()))?;
         let mut wallet = Wallet::new(nockapp);
@@ -2043,5 +1782,17 @@ mod tests {
         assert!(!show_result.is_empty(), "Expected non-empty show-tx result");
 
         Ok(())
+    }
+
+    #[test]
+    fn domain_hash_from_base58_accepts_valid_id() {
+        let tx_id = "3giXkwW4zbFhoyJu27RbP6VNiYgR6yaTfk2AYnEHvxtVaGbmcVD6jb9";
+        DomainHash::from_base58(tx_id).expect("expected valid base58 hash");
+    }
+
+    #[test]
+    fn domain_hash_from_base58_rejects_invalid_id() {
+        let invalid_tx_id = "not-a-valid-hash";
+        assert!(DomainHash::from_base58(invalid_tx_id).is_err());
     }
 }

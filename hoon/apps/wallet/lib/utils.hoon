@@ -262,6 +262,9 @@
       ~|("base path not accessible because master not set" !!)
     /keys/[t/(to-b58:master:wt master.state)]
   ::
+  ++  watch-path  ^-  trek
+    /keys/watch
+  ::
   ++  seed-path  ^-  trek
     (welp base-path /seed)
   ::
@@ -328,8 +331,19 @@
       |=  [t=trek =meta:wt]
       ?:(&(?=(%label -.meta) =(label +.meta)) `t ~)
     ::
+    ++  watch-keys
+      ^-  (list @t)
+      =/  subtree  (~(kids of keys.state) watch-path)
+      %+  turn
+        ~(tap by kid.subtree)
+      |=  [=trek =meta:wt]
+      ?>  ?=(%watch-key -.meta)
+      p.meta
+    ::
     ++  keys
       ^-  (list [trek meta:wt])
+      ?~  master.state
+        ~
       =/  subtree
         %-  ~(kids of keys.state)
         key-path
@@ -369,13 +383,19 @@
       %+  ~(put of keys.state)
         (welp key-path /label)
       label/u.label
+    ::
+    ++  watch-key
+      |=  b58-key=@t
+      %+  ~(put of keys.state)
+        (welp watch-path ~[t/b58-key])
+      [%watch-key b58-key]
     --
   ::
   ++  get-note
     |=  name=nname:transact
     ^-  nnote:transact
-    ?:  (~(has z-by:zo balance.state) name)
-      (~(got z-by:zo balance.state) name)
+    ?:  (~(has z-by:zo notes.balance.state) name)
+      (~(got z-by:zo notes.balance.state) name)
     ~|("note not found: {<name>}" !!)
   ::
   ::  TODO: way too slow, need a better way to do this or
@@ -385,7 +405,7 @@
     |=  has=hash:transact
     ^-  (unit nname:transact)
     =/  notes=(list [name=nname:transact note=nnote:transact])
-      ~(tap z-by:zo balance.state)
+      ~(tap z-by:zo notes.balance.state)
     |-
     ?~  notes  ~
     ?:  =((hash:nnote:transact note.i.notes) has)

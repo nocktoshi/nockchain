@@ -17,9 +17,9 @@ use nockvm_macros::tas;
 use rand::Rng;
 use tokio::sync::Mutex;
 use tracing::{debug, error, info, instrument, warn};
-use zkvm_jetpack::form::PRIME;
-use zkvm_jetpack::hand::structs::HoonList;
-use zkvm_jetpack::noun::noun_ext::NounExt as OtherNounExt;
+use zkvm_jetpack::form::belt::PRIME;
+use zkvm_jetpack::form::noun_ext::NounMathExt;
+use zkvm_jetpack::form::structs::HoonList;
 
 pub enum MiningWire {
     Mined,

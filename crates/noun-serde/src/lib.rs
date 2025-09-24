@@ -5,6 +5,8 @@ pub mod wallet;
 #[allow(unused_imports)]
 use nockapp::utils::make_tas;
 use nockapp::{AtomExt, NockAppError};
+use nockvm::jets::util::BAIL_FAIL;
+use nockvm::jets::JetErr;
 #[allow(unused_imports)]
 use nockvm::noun::{Atom, FullDebugCell, Noun, NounAllocator, Slots, D, T};
 use nockvm::noun::{NO, YES};
@@ -78,6 +80,12 @@ pub enum NounDecodeError {
 
     #[error("Failed to decode Constraints")]
     ConstraintsDecodeError,
+}
+
+impl From<NounDecodeError> for JetErr {
+    fn from(_err: NounDecodeError) -> Self {
+        BAIL_FAIL
+    }
 }
 
 impl From<NounDecodeError> for NockAppError {
@@ -341,8 +349,6 @@ impl<T: NounEncode> NounEncode for Option<T> {
 
 impl<T: NounDecode> NounDecode for Option<T> {
     fn from_noun(noun: &Noun) -> Result<Self, NounDecodeError> {
-        trace!("Decoding Option with noun: {:?}", noun);
-
         // First check if it's an atom 0 (None)
         if let Ok(atom) = noun.as_atom() {
             match atom.as_u64() {

@@ -315,27 +315,31 @@
   |%
   +$  form  [^hash ^hash ~]
   ::
+  ++  first
+    |=  [owners=lock has-timelock=?]
+    %-  hash-hashable:tip5
+    :*  leaf+&                   :: outcome of first pact
+        leaf+has-timelock        :: does it have a timelock?
+        hash+(hash:lock owners)  :: owners of note
+        leaf+~                   :: first pact
+    ==
+  ::
+  ++  last
+    |=  [=source =timelock]
+    %-  hash-hashable:tip5
+    :*  leaf+&                          :: outcome of second pact
+        (hashable:^source source)       :: source of note
+        hash+(hash:^timelock timelock)  :: timelock of note
+        leaf+~                          :: second pact
+    ==
+  ::
   ++  new
     =<  default
     |%
     ++  default
       |=  [owners=lock =source =timelock]
       ^-  form
-      =/  first-name
-        %-  hash-hashable:tip5
-        :*  leaf+&                  :: outcome of first pact
-            leaf+!=(~ timelock)     :: does it have a timelock?
-            hash+(hash:lock owners)  :: owners of note
-            leaf+~                  :: first pact
-        ==
-      =/  last-name
-        %-  hash-hashable:tip5
-        :*  leaf+&                          :: outcome of second pact
-            (hashable:^source source)       :: source of note
-            hash+(hash:^timelock timelock)  :: timelock of note
-            leaf+~                          :: second pact
-        ==
-      [first-name last-name ~]
+      [(first owners !=(~ timelock)) (last source timelock) ~]
     ::
     ++  simple
       |=  [owners=lock =source]
@@ -484,7 +488,6 @@
   ++  hashable-block-commitment
     |=  =form
     ^-  hashable:tip5
-    |^
     :*  hash+parent.form
         hash+(hash-hashable:tip5 (hashable-tx-ids tx-ids.form))
         hash+(hash:coinbase-split coinbase.form)
@@ -495,19 +498,127 @@
         leaf+height.form
         leaf+msg.form
     ==
-    ::
-    ++  hashable-tx-ids
-      |=  tx-ids=(z-set tx-id)
-      ^-  hashable:tip5
-      ?~  tx-ids  leaf+tx-ids
-      :+  hash+n.tx-ids
-        $(tx-ids l.tx-ids)
-      $(tx-ids r.tx-ids)
-    --
+  ::
+  ::  +hashable-digest: block-id as hashable
+  ++  hashable-digest
+    |=  pag=form
+    ^-  hashable:tip5
+    :-  ?~  pow.pag  leaf+~
+        [leaf+~ hash+(hash-proof u.pow.pag)]
+    (hashable-block-commitment pag)
   ::
   ++  block-commitment
     |=  =form
     (hash-hashable:tip5 (hashable-block-commitment form))
+  ::
+  ++  hashable-tx-ids
+    |=  tx-ids=(z-set tx-id)
+    ^-  hashable:tip5
+    ?~  tx-ids  leaf+tx-ids
+    :+  hash+n.tx-ids
+      $(tx-ids l.tx-ids)
+    $(tx-ids r.tx-ids)
+  ::
+  ++  field-merk-proof
+    |=  [pag=form idx=@]
+    ^-  [axis=@ proof=merk-proof:merkle]
+    %+  prove-hashable-by-index:merkle
+      (hashable-digest pag)
+    idx
+  ::
+  ::
+  ++  tx-ids-digest
+    |=  pag=form
+    ^-  noun-digest:tip5
+    (hash-hashable:tip5 (hashable-tx-ids tx-ids.pag))
+  ::
+  ::
+  +$  proof-field
+    $:  top=[axis=@ proof=merk-proof:merkle]
+        inner=(unit [axis=@ proof=merk-proof:merkle])
+        value=(unit noun-digest:tip5)
+    ==
+  ::
+  ++  prove-field
+    |=  [pag=form tag=$@(@tas (pair @tas @))]
+    ^-  (unit proof-field)
+    ?@  tag
+      :: top-level field idx + digest
+      =/  [idx=@ val=noun-digest:tip5]
+        ?+    tag  !!
+            %pow
+          :-  1
+          %-  hash-hashable:tip5
+          ^-  hashable:tip5
+          ?~  pow.pag  leaf+~
+          [leaf+~ hash+(hash-proof u.pow.pag)]
+            %parent
+          :-  2
+          (hash-hashable:tip5 hash+parent.pag)
+            %tx-ids
+          :-  3
+          %-  hash-hashable:tip5
+          hash+(hash-hashable:tip5 (hashable-tx-ids tx-ids.pag))
+            %coinbase
+          :-  4
+          %-  hash-hashable:tip5
+          hash+(hash:coinbase-split coinbase.pag)
+            %timestamp
+          :-  5
+          (hash-hashable:tip5 leaf+timestamp.pag)
+            %epoch-counter
+          :-  6
+          (hash-hashable:tip5 leaf+epoch-counter.pag)
+            %target
+          :-  7
+          (hash-hashable:tip5 leaf+target.pag)
+            %accumulated-work
+          :-  8
+          (hash-hashable:tip5 leaf+accumulated-work.pag)
+            %height
+          :-  9
+          (hash-hashable:tip5 leaf+height.pag)
+            %msg
+          :-  10
+          (hash-hashable:tip5 leaf+msg.pag)
+        ==
+      =/  pr=[axis=@ proof=merk-proof:merkle]
+        (field-merk-proof pag idx)
+      %-  some
+      [[axis.pr proof.pr] ~ `val]
+    :: nested case: currently supports [%tx-id i]
+    =/  lab=@tas  p.tag
+    =/  i=@       q.tag
+    ?:  =(lab %tx-id)
+      =/  pr-top=[axis=@ proof=merk-proof:merkle]
+        (field-merk-proof pag 3)
+      =/  ax-top=@  axis.pr-top
+      =/  pr-top-proof=merk-proof:merkle  proof.pr-top
+      =/  mh2=(pair @ merk-heap:merkle)
+        =/  bps=(list bpoly)
+          %+  turn  ~(tap z-in tx-ids.pag)
+          |=  id=tx-id
+          (init-bpoly (to-list:hash id))
+        =/  base0=mary  (zing-bpolys bps)
+        =/  need=@  (sub (bex (xeb len.array.base0)) len.array.base0)
+        =/  zeros=(list bpoly)
+          (turn (range need) |=([i=@] (init-bpoly (reap 5 0))))
+        =/  bps2=(list bpoly)  (weld bps zeros)
+        =/  base=mary  (zing-bpolys bps2)
+        (bp-build-merk-heap:merkle base)
+      =/  ax-in=@  (index-to-axis:merkle p.mh2 i)
+      =/  pr-in=merk-proof:merkle  (build-merk-proof:merkle [q.mh2 ax-in])
+      =/  txd=noun-digest:tip5  (tx-ids-digest pag)
+      %-  some
+      [[ax-top pr-top-proof] `[ax-in pr-in] `txd]
+    ~
+  ::
+  ++  tx-id-index
+    |=  [pag=form target=tx-id]
+    ^-  (unit @)
+    =/  i  *@
+    %+  find  ~[target]
+    ~(tap z-in tx-ids.pag)
   ::
   ++  check-digest
     |=  pag=form
@@ -521,9 +632,7 @@
     |=  pag=form
     ^-  block-id
     %-  hash-hashable:tip5
-    :-  ?~  pow.pag  leaf+~
-        [leaf+~ hash+(hash-proof u.pow.pag)]
-    (hashable-block-commitment pag)
+    (hashable-digest pag)
   ::
   ::  +time-in-secs: returns @da in seconds.
   ++  time-in-secs

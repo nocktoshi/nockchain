@@ -7,8 +7,10 @@ edition.workspace = true
 kernels = { workspace = true, features = ["wallet"] }
 nockapp = { workspace = true }
 nockapp-grpc = { workspace = true }
+nockchain-types = { workspace = true }
 nockvm = { workspace = true }
 nockvm_macros = { workspace = true }
+noun-serde = { workspace = true }
 
 bardecoder = { workspace = true }
 bs58 = { workspace = true }
@@ -16,13 +18,16 @@ clap = { workspace = true, features = ["derive"] }
 crossterm.workspace = true
 either.workspace = true
 getrandom.workspace = true
+http = "1"
 image = { workspace = true }
 qrcode = { workspace = true }
 ratatui.workspace = true
+rustls = { workspace = true }
 tempfile.workspace = true
 termimad.workspace = true
 thiserror.workspace = true
 tokio = { workspace = true, features = ["full"] }
+tonic = { workspace = true }
 tracing = { workspace = true }
 tracing-subscriber = { workspace = true }
 zkvm-jetpack = { workspace = true }

@@ -36,16 +36,38 @@
   |=  old=versioned-state:wt
   ^-  state:wt
   |^
+  |-
+  ?:  ?=(%2 -.old)
+    old
+  ~>  %slog.[0 'load: State upgrade required']
   ?-  -.old
-    %0  state-0-1
-    %1  old
+    %0  $(old state-0-1)
+    %1  $(old state-1-2)
   ==
   ::
   ++  state-0-1
-    ^-  state:wt
+    ^-  state-1:wt
     ?>  ?=(%0 -.old)
+    ~>  %slog.[0 'upgrade version 0 to 1']
     :*  %1
         balance.old
+        master.old
+        keys.old
+        last-block.old
+        peek-requests.old
+        active-transaction.old
+        active-input.old
+        active-seed.old
+        transaction-tree.old
+        pending-commands.old
+    ==
+ ::
+  ++  state-1-2
+    ^-  state:wt
+    ?>  ?=(%1 -.old)
+    ~>  %slog.[0 'upgrade version 1 to 2']
+    :*  %2
+        balance=*balance:wt
         master.old
         keys.old
         last-block.old
@@ -59,16 +81,30 @@
   --
 ::
 ++  peek
-  |=  =path
+  |=  arg=path
   ^-  (unit (unit *))
-  %-  (debug "peek: {<state>}")
-  ?+    path  ~
+  %-  (debug "peek: {<arg>}")
+  =/  =(pole)  arg
+  ?+  pole  ~
     ::
       [%balance ~]
     ``balance.state
     ::
       [%state ~]
     ``state
+    ::
+    ::  returns a list of pubkeys
+      [%tracked-pubkeys include-watch-only=? ~]
+    :+  ~
+      ~
+    =;  signing-keys=(list @t)
+      ?.  include-watch-only.pole
+        signing-keys
+      (weld signing-keys watch-keys:get:v)
+    %+  turn
+      ~(coils get:v %pub)
+    |=  =coil:wt
+    key-b58:(to-b58:coil:wt coil)
   ==
 ::
 ++  poke
@@ -112,6 +148,7 @@
         %verify-hash           (do-verify-hash cause)
         %import-keys           (do-import-keys cause)
         %import-extended       (do-import-extended cause)
+        %import-watch-only-pubkey  (do-import-watch-only-pubkey cause)
         %export-keys           (do-export-keys cause)
         %export-master-pubkey  (do-export-master-pubkey cause)
         %import-master-pubkey  (do-import-master-pubkey cause)
@@ -150,9 +187,9 @@
     |=  =cause:wt
     ?>  ?=(%update-balance-grpc -.cause)
     %-  (debug "update-balance-grpc")
-    %-  (debug "last balance size: {<(lent ~(tap z-by:zo balance.state))>}")
-    =/  softed=(unit (unit (unit (z-map:zo nname:transact nnote:transact))))
-      %-  (soft (unit (unit (z-map:zo nname:transact nnote:transact))))
+    %-  (debug "last balance size: {<(lent ~(tap z-by:zo notes.balance.state))>}")
+    =/  softed=(unit (unit (unit balance:wt)))
+      %-  (soft (unit (unit balance:wt)))
       balance.cause
     ?~  softed
       %-  (debug "do-update-balance-grpc: %balance: could not soft result")
@@ -164,10 +201,16 @@
     ?~  u.balance-result
       %-  (warn "%update-balance did not return a result: nothing")
       [~ state]
-    ?~  u.u.balance-result
-      %-  (warn "%update-balance did not return a result: empty result")
-      [~ state]
-    =.  balance.state  u.u.balance-result
+    =/  update=balance:wt  u.u.balance-result
+    =?  balance.state  (gte height.update height.balance.state)
+      ?:  ?&  =(height.update height.balance.state)
+              =(block-id.balance.state block-id.update)
+          ==
+          ~>  %slog.[0 'Received balance update from same block, adding update to current balance']
+          ::  If it is duplicate balance update for the same address, union should have no impact
+          update(notes (~(uni z-by:zo notes.balance.state) notes.update))
+      ~>  %slog.[0 'Received balance update for new heaviest block, overwriting balance with update']
+      update
     %-  (debug "balance state updated!")
     [~ state]
   ::
@@ -205,13 +248,28 @@
 
       """
     =.  master.state  `master-key
-    :_  state(keys new-keys)
+    =.  keys.state  new-keys
+    :_  state
     :~  :-  %markdown
         %-  crip
         """
         ## Imported Keys
 
         {(zing key-list)}
+        """
+        [%exit 0]
+    ==
+  ::
+  ++  do-import-watch-only-pubkey
+    |=  =cause:wt
+    ?>  ?=(%import-watch-only-pubkey -.cause)
+    :_  state(keys (watch-key:put:v key.cause))
+    :~  :-  %markdown
+        %-  crip
+        """
+        ## Imported watch-only pubkey
+
+        - Imported key: {<key.cause>}
         """
         [%exit 0]
     ==
@@ -236,7 +294,6 @@
     ::  if this is a master key (no parent), set as master
     ?:  =(0 dep:core)
       =.  master.state  (some public-coil)
-
       =.  keys.state  (key:put:v imported-coil ~ `key-label)
       =.  keys.state  (key:put:v public-coil ~ `key-label)
       =/  extended-type=tape  ?:(is-private "private" "public")
@@ -464,6 +521,7 @@
     :_  state
     :~
       [%grpc %poke pid nock-cause]
+      [%nockchain-grpc %send-tx raw]
       [%exit 0]
     ==
   ::
@@ -484,9 +542,8 @@
   ++  do-list-pubkeys
     |=  =cause:wt
     ?>  ?=(%list-pubkeys -.cause)
-    =/  pubkeys  ~(coils get:v %pub)
-    =/  base58-keys=(list tape)
-      %+  turn  pubkeys
+    =/  base58-sign-keys=(list tape)
+      %+  turn  ~(coils get:v %pub)
       |=  =coil:wt
       =/  [key-b58=@t cc-b58=@t]  (to-b58:coil:wt coil)
       """
@@ -495,13 +552,25 @@
       ---
 
       """
+    =/  base58-watch-keys=(list tape)
+      %+  turn  watch-keys:get:v
+      |=  key-b58=@t
+      """
+      - {<key-b58>}
+      ---
+
+      """
     :_  state
     :~  :-  %markdown
         %-  crip
         """
-        ## Public Keys
+        ## Public Keys -- Signing
 
-        {?~(base58-keys "No pubkeys found" (zing base58-keys))}
+        {?~(base58-sign-keys "No pubkeys found" (zing base58-sign-keys))}
+
+        ## Public Keys -- Watch only
+
+        {?~(base58-watch-keys "No pubkeys found" (zing base58-watch-keys))}
         """
         [%exit 0]
     ==
@@ -615,7 +684,7 @@
     ::  find notes with matching first names in balance
     =/  notes=(list nnote:transact)
       %+  murn
-        ~(tap z-by:zo balance.state)
+        ~(tap z-by:zo notes.balance.state)
       |=  [name=nname:transact note=nnote:transact]
       ^-  (unit nnote:transact)
       ::  check if first name matches any in our list
@@ -671,7 +740,7 @@
       """
       =-  ?:  =("" -)  "No notes found"  -
       %-  zing
-      %+  turn  ~(val z-by:zo balance.state)
+      %+  turn  ~(val z-by:zo notes.balance.state)
       |=  =nnote:transact
       %-  trip
       (display-note-cord:utils nnote)
@@ -685,7 +754,7 @@
     =/  target-pubkey=schnorr-pubkey:transact
       (from-b58:schnorr-pubkey:transact pubkey.cause)
     =/  matching-notes=(list [name=nname:transact note=nnote:transact])
-      %+  skim  ~(tap z-by:zo balance.state)
+      %+  skim  ~(tap z-by:zo notes.balance.state)
       |=  [name=nname:transact note=nnote:transact]
       (~(has z-in:zo pubkeys.lock.note) target-pubkey)
     :_  state
@@ -712,7 +781,7 @@
     =/  target-pubkey=schnorr-pubkey:transact
       (from-b58:schnorr-pubkey:transact pubkey.cause)
     =/  matching-notes=(list [name=nname:transact note=nnote:transact])
-      %+  skim  ~(tap z-by:zo balance.state)
+      %+  skim  ~(tap z-by:zo notes.balance.state)
       |=  [name=nname:transact note=nnote:transact]
       (~(has z-in:zo pubkeys.lock.note) target-pubkey)
     =/  csv-header=tape
@@ -835,7 +904,6 @@
     =/  master-public-coil  [%coil [%pub public-key] chain-code]:cor
     =/  master-private-coil  [%coil [%prv private-key] chain-code]:cor
     =.  master.state  (some master-public-coil)
-
     %-  (debug "keygen: public key: {<(en:base58:wrap public-key:cor)>}")
     %-  (debug "keygen: private key: {<(en:base58:wrap private-key:cor)>}")
     =/  pub-label  `(crip "master-public-{<(end [3 4] public-key:cor)>}")
@@ -888,7 +956,6 @@
       |=  [=coil:wt keys=_keys.state]
       =.  keys.state  keys
       (key:put:v coil `index label.cause)
-    ::
     =/  key-text=tape
       %-  zing
       %+  turn  ~(tap in derived-keys)
@@ -901,6 +968,8 @@
       """
       - {key-type}: {<key-b58>}
       - Chain Code: {<cc-b58>}
+      ---
+
       """
     :_  state
     :~
@@ -1460,7 +1529,7 @@
             "<(trip first)> <(trip last)>"
           (to-b58:nname:transact u.parent-note-name)
         =/  parent-note=(unit nnote:transact)
-          (~(get z-by:zo balance.state) u.parent-note-name)
+          (~(get z-by:zo notes.balance.state) u.parent-note-name)
         ?~  parent-note
           :~
             :-  %text

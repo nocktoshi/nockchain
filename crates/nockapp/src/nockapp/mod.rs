@@ -349,7 +349,7 @@ impl<J: Jammer + Send + 'static> NockApp<J> {
         } else {
             let res_noun = tail.as_cell()?.tail();
             let mut slab = NounSlab::new();
-            slab.modify_noun(|_| res_noun);
+            slab.copy_into(res_noun);
             Ok(Some(slab))
         }
     }

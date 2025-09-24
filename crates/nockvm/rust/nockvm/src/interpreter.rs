@@ -443,9 +443,9 @@ impl From<cold::Error> for Error {
 
 pub type Result = result::Result<Noun, Error>;
 
-const BAIL_EXIT: Result = Err(Error::Deterministic(Mote::Exit, D(0)));
-const BAIL_FAIL: Result = Err(Error::NonDeterministic(Mote::Fail, D(0)));
-const BAIL_INTR: Result = Err(Error::NonDeterministic(Mote::Intr, D(0)));
+pub const BAIL_EXIT: Result = Err(Error::Deterministic(Mote::Exit, D(0)));
+pub const BAIL_FAIL: Result = Err(Error::NonDeterministic(Mote::Fail, D(0)));
+pub const BAIL_INTR: Result = Err(Error::NonDeterministic(Mote::Intr, D(0)));
 pub(crate) const BAIL_JEST: Result = Err(Error::NonDeterministic(Mote::Jest, D(0)));
 
 #[allow(unused_variables)]

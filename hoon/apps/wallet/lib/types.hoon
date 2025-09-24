@@ -38,8 +38,9 @@
 ::    $meta: stored metadata for a key
 +$  meta
   $%  coil
-      [%label @t]
-      [%seed @t]
+      [%label p=@t]
+      [%seed p=@t]
+      [%watch-key p=@t]
   ==
 ::
 ::    $keys: path indexed map for keys
@@ -47,6 +48,7 @@
 ::  path format for keys state:
 ::
 ::  /keys                                                        ::  root path (holds nothing in its fil)
+::  /keys/watch/[t/watch-key][coil/watch-key]                    ::  watch key path
 ::  /keys/[t/master]/[key-type]/m/[coil/key]                     ::  master key path
 ::  /keys/[t/master]/[key-type]/[ud/index]/[coil/key]            ::  derived key path
 ::  /keys/[t/master]/[key-type]/[ud/index]/[coil/key]            ::  specific key path
@@ -119,10 +121,15 @@
 ::  $cc: chaincode
 ::
 +$  cc  @ux
-::  $balance: wallet balance
-+$  balance
-  $+  wallet-balance
-  (z-map:zo nname:transact nnote:transact)
+::
++$  balance-v0  $+(balance-v0 (z-map:zo nname:transact nnote:transact))
++$  balance-v1  $+(balance-v1 balance-v0)
++$  balance-v2
+  $:  height=page-number:transact
+      block-id=hash:transact   :: block hash of balance
+      notes=(z-map:zo nname:transact nnote:transact)  :: notes
+  ==
++$  balance  balance-v2
 ::
 +$  ledger
   %-  list
@@ -132,42 +139,61 @@
       =timelock-intent:transact
   ==
   ::
+  +$  state-0
+    $:  %0
+        balance=balance-v0
+        hash-to-name=(z-map:zo hash:transact nname:transact)  ::  hash of note -> name of note
+        name-to-hash=(z-map:zo nname:transact hash:transact)  ::  name of note -> hash of note
+        receive-address=lock:transact
+        =master
+        =keys
+        transactions=$+(transactions (map * transaction))
+        last-block=(unit block-id:transact)
+        peek-requests=$+(peek-requests (map @ud ?(%balance %block)))
+        active-transaction=(unit transaction-name)
+        active-input=(unit input-name)
+        active-seed=(unit seed-name)             ::  currently selected seed
+        transaction-tree=transaction-tree        ::  structured tree of transactions, inputs, and seeds
+        pending-commands=(z-map:zo @ud [phase=?(%block %balance %ready) wrapped=cause])  ::  commands waiting for sync
+    ==
+  ::
+  +$  state-1
+    $:  %1
+        balance=balance-v1
+        =master
+        =keys
+        last-block=(unit block-id:transact)
+        peek-requests=$+(peek-requests (map @ud ?(%balance %block)))
+        active-transaction=(unit transaction-name)
+        active-input=(unit input-name)
+        active-seed=(unit seed-name)             ::  currently selected seed
+        transaction-tree=transaction-tree                    ::  structured tree of transactions, inputs, and seeds
+        pending-commands=(z-map:zo @ud [phase=?(%block %balance %ready) wrapped=cause])  ::  commands waiting for sync
+    ==
+  ::
+  +$  state-2
+    $:  %2
+        balance=balance-v2
+        =master
+        =keys
+        last-block=(unit block-id:transact)
+        peek-requests=$+(peek-requests (map @ud ?(%balance %block)))
+        active-transaction=(unit transaction-name)
+        active-input=(unit input-name)
+        active-seed=(unit seed-name)             ::  currently selected seed
+        transaction-tree=transaction-tree                    ::  structured tree of transactions, inputs, and seeds
+        pending-commands=(z-map:zo @ud [phase=?(%block %balance %ready) wrapped=cause])  ::  commands waiting for sync
+    ==
+  ::
   ::  $versioned-state: wallet state
   ::
   +$  versioned-state
-    $%
-      $:  %0
-          =balance
-          hash-to-name=(z-map:zo hash:transact nname:transact)  ::  hash of note -> name of note
-          name-to-hash=(z-map:zo nname:transact hash:transact)  ::  name of note -> hash of note
-          receive-address=lock:transact
-          =master
-          =keys
-          transactions=$+(transactions (map * transaction))
-          last-block=(unit block-id:transact)
-          peek-requests=$+(peek-requests (map @ud ?(%balance %block)))
-          active-transaction=(unit transaction-name)
-          active-input=(unit input-name)
-          active-seed=(unit seed-name)             ::  currently selected seed
-          transaction-tree=transaction-tree        ::  structured tree of transactions, inputs, and seeds
-          pending-commands=(z-map:zo @ud [phase=?(%block %balance %ready) wrapped=cause])  ::  commands waiting for sync
-      ==
-      ::
-      $:  %1
-          =balance
-          =master
-          =keys
-          last-block=(unit block-id:transact)
-          peek-requests=$+(peek-requests (map @ud ?(%balance %block)))
-          active-transaction=(unit transaction-name)
-          active-input=(unit input-name)
-          active-seed=(unit seed-name)             ::  currently selected seed
-          transaction-tree=transaction-tree                    ::  structured tree of transactions, inputs, and seeds
-          pending-commands=(z-map:zo @ud [phase=?(%block %balance %ready) wrapped=cause])  ::  commands waiting for sync
-      ==
+    $%  state-0
+        state-1
+        state-2
     ==
   ::
-  +$  state  $>(%1 versioned-state)
+  +$  state  $>(%2 versioned-state)
   ::
   +$  seed-name   $~('default-seed' @t)
   ::
@@ -190,6 +216,7 @@
         [%derive-child i=@ hardened=? label=(unit @tas)]
         [%import-keys keys=(list (pair trek meta))]
         [%import-extended extended-key=@t]                ::  extended key string
+        [%import-watch-only-pubkey key=@t]                ::  imports base58-encoded pubkey
         [%export-keys ~]
         [%export-master-pubkey ~]
         [%import-master-pubkey =coil]                     ::  base58-encoded pubkey + chain code
@@ -364,11 +391,16 @@
         [%print-status =transaction-name]                            ::  print transaction status
     ==
   ::
+  +$  nockchain-grpc-effect
+    $%  [%send-tx tx=raw-tx:transact]
+    ==
+  ::
   +$  effect
     $%  file-effect
         [%markdown @t]
         [%raw *]
         [%grpc grpc-effect]
+        [%nockchain-grpc nockchain-grpc-effect]
         [%exit code=@]
     ==
   ::

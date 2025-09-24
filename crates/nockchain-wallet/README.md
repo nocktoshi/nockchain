@@ -29,6 +29,9 @@ nockchain-wallet import-keys --seedphrase "your seed phrase here"
 # Generate master public key from private key and chain code
 nockchain-wallet import-keys --master-privkey <private-key> --chain-code <chain-code>
 
+# Import a watch-only public key
+nockchain-wallet import-keys --watch-only-pubkey <public-key-base58>
+
 # Import a master public key from exported file
 nockchain-wallet import-master-pubkey keys.export
 ```
@@ -40,16 +43,44 @@ Can be used for:
 - Migrating to a new device
 - Sharing public keys with other users
 
-### Connecting to Nockchain
+### Connecting to a Nockchain API server
 
-The wallet connects to the NockApp gRPC server exposed by a running nockchain instance to perform operations like checking balances, broadcasting transactions, etc.
+The wallet talks to the gRPC APIs exposed by a running nockchain instance. You can target either the **public** API (default) or the **private** API that is typically bound to `localhost`. You must run a nockchain instance to connect to the private API. Zorp runs its own public Nockchain API server at `https://nockchain-api.zorp.io`, and the wallet connects to it by default.
+
+#### Public API (default)
 
 ```bash
-# Connect to nockchain using gRPC
-nockchain-wallet --grpc-address http://localhost:5555 <command>
+# Use the default public endpoint (https://nockchain-api.zorp.io)
+nockchain-wallet list-notes
+
+# Or point at a different remote public listener
+nockchain-wallet \
+  --client public \
+  --public-grpc-server-addr https://public-node.example.com \
+  list-notes
+```
+- The wallet syncs its balance based on the pubkeys that are stored in it. Make sure your wallet is loaded with your keys before running sync-heavy commands such as `list-notes`, `list-notes-by-pubkey`, `create-tx`, and `send-tx`. If you do not have pubkeys, import them with `import-keys` (see [Importing and Exporting Keys](#importing-and-exporting-keys)).
+- `--public-grpc-server-addr` accepts a bare `host:port` or a full URI (e.g. `http://host:port`).
+- If you omit the port, the wallet assumes **80** for `http://` and **443** for `https://` URLs.
+- By default, we do not sync notes attached to watch-only pubkeys. Pair sync-heavy commands with `--include-watch-only` when you want watch-only pubkeys included in balance updates.
+
+#### Private API
+
+```bash
+# Talk to a private listener running on localhost:5555 (default)
+nockchain-wallet --client private list-notes
+
+# Override the private port if your setup uses a different port forward
+nockchain-wallet \
+  --client private \
+  --private-grpc-server-port 6000 \
+  list-notes
 ```
 
-Note: Make sure nockchain is running and the grpc address matches your nockchain configuration.
+When `--client private` is selected, the wallet spins up the private listener driver so subsequent operations (balance sync and transaction submission) use the private interface automatically. You must have a
+nockchain instance running locally to use the private client.
+
+> **Tip:** Ensure the corresponding NockApp gRPC server is running and reachable before issuing wallet commands; otherwise the wallet will fail when attempting to synchronize state.
 
 
 
@@ -96,7 +127,7 @@ Shows only the notes associated with the specified public key. Useful for filter
 nockchain-wallet list-notes-by-pubkey-csv <public-key>
 ```
 
-Outputs matching notes in CSV format suitable for analysis or reporting.
+Outputs matching notes in CSV format suitable for analysis or reporting. The output csv has the format: `notes-<public-key>.csv`.
 
 
 ## Transaction Creation
@@ -168,6 +199,19 @@ nockchain-wallet send-tx txs/transaction.tx
 ```
 
 Note: The transaction file will be saved in `./txs/` directory with a `.tx` extension.
+
+### Check whether a transaction was accepted (public API only)
+
+```bash
+# Query the public API for acceptance status
+nockchain-wallet \
+  --client public \
+  tx-accepted <base58-tx-id>
+```
+
+- The wallet asks the Nockchain node whether it has validated the transaction (consistency check). A `true` response means the node accepted the transaction, not that it currently resides in the mempool. You can use this command to check whether a transaction was accepted by the network; it is necessary for inclusion in a block but not sufficient when timelocks are present.
+- Currently, the private API cannot be queried with this request
+- The command is lightweight and does not perform a full balance sync.
 
 
 ## Message Signing and Verification
