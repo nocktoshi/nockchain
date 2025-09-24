@@ -15,7 +15,7 @@ Install `rustup` by following their instructions at: [https://rustup.rs/](https:
 Ensure you have these dependencies installed if running on Debian/Ubuntu:
 ```
 sudo apt update
-sudo apt install clang llvm-dev libclang-dev make
+sudo apt install clang llvm-dev libclang-dev make protobuf-compiler
 ```
 Clone the repo and cd into it:
 ```
