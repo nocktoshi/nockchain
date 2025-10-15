@@ -252,7 +252,7 @@ pub enum Commands {
     },
 
     /// Import keys from a file, extended key, seed phrase, or master private key
-    #[command(group = clap::ArgGroup::new("import_source").required(true).args(&["file", "key", "seedphrase", "master_privkey", "watch_only_pubkey"]))]
+    #[command(group = clap::ArgGroup::new("import_source").required(true).args(&["file", "key", "seedphrase", "watch_only_pubkey"]))]
     ImportKeys {
         /// Path to the jammed keys file
         #[arg(short = 'f', long = "file", value_name = "FILE")]
@@ -266,37 +266,13 @@ pub enum Commands {
         #[arg(short = 's', long = "seedphrase", value_name = "SEEDPHRASE")]
         seedphrase: Option<String>,
 
-        /// Master private key (base58-encoded) - requires --chain-code
-        #[arg(short = 'm', long = "master-privkey", value_name = "MASTER_PRIVKEY")]
-        master_privkey: Option<String>,
-
         /// Pubkey (watch only)
         #[arg(short = 'c', long = "watch-only", value_name = "WATCH_ONLY")]
         watch_only_pubkey: Option<String>,
-
-        /// Chain code (base58-encoded) - required with --master-privkey
-        #[arg(short = 'c', long = "chain-code", value_name = "CHAIN_CODE")]
-        chain_code: Option<String>,
     },
 
     /// Export keys to a file
     ExportKeys,
-
-    /// Perform a simple scan of the blockchain
-    Scan {
-        /// Master public key to scan for
-        #[arg(short, long)]
-        master_pubkey: String,
-        /// Optional search depth (default 100)
-        #[arg(short, long, default_value = "100")]
-        search_depth: u64,
-        /// Include timelocks in scan
-        #[arg(long, default_value = "false")]
-        include_timelocks: bool,
-        /// Include multisig in scan
-        #[arg(long, default_value = "false")]
-        include_multisig: bool,
-    },
 
     /// List all notes in the wallet
     ListNotes,
@@ -379,8 +355,18 @@ pub enum Commands {
         key_path: String,
     },
 
-    /// Lists all public keys in the wallet
-    ListPubkeys,
+    /// Set the active master address. Any child keys derived from that address will also become active.
+    SetActiveMasterAddress {
+        /// Base58-encoded address to promote to master
+        #[arg(value_name = "ADDRESS_B58")]
+        address_b58: String,
+    },
+
+    /// Lists all addresses in the wallet under the active master address, including child addresses
+    ListActiveAddresses,
+
+    /// Lists all master addresses
+    ListMasterAddresses,
 
     /// Show the seed phrase for the current master key
     ShowSeedphrase,
@@ -496,16 +482,17 @@ impl Commands {
             Commands::ImportKeys { .. } => "import-keys",
             Commands::ExportKeys => "export-keys",
             Commands::SignTx { .. } => "sign-tx",
-            Commands::Scan { .. } => "scan",
             Commands::ListNotes => "list-notes",
             Commands::ListNotesByPubkey { .. } => "list-notes-by-pubkey",
             Commands::ListNotesByPubkeyCsv { .. } => "list-notes-by-pubkey-csv",
+            Commands::SetActiveMasterAddress { .. } => "set-active-master-address",
             Commands::CreateTx { .. } => "create-tx",
             Commands::SendTx { .. } => "send-tx",
             Commands::ShowTx { .. } => "show-tx",
             Commands::ExportMasterPubkey => "export-master-pubkey",
             Commands::ImportMasterPubkey { .. } => "import-master-pubkey",
-            Commands::ListPubkeys => "list-pubkeys",
+            Commands::ListActiveAddresses => "list-active-addresses",
+            Commands::ListMasterAddresses => "list-master-addresses",
             Commands::ShowSeedphrase => "show-seedphrase",
             Commands::ShowMasterPubkey => "show-master-pubkey",
             Commands::ShowMasterPrivkey => "show-master-privkey",

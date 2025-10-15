@@ -3,7 +3,7 @@ use std::time::Duration;
 
 use clap::{arg, command, value_parser, ArgAction, Parser};
 
-use crate::mining::MiningKeyConfig;
+use crate::mining::{MiningKeyConfig, MiningPkhConfig};
 
 // TODO: command-line/configure
 /** Path to read current node's identity from */
@@ -49,11 +49,23 @@ pub struct NockchainCli {
     pub mining_pubkey: Option<String>,
     #[arg(
         long,
+        help = "Pubkey hash to mine to (mutually exclusive with --mining-pkh-adv)"
+    )]
+    pub mining_pkh: Option<String>,
+    #[arg(
+        long,
         help = "Advanced mining key configuration (mutually exclusive with --mining-pubkey). Format: share,m:key1,key2,key3",
         value_parser = value_parser!(MiningKeyConfig),
         num_args = 1..,
     )]
     pub mining_key_adv: Option<Vec<MiningKeyConfig>>,
+    #[arg(
+        long,
+        help = "Advanced mining pubkey hash configuration (mutually exclusive with --mining-pkh). Format: share,pkh",
+        value_parser = value_parser!(MiningPkhConfig),
+        num_args = 1..,
+    )]
+    pub mining_pkh_adv: Option<Vec<MiningPkhConfig>>,
     #[arg(long, help = "Whether to run as fakenet", default_value_t = false)]
     pub fakenet: bool,
     #[arg(long, short, help = "Initial peer", action = ArgAction::Append)]
@@ -107,6 +119,12 @@ pub struct NockchainCli {
         default_value = "1"
     )]
     pub fakenet_log_difficulty: Option<u64>,
+    #[arg(
+        long,
+        help = "Override the v1-phase activation height when running on fakenet. Requires --fakenet.",
+        requires = "fakenet"
+    )]
+    pub fakenet_v1_phase: Option<u64>,
     #[arg(long, help = "Path to fake genesis block jam file")]
     pub fakenet_genesis_jam_path: Option<PathBuf>,
     #[arg(long, value_parser = clap::value_parser!(std::net::SocketAddr), default_value = "127.0.0.1:5555")]
@@ -127,6 +145,28 @@ impl NockchainCli {
             return Err(
                 "Cannot specify both mining_pubkey and mining_key_adv at the same time".to_string(),
             );
+        }
+
+        if self.mining_pkh.is_some() && self.mining_pkh_adv.is_some() {
+            return Err(
+                "Cannot specify both mining_pkh and mining_pkh_adv at the same time".to_string(),
+            );
+        }
+
+        if self.mining_pubkey.is_some() {
+            if !self.mining_pkh.is_some() {
+                return Err(
+                    "Have mining_pubkey, but no mining_pkh. Must specify neither or both of mining_pubkey and mining_pkh. To get a pkh, you must generate a v1 key by running `keygen` on the latest version of the wallet. The pkh will be listed as the 'Receive Address' ".to_string(),
+                );
+            }
+        }
+
+        if self.mining_key_adv.is_some() {
+            if !self.mining_pkh_adv.is_some() {
+                return Err(
+                    "Must specify neither or both of mining_key_adv and mining_pkh_adv".to_string(),
+                );
+            }
         }
 
         Ok(())

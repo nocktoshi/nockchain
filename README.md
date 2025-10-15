@@ -34,6 +34,8 @@ make install-hoonc
 export PATH="$HOME/.cargo/bin:$PATH"
 ```
 
+(If you build manually with `cargo build`, be sure to use `--release` for `hoonc`.)
+
 ## Install Wallet
 
 After you've run the setup and build commands, install the wallet:
@@ -65,11 +67,24 @@ nockchain-wallet keygen
 
 This will print a new public/private key pair + chain code to the console, as well as the seed phrase for the private key.
 
-Now, copy the public key to the `.env` file:
+Use `.env_example` as a template and copy the public key to the `.env` file:
 
 ```
 MINING_PUBKEY=<public-key>
 ```
+When the v1 protocol cut-off block-height is reached, the miner will automatically generate v1 coinbases for blocks that it mines.
+You will need to supply a pkh for the coinbase ahead of time by generating a v1 key using the latest wallet. pkhs cannot be generated
+from v0 keys.
+
+Generate the v1 pkh by running `nockchain-wallet keygen` on the latest version of the wallet. The pkh should be listed as the `Receive Address`.
+Then, in your `.env` file, set the `MINING_PKH` variable to the receive address of the v1 key you generated.
+
+```
+MINING_PKH=<receive-address>
+```
+
+To reiterate, before the upgrade cutoff, the miner will generate v0 coinbases spendable by the `MINING_PUBKEY`. After the cutoff, it will generate
+v1 coinbases spendable by the `MINING_PKH`.
 
 ## Backup Keys
 
