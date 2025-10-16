@@ -158,7 +158,7 @@
 +$  blockchain-constants
   $+  blockchain-constants
   $~  :*
-          v1-phase=37.350
+          v1-phase=39.000
           ::  note data field constraints
           ::    max-size: maximum number of leaves in the data field noun
           ::    min-fee:  minimum fee (in nicks)
