@@ -304,8 +304,10 @@
     $%  [%grpc-bind result=*]
     ==
   ::
+  ++  key-version  ?(%0 %1)
   +$  cause
     $%  [%keygen entropy=byts salt=byts]
+        [%generate-mining-pkh entropy=byts salt=byts]
         [%derive-child i=@ hardened=? label=(unit @tas)]
         [%import-keys keys=(list (pair trek *))]
         [%import-extended extended-key=@t]                ::  extended key string
@@ -336,7 +338,7 @@
         [%show-master-zpub ~]
         [%show-master-zprv ~]
         [%show =path]
-        [%import-seed-phrase seed-phrase=@t version=?(%0 %1)]
+        [%import-seed-phrase seed-phrase=@t version=key-version]
         [%update-balance-grpc balance=*]
         [%set-active-master-address address-b58=@t]
         [%list-master-addresses ~]

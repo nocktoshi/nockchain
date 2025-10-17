@@ -75,6 +75,7 @@ async fn main() -> Result<(), NockAppError> {
         // Commands that DON'T need syncing either because they don't sync
         // or they don't interact with the chain
         Commands::Keygen
+        | Commands::GenerateMiningPkh
         | Commands::DeriveChild { .. }
         | Commands::ImportKeys { .. }
         | Commands::ExportKeys
@@ -99,7 +100,6 @@ async fn main() -> Result<(), NockAppError> {
         _ => true,
     };
 
-    // Generate the command noun and operation
     let poke = match &cli.command {
         Commands::Keygen => {
             let mut entropy = [0u8; 32];
@@ -107,6 +107,13 @@ async fn main() -> Result<(), NockAppError> {
             getrandom::fill(&mut entropy).map_err(|e| CrownError::Unknown(e.to_string()))?;
             getrandom::fill(&mut salt).map_err(|e| CrownError::Unknown(e.to_string()))?;
             Wallet::keygen(&entropy, &salt)
+        }
+        Commands::GenerateMiningPkh => {
+            let mut entropy = [0u8; 32];
+            let mut salt = [0u8; 16];
+            getrandom::fill(&mut entropy).map_err(|e| CrownError::Unknown(e.to_string()))?;
+            getrandom::fill(&mut salt).map_err(|e| CrownError::Unknown(e.to_string()))?;
+            Wallet::generate_mining_pkh(&entropy, &salt)
         }
         Commands::DeriveChild {
             index,
@@ -413,11 +420,12 @@ impl Wallet {
         Ok((slab.clone(), operation))
     }
 
-    /// Generates a new key pair.
+    /// Generates a new key pair. Will be a version 0 key until the wallet supports v1 transactions
     ///
     /// # Arguments
     ///
     /// * `entropy` - The entropy to use for key generation.
+    /// * `sal` - The salt to use for key generation.
     fn keygen(entropy: &[u8; 32], sal: &[u8; 16]) -> CommandNoun<NounSlab> {
         let mut slab = NounSlab::new();
         let ent: Byts = Byts::new(entropy.to_vec());
@@ -425,6 +433,26 @@ impl Wallet {
         let sal: Byts = Byts::new(sal.to_vec());
         let sal_noun = sal.into_noun(&mut slab);
         Self::wallet("keygen", &[ent_noun, sal_noun], Operation::Poke, &mut slab)
+    }
+
+    /// Generates a new key pair, specifically for mining pkh.
+    ///
+    /// # Arguments
+    ///
+    /// * `entropy` - The entropy to use for key generation.
+    /// * `sal` - The salt to use for key generation.
+    fn generate_mining_pkh(entropy: &[u8; 32], sal: &[u8; 16]) -> CommandNoun<NounSlab> {
+        let mut slab = NounSlab::new();
+        let ent: Byts = Byts::new(entropy.to_vec());
+        let ent_noun = ent.into_noun(&mut slab);
+        let sal: Byts = Byts::new(sal.to_vec());
+        let sal_noun = sal.into_noun(&mut slab);
+        Self::wallet(
+            "generate-mining-pkh",
+            &[ent_noun, sal_noun],
+            Operation::Poke,
+            &mut slab,
+        )
     }
 
     ///// Updates the keys in the wallet.

@@ -39,7 +39,7 @@ const PEEK_AXIS: u64 = 22;
 const POKE_AXIS: u64 = 23;
 
 const SERF_FINISHED_INTERVAL: Duration = Duration::from_millis(100);
-const SERF_THREAD_STACK_SIZE: usize = 8 * 1024 * 1024; // 8MB
+const SERF_THREAD_STACK_SIZE: usize = 256 * 1024 * 1024; // 8MB
 
 pub struct LoadState {
     pub ker_hash: Hash,

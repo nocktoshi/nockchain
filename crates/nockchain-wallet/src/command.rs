@@ -233,8 +233,11 @@ fn validate_label(s: &str) -> Result<String, String> {
 
 #[derive(Subcommand, Debug, Clone)]
 pub enum Commands {
-    /// Generate a new key pair
+    /// Generates a new version 0 key pair
     Keygen,
+
+    /// Generate a new version 1 key pair for mining pkh so miners can set it in advance of the v1 cutoff
+    GenerateMiningPkh,
 
     /// Derive child key (pub, private or both) from the current master key
     DeriveChild {
@@ -262,7 +265,9 @@ pub enum Commands {
         #[arg(short = 'k', long = "key", value_name = "EXTENDED_KEY")]
         key: Option<String>,
 
-        /// Seed phrase to generate master private key
+        /// Seed phrase to generate master private key, requires version. If your key was generated prior to
+        /// the release of the v1 protocol upgrade on October 15, 2025, it is mostly likely version 0.
+        /// If it was generated after that date, it is likely version 1.
         #[arg(short = 's', long = "seedphrase", value_name = "SEEDPHRASE")]
         seedphrase: Option<String>,
 
@@ -482,6 +487,7 @@ impl Commands {
     fn as_wire_tag(&self) -> &'static str {
         match self {
             Commands::Keygen => "keygen",
+            Commands::GenerateMiningPkh => "generate-mining-pkh",
             Commands::DeriveChild { .. } => "derive-child",
             Commands::ImportKeys { .. } => "import-keys",
             Commands::ExportKeys => "export-keys",

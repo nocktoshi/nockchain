@@ -37,7 +37,7 @@
 ::
 ++  domain-separator  [14 'dees niahckcoN']
 ::
-++  current-protocol  1
+++  current-protocol  0
 ++  protocol-version  ver
 ::
 ::
@@ -57,7 +57,7 @@
 ::  core initialization
 ::
 ++  from-seed
-  |=  byts
+  |=  [byts version=@]
   ^+  +>
   =+  der=(hmac-sha512l domain-separator [wid dat])
   =/  [left=@ right=@]
@@ -68,7 +68,7 @@
   ::  obtain a valid key. This prevents the distribution from being biased.
   |-
   ?:  (lth left n)
-    +>.^$(prv left, pub (point left a-gen:curve), cad right, ver current-protocol)
+    +>.^$(prv left, pub (point left a-gen:curve), cad right, ver version)
   =/  der  (hmac-sha512l domain-separator 64^der)
   %=    $
     der  der

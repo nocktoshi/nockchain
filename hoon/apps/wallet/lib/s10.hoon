@@ -6,6 +6,7 @@
 =>
 |%
 ++  keyc  keyc:slip10
+++  current-protocol  current-protocol:slip10
 --
 |_  bas=base:slip10
 ++  gen-master-key
@@ -16,11 +17,12 @@
       entropy
     salt
   =/  memo=tape  (from-entropy:bip39 argon-byts)
+  ::  TODO: thread version through returned core rather than in userspace code
   :-  (crip memo)
-  (from-seed:slip10 [64 (to-seed:bip39 memo "")])
+  (from-seed:slip10 [64 (to-seed:bip39 memo "")] current-protocol:slip10)
 ++  from-seed
-  |=  =byts
-  (from-seed:slip10 byts)
+  |=  [=byts version=@]
+  (from-seed:slip10 byts version)
 ::
 ++  from-private
   |=  =keyc
