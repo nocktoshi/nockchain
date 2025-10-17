@@ -24,8 +24,11 @@ nockchain-wallet import-keys --file keys.export
 # Import an extended key string
 nockchain-wallet import-keys --key "zprv..."
 
-# Generate master private key from seed phrase
-nockchain-wallet import-keys --seedphrase "your seed phrase here"
+# Generate master private key from seed phrase (version required)
+# If you generated your seedphrase before October 2025 then it’s probably version 0
+# If you import with version 0 and find that you cannot spend your notes, try
+# importing the seed phrase again with version 1.
+nockchain-wallet import-keys --seedphrase "your seed phrase here" --version <version | 1 or 0>
 
 # Generate master public key from private key and chain code
 nockchain-wallet import-keys --master-privkey <private-key> --chain-code <chain-code>

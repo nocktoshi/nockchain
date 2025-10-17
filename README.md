@@ -76,11 +76,11 @@ When the v1 protocol cut-off block-height is reached, the miner will automatical
 You will need to supply a pkh for the coinbase ahead of time by generating a v1 key using the latest wallet. pkhs cannot be generated
 from v0 keys.
 
-Generate the v1 pkh by running `nockchain-wallet keygen` on the latest version of the wallet. The pkh should be listed as the `Receive Address`.
-Then, in your `.env` file, set the `MINING_PKH` variable to the receive address of the v1 key you generated.
+Generate the v1 pkh by running `nockchain-wallet keygen` on the latest version of the wallet. The pkh should be listed as the `Address`.
+Then, in your `.env` file, set the `MINING_PKH` variable to the address of the v1 key you generated.
 
 ```
-MINING_PKH=<receive-address>
+MINING_PKH=<address>
 ```
 
 To reiterate, before the upgrade cutoff, the miner will generate v0 coinbases spendable by the `MINING_PUBKEY`. After the cutoff, it will generate

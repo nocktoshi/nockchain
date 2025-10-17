@@ -1,5 +1,4 @@
-/=  bip39  /common/bip39
-/=  slip10  /common/slip10
+/=  s10  /apps/wallet/lib/s10
 /=  m  /common/markdown/types
 /=  md  /common/markdown/markdown
 /=  transact  /common/tx-engine
@@ -32,15 +31,6 @@
 ++  make-markdown-effect
   |=  nodes=markdown:m
   [%markdown (crip (en:md nodes))]
-::
-++  pkh-b58-from-pubkey-b58
-  |=  pk-b58=@t
-  ^-  @t
-  =/  pk=schnorr-pubkey:transact
-    (from-b58:schnorr-pubkey:transact pk-b58)
-  =/  pkh=hash:transact
-    (hash:schnorr-pubkey:transact pk)
-  (to-b58:hash:transact pkh)
 ::
 ::  +timelock-helpers: helper functions for creating timelock-intents
 ::
@@ -80,57 +70,6 @@
     *timelock-intent:transact
   --
 ::
-::  Convenience wrapper door for slip10 library
-::  ** Never use slip10 directly in the wallet **
-++  s10
-  |_  bas=base:slip10
-  ++  gen-master-key
-    |=  [entropy=byts salt=byts]
-    =/  argon-byts=byts
-      :-  32
-      %+  argon2-nockchain:argon2:crypto
-        entropy
-      salt
-    =/  memo=tape  (from-entropy:bip39 argon-byts)
-    %-  (debug "memo: {memo}")
-    :-  (crip memo)
-    (from-seed:slip10 [64 (to-seed:bip39 memo "")])
-  ++  from-seed
-    |=  =byts
-    (from-seed:slip10 byts)
-::
-  ++  from-private
-    |=  =keyc:slip10
-    (from-private:slip10 keyc)
-::
-  ++  from-public
-    |=  =keyc:slip10
-    (from-public:slip10 keyc)
-  ::
-  ::  derives the i-th child key(s) from a parent key.
-  ::  index i can be any child index. returns the door
-  ::  with the door sample modified with the values
-  ::  corresponding to the key. the core sample can then
-  ::  be harvested for keys.
-  ::
-  ++  derive
-    |=  [parent=coil:wt i=@u]
-    =/  keyc=keyc:slip10  ~(keyc get:coil:wt parent)
-    ?-    -.key.parent
-        %pub
-      =>  [cor=(from-public keyc) i=i]
-      (derive:cor i)
-    ::
-        %prv
-      =>  [cor=(from-private keyc) i=i]
-      (derive:cor i)
-    ==
-  ::
-  ++  from-extended-key
-    |=  key=@t
-    (from-extended-key:slip10 key)
-  --
-::
 ++  vault
   |_  =state:wt
   ::
@@ -162,19 +101,25 @@
       (welp base-path ~[key-type])
     ::
     ++  master-addresses
-      ^-  (list @t)
+      ^-  (list [version=@ addr=@t])
       =/  subtree  (~(kids of keys.state) /keys)
       %~  tap  in
       %-  silt
-      ^-  (list @t)
+      ^-  (list [version=@ addr=@t])
       %+  murn  ~(tap by kid.subtree)
-      |=  [pax=trek *]
-      ^-  (unit @t)
-      ?~  pax  ~
-      =/  segment  i.pax
-      ?.  ?=([%t @t] segment)
-        ~
-      `+.segment
+      |=  [pax=trek =meta:wt]
+      ^-  (unit [version=@ addr=@t])
+      =/  version=(unit @)
+        ?.  ?=(%coil -.meta)
+          ~
+        (some `@`-.p.meta)
+      =/  addr=(unit @t)
+        ?~  pax  ~
+        =/  segment  i.pax
+        ?.  ?=([%t @t] segment)
+          ~
+        `+.segment
+      (both version addr)
     ::
     ::  Grab other master addr
     ++  master-by-addr
@@ -195,7 +140,7 @@
       ?>  ?=(%coil -.meta)
       =/  =coil:wt  p.meta
       ?:  ?=(%prv key-type)
-        =/  keyc=keyc:slip10  ~(keyc get:coil:wt coil)
+        =/  keyc=keyc:s10  ~(keyc get:coil:wt coil)
         =/  public-key=@  public-key:(from-private:s10 keyc)
         ?:  =(public-key p.key:(public:active:wt active-master.state))
           coil
@@ -363,10 +308,11 @@
       ?:  ~(master has %prv)
         ~(master get %prv)
       ~(master get %pub)
+    =/  keyc=keyc:s10  ~(keyc get:coil:wt parent)
     ?:  hardened
       ?>  ?=(%prv -.key.parent)
       ::
-      =>  (derive:s10 parent i)
+      =>  (derive:s10 keyc %prv i)
       ?:  =(%1 +..)
         :~  [%1 [%prv private-key] `@ux`chain-code]
             [%1 [%pub public-key] `@ux`chain-code]
@@ -381,7 +327,7 @@
     ?-    -.key.parent
      ::  if the parent is a private key, we can derive the unhardened prv and pub child
         %prv
-      =>  [(derive:s10 parent i) version=-.parent]
+      =>  [(derive:s10 keyc %prv i) version=ver.keyc]
       ?:  =(%1 version)
         :~  [%1 [%prv private-key] `@ux`chain-code]
             [%1 [%pub public-key] `@ux`chain-code]
@@ -392,7 +338,7 @@
     ::
      ::  if the parent is a public key, we can only derive the unhardened pub child
         %pub
-      =>  [(derive:s10 parent i) version=-.parent]
+      =>  [(derive:s10 keyc %pub i) version=ver.keyc]
       ?:  =(%1 version)
         ~[[%1 [%pub public-key] `@ux`chain-code]]
       ~[[%0 [%pub public-key] `@ux`chain-code]]

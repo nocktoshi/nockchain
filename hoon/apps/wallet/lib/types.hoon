@@ -2,7 +2,7 @@
 /=  zo  /common/zoon
 /=  *  /common/zose
 /=  dumb  /apps/dumbnet/lib/types
-/=  slip10  /common/slip10
+/=  s10  /apps/wallet/lib/s10
 |%
 ::    $key: public or private key
 ::
@@ -53,16 +53,39 @@
             %1  cc.form
         ==
       ++  keyc
-        ^-  keyc:slip10
+        ^-  keyc:s10
+        ::  [key chaincode version]
         [p.key cc -]:form
       --:: +get
     ::
-    ++  to-b58
+    ++  extended-key
       |=  =form
-      ^-  [key-b58=@t cc-b58=@t]
-      =/  keyc=keyc:slip10  ~(keyc get form)
-      :-  (crip (en:base58:wrap key:keyc))
-      (crip (en:base58:wrap cai:keyc))
+      ^-  @t
+      =/  =keyc:s10  ~(keyc get form)
+      ?:  ?=(%pub -.key.form)
+        extended-public-key:(from-public:s10 keyc)
+      extended-private-key:(from-private:s10 keyc)
+    ::
+    ++  to-b58
+      |_  =form
+      ++  key
+        ^-  @t
+        =/  key=@ux  p.key.form
+        (crip (en:base58:wrap key))
+      ::
+      ++  address
+        ^-  @t
+        ?>  ?=(%pub -.key.form)
+        ?-    -.form
+            %0  ::  return b58 pubkey
+          (crip (en:base58:wrap p.key.form))
+        ::
+            %1    ::  return b58 pkh address
+          %-  to-b58:hash:transact
+          %-  hash:schnorr-pubkey:transact
+          (from-ser:schnorr-pubkey:transact p.key.form)
+        ==
+      --
   --
 ++  coil  coil-v3
 ::
@@ -147,22 +170,17 @@
     ++  public
       |=  =form
       ?:  ?=(^ form)
+        ?.  ?=(%pub -.key.u.form)
+          ~|('fatal: active master public key set to a private key' !!)
         u.form
       ~|("active master public key not found" !!)
     ::
+    ::  returns active master address
     ++  to-b58
       |=  =form
       ^-  @t
-      =/  =coil  (public form)
-      ?-    -.coil
-          %0  ::  return b58 pubkey
-        (crip (en:base58:wrap p.key.coil))
-      ::
-          %1    ::  return b58 pkh address
-        %-  to-b58:hash:transact
-        %-  hash:schnorr-pubkey:transact
-        (from-ser:schnorr-pubkey:transact p.key.coil)
-      ==
+      =/  pubcoil=coil  (public form)
+      ~(address to-b58:coil pubcoil)
   --
 ++  active  active-v3
 ::
@@ -314,12 +332,11 @@
         [%sign-tx dat=transaction sign-key=(unit [child-index=@ud hardened=?]) entropy=@]
         [%list-active-addresses ~]
         [%list-notes ~]
-        [%show-seedphrase ~]
-        [%show-master-pubkey ~]
-        [%show-master-privkey ~]
+        [%show-seed-phrase ~]
+        [%show-master-zpub ~]
+        [%show-master-zprv ~]
         [%show =path]
-        [%gen-master-privkey seedphrase=@t]
-        [%gen-master-pubkey privkey-b58=@t cc-b58=@t]
+        [%import-seed-phrase seed-phrase=@t version=?(%0 %1)]
         [%update-balance-grpc balance=*]
         [%set-active-master-address address-b58=@t]
         [%list-master-addresses ~]

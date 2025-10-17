@@ -156,7 +156,7 @@ impl NockchainCli {
         if self.mining_pubkey.is_some() {
             if !self.mining_pkh.is_some() {
                 return Err(
-                    "Have mining_pubkey, but no mining_pkh. Must specify neither or both of mining_pubkey and mining_pkh. To get a pkh, you must generate a v1 key by running `keygen` on the latest version of the wallet. The pkh will be listed as the 'Receive Address' ".to_string(),
+                    "Have mining_pubkey, but no mining_pkh. Must specify neither or both of mining_pubkey and mining_pkh. To get a pkh, you must generate a v1 key by running `keygen` on the latest version of the wallet. The pkh will be listed as the 'Address' ".to_string(),
                 );
             }
         }

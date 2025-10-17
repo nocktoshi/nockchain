@@ -266,6 +266,10 @@ pub enum Commands {
         #[arg(short = 's', long = "seedphrase", value_name = "SEEDPHRASE")]
         seedphrase: Option<String>,
 
+        /// Master key version to use when generating from seed phrase
+        #[arg(long = "version", value_name = "VERSION", requires = "seedphrase")]
+        version: Option<u64>,
+
         /// Pubkey (watch only)
         #[arg(short = 'c', long = "watch-only", value_name = "WATCH_ONLY")]
         watch_only_pubkey: Option<String>,
@@ -374,7 +378,7 @@ pub enum Commands {
     /// Show the master public key
     ShowMasterPubkey,
 
-    /// Show the master private key
+    /// Show the master extended private key
     ShowMasterPrivkey,
 
     /// Fetch confirmation depth for a transaction ID
@@ -493,9 +497,9 @@ impl Commands {
             Commands::ImportMasterPubkey { .. } => "import-master-pubkey",
             Commands::ListActiveAddresses => "list-active-addresses",
             Commands::ListMasterAddresses => "list-master-addresses",
-            Commands::ShowSeedphrase => "show-seedphrase",
-            Commands::ShowMasterPubkey => "show-master-pubkey",
-            Commands::ShowMasterPrivkey => "show-master-privkey",
+            Commands::ShowSeedphrase => "show-seed-phrase",
+            Commands::ShowMasterPubkey => "show-master-zpub",
+            Commands::ShowMasterPrivkey => "show-master-zprv",
             Commands::SignMessage { .. } => "sign-message",
             Commands::VerifyMessage { .. } => "verify-message",
             Commands::SignHash { .. } => "sign-hash",
