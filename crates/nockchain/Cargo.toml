@@ -18,6 +18,8 @@ nockapp-grpc.workspace = true
 nockvm.workspace = true
 nockvm_macros.workspace = true
 noun-serde.workspace = true
+nockchain-types.workspace = true
+nockchain-math.workspace = true
 
 bitcoincore-rpc.workspace = true
 bs58.workspace = true

@@ -129,10 +129,12 @@
       ?.  include-watch-only.pole
         signing-keys
       (weld signing-keys watch-keys:get:v)
-    %+  turn
+    %+  murn
       ~(coils get:v %pub)
     |=  =coil:wt
-    ~(address to-b58:coil:wt coil)
+    ?:  ?=(%1 -.coil)
+      ~
+    `~(address to-b58:coil:wt coil)
   ==
 ::
 ++  poke
