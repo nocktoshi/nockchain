@@ -435,7 +435,10 @@ pub fn make_libp2p_driver(
                         match result {
                             Ok(Ok(())) => {}
                             Ok(Err(e)) => {
-                                error!("Task returned error: {:?}", e);
+                                // Don't log OneShotRecvError as it's expected when tasks are cancelled
+                                if !matches!(e, NockAppError::OneShotRecvError(_)) {
+                                    error!("Task returned error: {:?}", e);
+                                }
                             }
                             Err(e) => {
                                 error!("Task error: {:?}", e);
@@ -755,11 +758,13 @@ async fn handle_request_response(
                         .await
                         .requested(ip, request_high_threshold);
                     if let Some(count) = threshold_exceeded {
-                        warn!("IP address {ip} exceeded the request-per-interval threshold with {count} requests");
+                        trace!("IP address {ip} exceeded the request-per-interval threshold with {count} requests");
                     }
                 }
             } else {
-                warn!("Request received but connection not tracked. Please inform the developers.");
+                trace!(
+                    "Request received but connection not tracked. Please inform the developers."
+                );
             }
             let mut request_slab = NounSlab::new();
             match request {
@@ -2593,7 +2598,7 @@ pub(crate) fn identify_received(
 
 fn log_ping_success(peer: PeerId, connection_address: Option<Multiaddr>, duration: Duration) {
     let Some(connection_address) = connection_address else {
-        warn!("Untracked connection to {peer}, please report this to the developers");
+        trace!("Untracked connection to {peer}, please report this to the developers");
         return;
     };
     let ms = duration.as_millis();
@@ -2602,7 +2607,7 @@ fn log_ping_success(peer: PeerId, connection_address: Option<Multiaddr>, duratio
 
 fn log_ping_failure(peer: PeerId, connection_address: Option<Multiaddr>, error: ping::Failure) {
     let Some(connection_address) = connection_address else {
-        warn!("Untracked connection to {peer}, please report this to the developers");
+        trace!("Untracked connection to {peer}, please report this to the developers");
         return;
     };
     debug!("Ping to {peer} via {connection_address} failed: {error}");
