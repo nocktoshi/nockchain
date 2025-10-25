@@ -435,7 +435,14 @@ pub fn make_libp2p_driver(
                         match result {
                             Ok(Ok(())) => {}
                             Ok(Err(e)) => {
-                                error!("Task returned error: {:?}", e);
+                                match e {
+                                    NockAppError::OneShotRecvError(_) => {
+                                        // Silently ignore OneShotRecvError - this happens when sender is dropped
+                                    }
+                                    _ => {
+                                        error!("Task returned error: {:?}", e);
+                                    }
+                                }
                             }
                             Err(e) => {
                                 error!("Task error: {:?}", e);
