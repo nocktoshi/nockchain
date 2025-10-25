@@ -10,9 +10,7 @@ Nockchain is a ZK-Proof of Work L1 that combines sound money incentives with mod
 
 ## Setup
 
-Install `rustup` by following the instructions at: [https://rustup.rs/](https://rustup.rs/).
-
-Install `git` by following the instructions at [https://git-scm.com/](https://git-scm.com/book/en/v2/Getting-Started-Installing-Git).
+Install `rustup` by following their instructions at: [https://rustup.rs/](https://rustup.rs/)
 
 Ensure you have these dependencies installed if running on Debian/Ubuntu:
 ```
@@ -244,7 +242,7 @@ To check your wallet balance:
 
 ```bash
 # List all notes by pubkey
-nockchain-wallet list-notes-by-pubkey <your-pubkey>
+nockchain-wallet list-notes-by-address <your-base58-address>
 ```
 
 ### How do I configure logging levels?
