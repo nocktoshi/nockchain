@@ -364,7 +364,7 @@
         [%derive-child i=@ hardened=? label=(unit @tas)]
         [%import-keys keys=(list (pair trek *))]
         [%import-extended extended-key=@t]                ::  extended key string
-        [%import-watch-only-pubkey key=@t]                ::  imports base58-encoded pubkey
+        [%watch-address address=@t]                ::  imports base58-encoded pubkey
         [%export-keys ~]
         [%export-master-pubkey ~]
         [%import-master-pubkey coil=*]                    ::  base58-encoded pubkey + chain code

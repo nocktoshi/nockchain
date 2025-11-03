@@ -83,6 +83,14 @@ nockchain-wallet keygen
 
 This will print a new public/private key pair + chain code to the console, as well as the seed phrase for the private key.
 
+To track a watch-only address or pubkey without importing private material:
+
+```
+nockchain-wallet watch-address <base58-pkh-or-pubkey>
+```
+
+The wallet normalizes the identifier so you can supply either a v1 payee hash or a schnorr pubkey.
+
 Use `.env_example` as a template and copy your pkh to the `.env` file.
 
 Then, in your `.env` file, set the `MINING_PKH` variable to the address of the v1 key you generated.

@@ -77,6 +77,7 @@ async fn main() -> Result<(), NockAppError> {
         Commands::Keygen
         | Commands::DeriveChild { .. }
         | Commands::ImportKeys { .. }
+        | Commands::WatchAddress { .. }
         | Commands::ExportKeys
         | Commands::SignMessage { .. }
         | Commands::VerifyMessage { .. }
@@ -209,7 +210,6 @@ async fn main() -> Result<(), NockAppError> {
             key,
             seedphrase,
             version,
-            watch_only_pubkey,
         } => {
             if let Some(file_path) = file {
                 Wallet::import_keys(file_path)
@@ -224,10 +224,6 @@ async fn main() -> Result<(), NockAppError> {
                 // normalize seedphrase to have exactly one space between words
                 let normalized_seed = seed.split_whitespace().collect::<Vec<&str>>().join(" ");
                 Wallet::import_seed_phrase(&normalized_seed, version)
-            } else if let Some(pubkey) = watch_only_pubkey {
-                let _ = SchnorrPubkey::from_base58(pubkey)
-                    .map_err(|e| CrownError::Unknown(format!("Invalid public key: {}", e)))?;
-                Wallet::import_watch_only_pubkey(&pubkey)
             } else {
                 return Err(CrownError::Unknown(
                     "One of --file, --key, --seedphrase, or --master-privkey must be provided for import-keys".to_string(),
@@ -235,6 +231,12 @@ async fn main() -> Result<(), NockAppError> {
                 .into());
             }
         }
+        Commands::WatchAddress { address } => match normalize_watch_address(address.clone())? {
+            Some(normalized) => Wallet::watch_address(&normalized),
+            None => {
+                return Err(CrownError::Unknown("Invalid watch identifier provided".into()).into());
+            }
+        },
         Commands::ExportKeys => Wallet::export_keys(),
         Commands::ListNotes => Wallet::list_notes(),
         Commands::ListNotesByAddress { address } => {
@@ -290,42 +292,44 @@ async fn main() -> Result<(), NockAppError> {
         pubkey_peek_slab.set_root(path);
         let pubkey_slab = wallet.app.peek_handle(pubkey_peek_slab).await?;
 
-        let first_name_slab = if pubkey_slab.is_some() {
-            let mut first_name_peek_slab = NounSlab::new();
-            let tracked_tag = make_tas(&mut first_name_peek_slab, "tracked-names").as_noun();
-            let watch_only = cli.include_watch_only.to_noun(&mut first_name_peek_slab);
-            let path = T(&mut first_name_peek_slab, &[tracked_tag, watch_only, SIG]);
-            first_name_peek_slab.set_root(path);
-            wallet.app.peek_handle(first_name_peek_slab).await?
-        } else {
-            None
-        };
+        let mut first_name_peek_slab = NounSlab::new();
+        let tracked_tag = make_tas(&mut first_name_peek_slab, "tracked-names").as_noun();
+        let watch_only = cli.include_watch_only.to_noun(&mut first_name_peek_slab);
+        let path = T(&mut first_name_peek_slab, &[tracked_tag, watch_only, SIG]);
+        first_name_peek_slab.set_root(path);
+        let first_name_slab = wallet.app.peek_handle(first_name_peek_slab).await?;
 
-        if let Some(pubkey_slab) = pubkey_slab {
-            let pubkeys = pubkey_slab
+        let pubkeys = if let Some(pubkey_slab) = pubkey_slab {
+            pubkey_slab
                 .to_vec()
                 .iter()
                 .map(|key| String::from_noun(unsafe { key.root() }))
-                .collect::<Result<Vec<String>, NounDecodeError>>()?;
-
-            let first_names: Vec<String> = if let Some(name_slab) = first_name_slab {
-                let names_noun = unsafe { name_slab.root() };
-                <Vec<String>>::from_noun(names_noun)?
-            } else {
-                Vec::new()
-            };
-
-            let connection_target = cli.connection.target();
-            let pokes = connection::sync_wallet_balance(
-                &mut wallet, &connection_target, pubkeys, first_names,
-            )
-            .await?;
-
-            for poke in pokes {
-                let _ = wallet.app.poke(SystemWire.to_wire(), poke).await.unwrap();
-            }
+                .collect::<Result<Vec<String>, NounDecodeError>>()?
+                .into_iter()
+                .filter_map(|value| match normalize_watch_address(value) {
+                    Ok(Some(normalized)) => Some(Ok(normalized)),
+                    Ok(None) => None,
+                    Err(err) => Some(Err(err)),
+                })
+                .collect::<Result<Vec<String>, NockAppError>>()?
         } else {
-            info!("No pubkeys found, not updating balance")
+            Vec::new()
+        };
+
+        let first_names: Vec<String> = if let Some(name_slab) = first_name_slab {
+            let names_noun = unsafe { name_slab.root() };
+            <Vec<String>>::from_noun(names_noun)?
+        } else {
+            Vec::new()
+        };
+
+        let connection_target = cli.connection.target();
+        let pokes =
+            connection::sync_wallet_balance(&mut wallet, &connection_target, pubkeys, first_names)
+                .await?;
+
+        for poke in pokes {
+            let _ = wallet.app.poke(SystemWire.to_wire(), poke).await.unwrap();
         }
     }
 
@@ -677,16 +681,11 @@ impl Wallet {
     ///
     /// # Arguments
     ///
-    /// * `watch_pubkey` - Watch-only b58 encoded public key string
-    fn import_watch_only_pubkey(watch_pubkey: &str) -> CommandNoun<NounSlab> {
+    /// * `watch_address` - Watch-only b58 encoded address. Can be v1 or v0.
+    fn watch_address(watch_address: &str) -> CommandNoun<NounSlab> {
         let mut slab = NounSlab::new();
-        let key_noun = make_tas(&mut slab, watch_pubkey).as_noun();
-        Self::wallet(
-            "import-watch-only-pubkey",
-            &[key_noun],
-            Operation::Poke,
-            &mut slab,
-        )
+        let address_noun = make_tas(&mut slab, watch_address).as_noun();
+        Self::wallet("watch-address", &[address_noun], Operation::Poke, &mut slab)
     }
 
     /// Exports keys to a file.
@@ -877,50 +876,42 @@ impl Wallet {
     ) -> Result<Vec<NounSlab>, NockAppError> {
         let mut results = Vec::new();
 
-        if !first_names.is_empty() {
-            for first_name in first_names {
-                let mut slab = NounSlab::new(); // Define slab - adjust as needed
-                let response = client
-                    .wallet_get_balance(&BalanceRequest::FirstName(first_name))
-                    .await
-                    .map_err(|e| {
-                        NockAppError::OtherError(format!(
-                            "Failed to request current balance: {}",
-                            e
-                        ))
-                    })?;
-                let balance_update = v1::BalanceUpdate::try_from(response).map_err(|e| {
-                    NockAppError::OtherError(format!("Failed to parse balance update: {}", e))
+        for first_name in first_names {
+            let mut slab = NounSlab::new(); // Define slab - adjust as needed
+            let response = client
+                .wallet_get_balance(&BalanceRequest::FirstName(first_name))
+                .await
+                .map_err(|e| {
+                    NockAppError::OtherError(format!("Failed to request current balance: {}", e))
                 })?;
-                let wrapped_balance = Some(Some(balance_update));
-                let balance_noun = wrapped_balance.to_noun(&mut slab);
-                let head = make_tas(&mut slab, "update-balance-grpc").as_noun();
-                let full = T(&mut slab, &[head, balance_noun]);
-                slab.set_root(full);
-                results.push(slab);
-            }
-        } else {
-            for (_index, key) in pubkeys.iter().enumerate() {
-                let mut slab = NounSlab::new(); // Define slab - adjust as needed
-                let response = client
-                    .wallet_get_balance(&BalanceRequest::Address(key.to_owned()))
-                    .await
-                    .map_err(|e| {
-                        NockAppError::OtherError(format!(
-                            "Failed to request current balance: {}",
-                            e
-                        ))
-                    })?;
-                let balance_update = v1::BalanceUpdate::try_from(response).map_err(|e| {
-                    NockAppError::OtherError(format!("Failed to parse balance update: {}", e))
+            let balance_update = v1::BalanceUpdate::try_from(response).map_err(|e| {
+                NockAppError::OtherError(format!("Failed to parse balance update: {}", e))
+            })?;
+            let wrapped_balance = Some(Some(balance_update));
+            let balance_noun = wrapped_balance.to_noun(&mut slab);
+            let head = make_tas(&mut slab, "update-balance-grpc").as_noun();
+            let full = T(&mut slab, &[head, balance_noun]);
+            slab.set_root(full);
+            results.push(slab);
+        }
+
+        for (_index, key) in pubkeys.iter().enumerate() {
+            let mut slab = NounSlab::new(); // Define slab - adjust as needed
+            let response = client
+                .wallet_get_balance(&BalanceRequest::Address(key.to_owned()))
+                .await
+                .map_err(|e| {
+                    NockAppError::OtherError(format!("Failed to request current balance: {}", e))
                 })?;
-                let wrapped_balance = Some(Some(balance_update));
-                let balance_noun = wrapped_balance.to_noun(&mut slab);
-                let head = make_tas(&mut slab, "update-balance-grpc").as_noun();
-                let full = T(&mut slab, &[head, balance_noun]);
-                slab.set_root(full);
-                results.push(slab);
-            }
+            let balance_update = v1::BalanceUpdate::try_from(response).map_err(|e| {
+                NockAppError::OtherError(format!("Failed to parse balance update: {}", e))
+            })?;
+            let wrapped_balance = Some(Some(balance_update));
+            let balance_noun = wrapped_balance.to_noun(&mut slab);
+            let head = make_tas(&mut slab, "update-balance-grpc").as_noun();
+            let full = T(&mut slab, &[head, balance_noun]);
+            slab.set_root(full);
+            results.push(slab);
         }
 
         Ok(results)
@@ -939,57 +930,47 @@ impl Wallet {
         let mut request_index: i32 = 0;
         let mut results = Vec::new();
 
-        if first_names.is_empty() {
-            warn!("No tracked first names available; skipping balance-by-first-name peeks");
-        } else {
-            for first_name in first_names {
-                let mut slab = NounSlab::new();
+        for first_name in first_names {
+            let mut slab = NounSlab::new();
 
-                let mut path_slab = NounSlab::<NockJammer>::new();
-                let path_noun = vec!["balance-by-first-name".to_string(), first_name.clone()]
-                    .to_noun(&mut path_slab);
-                path_slab.set_root(path_noun);
-                let path_bytes = path_slab.jam().to_vec();
+            let mut path_slab = NounSlab::<NockJammer>::new();
+            let path_noun = vec!["balance-by-first-name".to_string(), first_name.clone()]
+                .to_noun(&mut path_slab);
+            path_slab.set_root(path_noun);
+            let path_bytes = path_slab.jam().to_vec();
 
-                let response = client.peek(request_index, path_bytes).await.map_err(|e| {
-                    NockAppError::OtherError(format!(
-                        "Failed to peek balance for first name {first_name}: {e}"
-                    ))
-                })?;
-                request_index = request_index.wrapping_add(1);
+            let response = client.peek(request_index, path_bytes).await.map_err(|e| {
+                NockAppError::OtherError(format!(
+                    "Failed to peek balance for first name {first_name}: {e}"
+                ))
+            })?;
+            request_index = request_index.wrapping_add(1);
 
-                let balance = slab.cue_into(response.as_bytes()?)?;
-                let head = make_tas(&mut slab, "update-balance-grpc").as_noun();
-                let full = T(&mut slab, &[head, balance]);
-                slab.set_root(full);
-                results.push(slab);
-            }
+            let balance = slab.cue_into(response.as_bytes()?)?;
+            let head = make_tas(&mut slab, "update-balance-grpc").as_noun();
+            let full = T(&mut slab, &[head, balance]);
+            slab.set_root(full);
+            results.push(slab);
         }
 
-        if pubkeys.is_empty() {
-            warn!("No tracked pubkeys available; skipping balance-by-pubkey peeks");
-        } else {
-            for key in pubkeys {
-                let mut slab = NounSlab::new();
-                let mut path_slab = NounSlab::<NockJammer>::new();
-                let path_noun =
-                    vec!["balance-by-pubkey".to_string(), key.clone()].to_noun(&mut path_slab);
-                path_slab.set_root(path_noun);
-                let path_bytes = path_slab.jam().to_vec();
+        for key in pubkeys {
+            let mut slab = NounSlab::new();
+            let mut path_slab = NounSlab::<NockJammer>::new();
+            let path_noun =
+                vec!["balance-by-pubkey".to_string(), key.clone()].to_noun(&mut path_slab);
+            path_slab.set_root(path_noun);
+            let path_bytes = path_slab.jam().to_vec();
 
-                let response = client.peek(request_index, path_bytes).await.map_err(|e| {
-                    NockAppError::OtherError(format!(
-                        "Failed to peek balance for pubkey {key}: {e}"
-                    ))
-                })?;
-                request_index = request_index.wrapping_add(1);
+            let response = client.peek(request_index, path_bytes).await.map_err(|e| {
+                NockAppError::OtherError(format!("Failed to peek balance for pubkey {key}: {e}"))
+            })?;
+            request_index = request_index.wrapping_add(1);
 
-                let balance = slab.cue_into(response.as_bytes()?)?;
-                let head = make_tas(&mut slab, "update-balance-grpc").as_noun();
-                let full = T(&mut slab, &[head, balance]);
-                slab.set_root(full);
-                results.push(slab);
-            }
+            let balance = slab.cue_into(response.as_bytes()?)?;
+            let head = make_tas(&mut slab, "update-balance-grpc").as_noun();
+            let full = T(&mut slab, &[head, balance]);
+            slab.set_root(full);
+            results.push(slab);
         }
 
         Ok(results)
@@ -1183,6 +1164,32 @@ fn confirm_upper_bound_warning() -> Result<(), NockAppError> {
             "Aborted create-tx because upper bound was not confirmed with YES".into(),
         )
         .into())
+    }
+}
+
+fn normalize_watch_address(value: String) -> Result<Option<String>, NockAppError> {
+    if value.as_bytes().len() >= SchnorrPubkey::BYTES_BASE58 {
+        match SchnorrPubkey::from_base58(&value) {
+            Ok(pubkey) => pubkey
+                .to_base58()
+                .map(Some)
+                .map_err(|err| NockAppError::OtherError(err.to_string())),
+            Err(err) => {
+                warn!(
+                    "Skipping invalid watch-only schnorr pubkey '{}': {}",
+                    value, err
+                );
+                Ok(None)
+            }
+        }
+    } else {
+        match Hash::from_base58(&value) {
+            Ok(hash) => Ok(Some(hash.to_base58())),
+            Err(err) => {
+                warn!("Skipping invalid watch-only hash '{}': {}", value, err);
+                Ok(None)
+            }
+        }
     }
 }
 
@@ -1578,7 +1585,6 @@ mod tests {
             key: None,
             seedphrase: Some(seedphrase.to_string()),
             version: Some(version),
-            watch_only_pubkey: None,
         })
         .to_wire();
         let privkey_result = wallet.app.poke(wire, noun.clone()).await?;
@@ -1614,7 +1620,6 @@ mod tests {
             key: None,
             seedphrase: None,
             version: None,
-            watch_only_pubkey: None,
         })
         .to_wire();
         let import_result = wallet.app.poke(wire, noun.clone()).await?;
@@ -1706,7 +1711,6 @@ mod tests {
             key: None,
             seedphrase: Some("correct horse battery staple".to_string()),
             version: Some(version),
-            watch_only_pubkey: None,
         })
         .to_wire();
         let genkey_result = wallet.app.poke(wire1, genkey_noun.clone()).await?;

@@ -150,14 +150,16 @@
     ?.  include-watch-only.pole
       signing-names
     %+  weld  signing-names
-    %+  turn  watch-keys:get:v
-    |=  addr=@t
+    %+  roll  watch-addrs:get:v
+    |=  [addr=@t first-names=(list @t)]
     ::  v0 keys have at least 132 bytes
     ?:  (gte (met 3 addr) 132)
-      =+  pubkey=(from-b58:schnorr-pubkey:transact addr)
-      (to-b58:hash:transact (simple:v0:first-name:transact pubkey))
+      ::  exclude names for v0 keys because those are handled through tracked pubkeys
+      first-names
     =+  pubkey-hash=(from-b58:hash:transact addr)
-    (to-b58:hash:transact (simple:v1:first-name:transact pubkey-hash))
+    :+  (to-b58:hash:transact (simple:v1:first-name:transact pubkey-hash))
+      (to-b58:hash:transact (coinbase:v1:first-name:transact pubkey-hash))
+    first-names
     ::
     ::  returns a list of pubkeys
       [%tracked-pubkeys include-watch-only=? ~]
@@ -166,7 +168,12 @@
     =;  signing-keys=(list @t)
       ?.  include-watch-only.pole
         signing-keys
-      (weld signing-keys watch-keys:get:v)
+      %+  weld  signing-keys
+      %+  murn  watch-addrs:get:v
+      |=  addr=@t
+      ?:  (lth (met 3 addr) 132)
+        ~
+      `addr
     %+  murn
       ~(coils get:v %pub)
     |=  =coil:wt
@@ -214,7 +221,7 @@
         %verify-hash           (do-verify-hash cause)
         %import-keys           (do-import-keys cause)
         %import-extended       (do-import-extended cause)
-        %import-watch-only-pubkey  (do-import-watch-only-pubkey cause)
+        %watch-address  (do-watch-address cause)
         %export-keys           (do-export-keys cause)
         %export-master-pubkey  (do-export-master-pubkey cause)
         %import-master-pubkey  (do-import-master-pubkey cause)
@@ -369,16 +376,16 @@
         [%exit 0]
     ==
   ::
-  ++  do-import-watch-only-pubkey
+  ++  do-watch-address
     |=  =cause:wt
-    ?>  ?=(%import-watch-only-pubkey -.cause)
-    :_  state(keys (watch-key:put:v key.cause))
+    ?>  ?=(%watch-address -.cause)
+    :_  state(keys (watch-addrs:put:v address.cause))
     :~  :-  %markdown
         %-  crip
         """
         ## Imported watch-only pubkey
 
-        - Imported key: {<key.cause>}
+        - Imported key: {<address.cause>}
         """
         [%exit 0]
     ==
@@ -671,8 +678,8 @@
       ---
 
       """
-    =/  base58-watch-keys=(list tape)
-      %+  turn  watch-keys:get:v
+    =/  base58-watch-addrs=(list tape)
+      %+  turn  watch-addrs:get:v
       |=  key-b58=@t
       """
       - {<key-b58>}
@@ -689,7 +696,7 @@
 
         ## Addresses -- Watch only
 
-        {?~(base58-watch-keys "No pubkeys found" (zing base58-watch-keys))}
+        {?~(base58-watch-addrs "No pubkeys found" (zing base58-watch-addrs))}
         """
         [%exit 0]
     ==
@@ -1123,19 +1130,6 @@
           %-  crip
           """
           Cannot sign a message without active master address set. Please import a master key / seed phrase or generate a new one.
-          """
-          [%exit 0]
-      ==
-    ?:  ?=(%1 -.u.active-master.state)
-      :_  state
-      :~  :-  %markdown
-          %-  crip
-          """
-          Cannot sign a message with v1 keys until forthcoming wallet update. Use the `list-master-addresses` command to list
-          your master addresses. Then use `set-active-master-address` to set your master address to an address corresponding
-          to a v0 key if available. If you have a v0 key stored as a seed phrase, you can import it by running
-          `nockchain-wallet import-keys --seedphrase <seed-phrase> --version 0`. If your key was generated before the
-          release of the v1 protocol upgrade on October 15, 2025, it is most likely a v0 key.
           """
           [%exit 0]
       ==

@@ -254,7 +254,7 @@ pub enum Commands {
     },
 
     /// Import keys from a file, extended key, seed phrase, or master private key
-    #[command(group = clap::ArgGroup::new("import_source").required(true).args(&["file", "key", "seedphrase", "watch_only_pubkey"]))]
+    #[command(group = clap::ArgGroup::new("import_source").required(true).args(&["file", "key", "seedphrase"]))]
     ImportKeys {
         /// Path to the jammed keys file
         #[arg(short = 'f', long = "file", value_name = "FILE")]
@@ -273,10 +273,13 @@ pub enum Commands {
         /// Master key version to use when generating from seed phrase
         #[arg(long = "version", value_name = "VERSION", requires = "seedphrase")]
         version: Option<u64>,
+    },
 
-        /// Pubkey (watch only)
-        #[arg(short = 'c', long = "watch-only", value_name = "WATCH_ONLY")]
-        watch_only_pubkey: Option<String>,
+    /// Add a watch-only address or pubkey to the wallet
+    WatchAddress {
+        /// Public key hash (v1 address) or schnorr pubkey (v0 address). base58 encoded.
+        #[arg(value_name = "address")]
+        address: String,
     },
 
     /// Export keys to a file
@@ -516,6 +519,7 @@ impl Commands {
             Commands::SignHash { .. } => "sign-hash",
             Commands::VerifyHash { .. } => "verify-hash",
             Commands::TxAccepted { .. } => "tx-accepted",
+            Commands::WatchAddress { .. } => "watch-address",
         }
     }
 }

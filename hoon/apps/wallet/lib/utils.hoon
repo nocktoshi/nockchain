@@ -171,7 +171,7 @@
       ^-  meta:wt
       (~(got of keys.state) seed-path)
     ::
-    ++  watch-keys
+    ++  watch-addrs
       ^-  (list @t)
       =/  subtree  (~(kids of keys.state) watch-path)
       %+  turn
@@ -225,11 +225,11 @@
         (welp key-path /label)
       label/u.label
     ::
-    ++  watch-key
-      |=  b58-key=@t
+    ++  watch-addrs
+      |=  b58-addr=@t
       %+  ~(put of keys.state)
-        (welp watch-path ~[t/b58-key])
-      [%watch-key b58-key]
+        (welp watch-path ~[t/b58-addr])
+      [%watch-key b58-addr]
     --
   ::
   ++  get-note
