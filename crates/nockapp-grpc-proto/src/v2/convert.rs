@@ -100,22 +100,15 @@ impl From<Note> for PbNote {
 impl TryFrom<PbNote> for Note {
     type Error = ConversionError;
     fn try_from(note: PbNote) -> Result<Self, Self::Error> {
-        match note
-            .note_version
-            .required("Note", "note_version")?
-        {
+        match note.note_version.required("Note", "note_version")? {
             note::NoteVersion::Legacy(legacy) => Ok(Note::V0(legacy.try_into()?)),
             note::NoteVersion::V1(v1) => Ok(Note::V1(NoteV1 {
                 version: v1::Version::V1,
                 origin_page: v1::BlockHeight(Belt(
-                    v1.origin_page
-                        .required("NoteV1", "origin_page")?
-                        .value,
+                    v1.origin_page.required("NoteV1", "origin_page")?.value,
                 )),
                 name: v0::Name::try_from(v1.name.required("NoteV1", "name")?)?,
-                note_data: NoteData::try_from(
-                    v1.note_data.required("NoteV1", "note_data")?,
-                )?,
+                note_data: NoteData::try_from(v1.note_data.required("NoteV1", "note_data")?)?,
                 assets: v1.assets.required("NoteV1", "assets")?.into(),
             })),
         }
@@ -136,12 +129,8 @@ impl TryFrom<PbBalance> for BalanceUpdate {
             })
             .collect::<Result<Vec<_>, _>>()?;
         Ok(BalanceUpdate {
-            height: v1::BlockHeight(Belt(
-                update.height.required("Balance", "height")?.value,
-            )),
-            block_id: v1::Hash::try_from(
-                update.block_id.required("Balance", "block_id")?,
-            )?,
+            height: v1::BlockHeight(Belt(update.height.required("Balance", "height")?.value)),
+            block_id: v1::Hash::try_from(update.block_id.required("Balance", "block_id")?)?,
             notes: v1::Balance(notes),
         })
     }
@@ -361,16 +350,10 @@ impl TryFrom<PbSeed> for V1Seed {
     fn try_from(seed: PbSeed) -> Result<Self, Self::Error> {
         Ok(V1Seed {
             output_source: seed.output_source.map(|s| s.try_into()).transpose()?,
-            lock_root: v1::Hash::try_from(
-                seed.lock_root.required("Seed", "lock_root")?,
-            )?,
-            note_data: NoteData::try_from(
-                seed.note_data.required("Seed", "note_data")?,
-            )?,
+            lock_root: v1::Hash::try_from(seed.lock_root.required("Seed", "lock_root")?)?,
+            note_data: NoteData::try_from(seed.note_data.required("Seed", "note_data")?)?,
             gift: seed.gift.required("Seed", "gift")?.into(),
-            parent_hash: v1::Hash::try_from(
-                seed.parent_hash.required("Seed", "parent_hash")?,
-            )?,
+            parent_hash: v1::Hash::try_from(seed.parent_hash.required("Seed", "parent_hash")?)?,
         })
     }
 }
@@ -408,9 +391,7 @@ impl TryFrom<PbHaxPreimage> for V1HaxPreimage {
     type Error = ConversionError;
     fn try_from(preimage: PbHaxPreimage) -> Result<Self, Self::Error> {
         Ok(V1HaxPreimage {
-            hash: v1::Hash::try_from(
-                preimage.hash.required("HaxPreimage", "hash")?,
-            )?,
+            hash: v1::Hash::try_from(preimage.hash.required("HaxPreimage", "hash")?)?,
             value: preimage.value.into(),
         })
     }
@@ -433,10 +414,7 @@ impl TryFrom<PbMerkleProof> for MerkleProof {
 impl TryFrom<PbLockPrimitive> for LockPrimitive {
     type Error = ConversionError;
     fn try_from(primitive: PbLockPrimitive) -> Result<Self, Self::Error> {
-        match primitive
-            .primitive
-            .required("LockPrimitive", "primitive")?
-        {
+        match primitive.primitive.required("LockPrimitive", "primitive")? {
             lock_primitive::Primitive::Pkh(pkh) => {
                 let hashes = pkh
                     .hashes
@@ -484,9 +462,7 @@ impl TryFrom<PbLockMerkleProof> for LockMerkleProof {
                     .required("LockMerkleProof", "spend_condition")?,
             )?,
             axis: proof.axis,
-            proof: MerkleProof::try_from(
-                proof.proof.required("LockMerkleProof", "proof")?,
-            )?,
+            proof: MerkleProof::try_from(proof.proof.required("LockMerkleProof", "proof")?)?,
         })
     }
 }
@@ -501,9 +477,7 @@ impl TryFrom<PbWitness> for V1Witness {
                     .required("Witness", "lock_merkle_proof")?,
             )?,
             pkh_signature: PkhSignature::try_from(
-                witness
-                    .pkh_signature
-                    .required("Witness", "pkh_signature")?,
+                witness.pkh_signature.required("Witness", "pkh_signature")?,
             )?,
             hax: witness
                 .hax
@@ -529,10 +503,7 @@ impl TryFrom<PbLegacySpend> for Spend0 {
                 .required("LegacySpend", "signature")?
                 .try_into()?,
             seeds: nockchain_types::tx_engine::v1::Seeds(seeds),
-            fee: spend
-                .fee
-                .required("LegacySpend", "fee")?
-                .into(),
+            fee: spend.fee.required("LegacySpend", "fee")?.into(),
         })
     }
 }
@@ -546,16 +517,9 @@ impl TryFrom<PbWitnessSpend> for Spend1 {
             .map(V1Seed::try_from)
             .collect::<Result<Vec<_>, _>>()?;
         Ok(Spend1 {
-            witness: V1Witness::try_from(
-                spend
-                    .witness
-                    .required("WitnessSpend", "witness")?,
-            )?,
+            witness: V1Witness::try_from(spend.witness.required("WitnessSpend", "witness")?)?,
             seeds: nockchain_types::tx_engine::v1::Seeds(seeds),
-            fee: spend
-                .fee
-                .required("WitnessSpend", "fee")?
-                .into(),
+            fee: spend.fee.required("WitnessSpend", "fee")?.into(),
         })
     }
 }
@@ -563,10 +527,7 @@ impl TryFrom<PbWitnessSpend> for Spend1 {
 impl TryFrom<PbSpend> for V1Spend {
     type Error = ConversionError;
     fn try_from(spend: PbSpend) -> Result<Self, Self::Error> {
-        match spend
-            .spend_kind
-            .required("Spend", "spend_kind")?
-        {
+        match spend.spend_kind.required("Spend", "spend_kind")? {
             spend::SpendKind::Legacy(legacy) => Ok(V1Spend::Legacy(Spend0::try_from(legacy)?)),
             spend::SpendKind::Witness(witness) => Ok(V1Spend::Witness(Spend1::try_from(witness)?)),
         }
@@ -586,10 +547,7 @@ impl TryFrom<PbSpendEntry> for (Name, V1Spend) {
 impl TryFrom<PbRawTransaction> for V1RawTx {
     type Error = ConversionError;
     fn try_from(tx: PbRawTransaction) -> Result<Self, Self::Error> {
-        let version_value = tx
-            .version
-            .required("RawTransaction", "version")?
-            .value;
+        let version_value = tx.version.required("RawTransaction", "version")?.value;
 
         let version = match version_value {
             1 => v1::Version::V1,

@@ -580,12 +580,8 @@ impl TryFrom<TimeLockIntent> for v0::Timelock {
                 }))
             }
             Some(time_lock_intent::Value::AbsoluteAndRelative(both)) => {
-                let abs = both
-                    .absolute
-                    .required("AbsoluteAndRelative", "absolute")?;
-                let rel = both
-                    .relative
-                    .required("AbsoluteAndRelative", "relative")?;
+                let abs = both.absolute.required("AbsoluteAndRelative", "absolute")?;
+                let rel = both.relative.required("AbsoluteAndRelative", "relative")?;
                 v0::Timelock(Some(v0::TimelockIntent {
                     absolute: abs.into(),
                     relative: rel.into(),
