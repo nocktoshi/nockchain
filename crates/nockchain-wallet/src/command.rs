@@ -1,6 +1,7 @@
 use std::str::FromStr;
 
-use clap::{Parser, Subcommand};
+use clap::builder::BoolishValueParser;
+use clap::{ArgAction, Parser, Subcommand};
 use nockapp::driver::Operation;
 use nockapp::kernel::boot::Cli as BootCli;
 use nockapp::wire::{Wire, WireRepr};
@@ -338,15 +339,15 @@ pub enum Commands {
     /// Create a transaction (use --refund-pkh when spending legacy v0 notes)
     #[command(
         name = "create-tx",
-        override_usage = "nockchain-wallet create-tx --names <NAMES> --recipient <RECIPIENT> --fee <FEE> [--refund-pkh <REFUND_PKH>]\n\n# NOTE: --refund-pkh is required when spending from v0 notes. For v1 notes, the refund defaults to the note owner.\n\nExamples:\n  # Send to a single recipient\n  nockchain-wallet create-tx \\\n    --names \"[first1 last1],[first2 last2]\" \\\n    --recipient \"<pkh-b58>:<amount>\" \\\n    --fee 10 \\\n    --refund-pkh <pkh-b58>"
+        override_usage = "nockchain-wallet create-tx --names <NAMES> --recipient <RECIPIENT> --fee <FEE> [--refund-pkh <REFUND_PKH>] [--include-data <BOOL>]\n\n# NOTE: --refund-pkh is required when spending from v0 notes. For v1 notes, the refund defaults to the note owner. --include-data defaults to true (pass 'false' to exclude note data).\n\nExamples:\n  # Send to a single recipient\n  nockchain-wallet create-tx \\\n    --names \"[first1 last1],[first2 last2]\" \\\n    --recipient \"<pkh-b58>:<amount>\" \\\n    --fee 10 \\\n    --refund-pkh <pkh-b58>"
     )]
     CreateTx {
         /// Names of notes to spend (comma-separated)
         #[arg(long)]
         names: String,
         /// Transaction output, formatted as "<recipient>:<amount>"
-        #[arg(long)]
-        recipient: String,
+        #[arg(long = "recipient")]
+        recipients: Vec<String>,
         /// Transaction fee
         #[arg(long)]
         fee: u64,
@@ -359,6 +360,14 @@ pub enum Commands {
         /// Hardened or unhardened child key
         #[arg(long, default_value = "false")]
         hardened: bool,
+        /// Include note data in output note
+        #[arg(
+            long,
+            action = ArgAction::Set,
+            value_parser = BoolishValueParser::new(),
+            default_value_t = true
+        )]
+        include_data: bool,
     },
 
     /// Export a master public key

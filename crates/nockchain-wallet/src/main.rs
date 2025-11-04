@@ -249,18 +249,20 @@ async fn main() -> Result<(), NockAppError> {
         Commands::ListNotesByAddressCsv { address } => Wallet::list_notes_by_address_csv(address),
         Commands::CreateTx {
             names,
-            recipient,
+            recipients,
             fee,
             refund_pkh,
             index,
             hardened,
+            include_data,
         } => Wallet::create_tx(
             names.clone(),
-            recipient.clone(),
+            recipients.clone(),
             *fee,
             refund_pkh.clone(),
             *index,
             *hardened,
+            *include_data,
         ),
         Commands::SendTx { transaction } => Wallet::send_tx(transaction),
         Commands::ShowTx { transaction } => Wallet::show_tx(transaction),
@@ -750,6 +752,16 @@ impl Wallet {
         Ok(names)
     }
 
+    fn parse_multiple_recipients(
+        recipients: &Vec<String>,
+    ) -> Result<Vec<(String, u64)>, NockAppError> {
+        recipients
+            .iter()
+            .map(|v| &**v)
+            .map(Self::parse_single_output)
+            .collect::<Result<Vec<_>, _>>()
+    }
+
     fn parse_single_output(raw: &str) -> Result<(String, u64), NockAppError> {
         let specs: Vec<&str> = raw
             .split(',')
@@ -795,6 +807,12 @@ impl Wallet {
             ))
         })?;
 
+        if amount == 0 {
+            return Err(
+                CrownError::Unknown("Gift amount to recipient cannot be 0".to_string()).into(),
+            );
+        }
+
         Ok((pkh_trimmed.to_string(), amount))
     }
 
@@ -803,16 +821,17 @@ impl Wallet {
     /// defaults back to the note owner, so `--refund-pkh` can be omitted.
     fn create_tx(
         names: String,
-        recipients: String,
+        recipients: Vec<String>,
         fee: u64,
         refund_pkh: Option<String>,
         index: Option<u64>,
         hardened: bool,
+        include_data: bool,
     ) -> CommandNoun<NounSlab> {
         let mut slab = NounSlab::new();
 
         let names_vec = Self::parse_note_names(&names)?;
-        let (pkh, amount) = Self::parse_single_output(&recipients)?;
+        let recipients = Self::parse_multiple_recipients(&recipients)?;
 
         // Convert names to list of pairs
         let names_noun = names_vec
@@ -838,15 +857,21 @@ impl Wallet {
             None => D(0),
         };
 
-        let recipient_pkh = Hash::from_base58(&pkh)
-            .map_err(|err| {
-                NockAppError::from(CrownError::Unknown(format!(
-                    "Invalid output pubkey hash '{}': {}",
-                    pkh, err
-                )))
-            })?
-            .to_noun(&mut slab);
-        let order_noun = T(&mut slab, &[recipient_pkh, D(amount)]);
+        let mut order_nouns = vec![];
+        for (pkh, amount) in recipients {
+            let recipient_pkh = Hash::from_base58(&pkh)
+                .map_err(|err| {
+                    NockAppError::from(CrownError::Unknown(format!(
+                        "Invalid output pubkey hash '{}': {}",
+                        pkh, err
+                    )))
+                })?
+                .to_noun(&mut slab);
+            let order_noun = T(&mut slab, &[recipient_pkh, D(amount)]);
+            order_nouns.push(order_noun);
+        }
+        order_nouns.push(D(0));
+        let order_noun = T(&mut slab, &order_nouns);
 
         let refund_noun = if let Some(refund) = refund_pkh {
             let refund_hash = Hash::from_base58(&refund).map_err(|err| {
@@ -860,10 +885,11 @@ impl Wallet {
         } else {
             SIG
         };
+        let include_data_noun = include_data.to_noun(&mut slab);
 
         Self::wallet(
             "create-tx",
-            &[names_noun, order_noun, fee_noun, sign_key_noun, refund_noun],
+            &[names_noun, order_noun, fee_noun, sign_key_noun, refund_noun, include_data_noun],
             Operation::Poke,
             &mut slab,
         )
@@ -1400,6 +1426,30 @@ mod tests {
     }
 
     #[test]
+    fn parse_multiple_output_accepts_valid_spec() -> Result<(), Box<dyn std::error::Error>> {
+        let recipients = vec![
+            "9phXGACnW4238oqgvn2gpwaUjG3RAqcxq2Ash2vaKp8KjzSd3MQ56Jt:65536".to_string(),
+            "9yPePjfWAdUnzaQKyxcRXKRa5PpUzKKEwtpECBZsUYt9Jd7egSDEWoV:99999".to_string(),
+        ];
+        let allocations = Wallet::parse_multiple_recipients(&recipients)?;
+        assert_eq!(
+            allocations[0],
+            (
+                "9phXGACnW4238oqgvn2gpwaUjG3RAqcxq2Ash2vaKp8KjzSd3MQ56Jt".to_string(),
+                65536
+            )
+        );
+        assert_eq!(
+            allocations[1],
+            (
+                "9yPePjfWAdUnzaQKyxcRXKRa5PpUzKKEwtpECBZsUYt9Jd7egSDEWoV".to_string(),
+                99999
+            )
+        );
+        Ok(())
+    }
+
+    #[test]
     fn parse_single_output_rejects_multiple_outputs() {
         let err = Wallet::parse_single_output("a:1,b:2").expect_err("expected failure");
         assert!(
@@ -1652,7 +1702,7 @@ mod tests {
         let mut wallet = Wallet::new(nockapp);
 
         let names = "[first1 last1],[first2 last2]".to_string();
-        let recipients = "pk1:1".to_string();
+        let recipients = vec!["pk1:1".to_string()];
         let fee = 1;
 
         let (noun, op) = Wallet::create_tx(
@@ -1662,14 +1712,16 @@ mod tests {
             None::<String>,
             None,
             false,
+            true,
         )?;
         let wire = WalletWire::Command(Commands::CreateTx {
             names: names.clone(),
-            recipient: recipients.clone(),
+            recipients: recipients.clone(),
             fee: fee.clone(),
             refund_pkh: None,
             index: None,
             hardened: false,
+            include_data: true,
         })
         .to_wire();
         let spend_result = wallet.app.poke(wire, noun.clone()).await?;
@@ -1690,7 +1742,7 @@ mod tests {
 
         // these should be valid names of notes in the wallet balance
         let names = "[Amt4GcpYievY4PXHfffiWriJ1sYfTXFkyQsGzbzwMVzewECWDV3Ad8Q BJnaDB3koU7ruYVdWCQqkFYQ9e3GXhFsDYjJ1vSmKFdxzf6Y87DzP4n]".to_string();
-        let recipients = "3HKKp7xZgCw1mhzk4iw735S2ZTavCLHc8YDGRP6G9sSTrRGsaPBu1AqJ8cBDiw2LwhRFnQG7S3N9N9okc28uBda6oSAUCBfMSg5uC9cefhrFrvXVGomoGcRvcFZTWuJzm3ch:100".to_string();
+        let recipients = vec!["3HKKp7xZgCw1mhzk4iw735S2ZTavCLHc8YDGRP6G9sSTrRGsaPBu1AqJ8cBDiw2LwhRFnQG7S3N9N9okc28uBda6oSAUCBfMSg5uC9cefhrFrvXVGomoGcRvcFZTWuJzm3ch:100".to_string()];
         let fee = 0;
 
         // generate keys
@@ -1704,6 +1756,7 @@ mod tests {
             None::<String>,
             None,
             false,
+            true,
         )?;
 
         let wire1 = WalletWire::Command(Commands::ImportKeys {
@@ -1718,11 +1771,12 @@ mod tests {
 
         let wire2 = WalletWire::Command(Commands::CreateTx {
             names: names.clone(),
-            recipient: recipients.clone(),
+            recipients: recipients.clone(),
             fee: fee.clone(),
             refund_pkh: None,
             index: None,
             hardened: false,
+            include_data: true,
         })
         .to_wire();
         let spend_result = wallet.app.poke(wire2, spend_noun.clone()).await?;

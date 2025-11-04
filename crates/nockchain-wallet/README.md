@@ -179,15 +179,21 @@ Displays the aggregate wallet balance, including the total number of notes and t
 
 ### Create a Transaction
 
-We currently only support fan-in transactions (multiple inputs, a single recipient).
-
-#### Single Recipient Transaction
+We support transactions with any amount of input notes going to any number of recipients.
 
 ```bash
 # Send to a single recipient
 nockchain-wallet create-tx \
   --names "[first1 last1],[first2 last2]" \
   --recipient "<pkh-b58>:<amount>" \
+  --fee 10
+
+# Send to multiple recipients
+nockchain-wallet create-tx \
+  --names "[first1 last1],[first2 last2]" \
+  --recipient "<pkh-b58>:<amount>" \
+  --recipient "<pkh-b58>:<amount>" \
+  ...
   --fee 10
 ```
 
