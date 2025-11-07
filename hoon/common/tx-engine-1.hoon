@@ -121,7 +121,6 @@
     ==
   ::
   ++  compute-size-without-txs
-    ~/  %compute-size-without-txs
     |=  pag=form
     ^-  size
     ;:  add
@@ -863,7 +862,6 @@
       [%.y ~]
     ==
   ++  validate
-    ~/  %validate
     |=  =form
     ^-  ?
     ?:  =(form *^form)  %.n
