@@ -1,11 +1,10 @@
 use nockapp::noun::slab::{NockJammer, NounSlab};
 use nockapp::noun::NounAllocatorExt;
-use nockapp::utils::make_tas;
-use nockapp::AtomExt;
 use nockchain_math::noun_ext::NounMathExt;
 use nockchain_math::structs::{HoonList, HoonMapIter};
 use nockchain_math::zoon::common::DefaultTipHasher;
 use nockchain_math::zoon::{zmap, zset};
+use nockvm::ext::{make_tas, AtomExt};
 use nockvm::noun::{Noun, NounAllocator, D};
 use noun_serde::{NounDecode, NounDecodeError, NounEncode};
 

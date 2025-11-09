@@ -205,7 +205,7 @@
       (do-grpc-bind cause tag.wir)
     [effs state]
   ::
-      [%poke ?(%one-punch %sys %wallet) ver=@ *]
+      [%poke ?(%one-punch %sys %wallet %file) ver=@ *]
     ?+    -.cause  ~|("unsupported cause: {<-.cause>}" !!)
         %show                  (show:utils state path.cause)
         %keygen                (do-keygen cause)
@@ -230,16 +230,18 @@
         %show-tx               (do-show-tx cause)
         %list-active-addresses  (do-list-active-addresses cause)
         %show-seed-phrase       (do-show-seed-phrase cause)
-        ::  TODO: replace with  show-zpub <KEY>
         %show-master-zpub    (do-show-master-zpub cause)
-        ::  TODO: replace with  show-zprv <KEY>
         %show-master-zprv  (do-show-master-zprv cause)
         %list-master-addresses  (do-list-master-addresses cause)
         %set-active-master-address  (do-set-active-master-address cause)
     ::
         %file
-      ?>  ?=(%write +<.cause)
-      [[%exit 0]~ state]
+      ::?>  ?=(%write +<.cause)
+      ::[[%exit 0]~ state]
+      ?-  +<.cause
+        %write  [[%exit 0]~ state]
+        %batch-write  [[%exit 0]~ state]
+      ==
     ==
   ==
   ::
@@ -991,13 +993,28 @@
         ::  jam inputs and save as transaction
         =/  =transaction:wt  [transaction-name spends]
         =/  transaction-jam  (jam transaction)
-        =/  path=@t
+        =/  tx-path=@t
           %-  crip
           "./txs/{(trip name.transaction)}.tx"
         %-  (debug "saving transaction to {<path>}")
-        =/  =effect:wt  [%file %write path transaction-jam]
+        =/  write-effect=effect:wt
+          ?.  save-raw-tx.cause
+            [%file %write tx-path transaction-jam]
+          =/  hashable-path=@t
+            %-  crip
+            "./txs-debug/{(trip name.transaction)}-hashable.jam"
+          =/  raw-tx-path=@t
+            %-  crip
+            "./txs-debug/{(trip name.transaction)}.jam"
+          :*  %file
+              %batch-write
+              :~  [hashable-path (jam [leaf+%1 (hashable:spends:transact spends)])]
+                  [tx-path transaction-jam]
+                  [raw-tx-path (jam raw-tx)]
+              ==
+          ==
         :_  state
-        ~[effect [%markdown markdown-text] [%exit 0]]
+        ~[write-effect [%markdown markdown-text]]
       ::
           %.n
         =/  msg=@t

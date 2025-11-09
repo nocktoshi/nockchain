@@ -1,8 +1,7 @@
-use nockapp::Noun;
 use nockvm::interpreter::Context;
 use nockvm::jets::util::{slot, BAIL_EXIT, BAIL_FAIL};
 use nockvm::jets::JetErr;
-use nockvm::noun::{Atom, IndirectAtom, D, T};
+use nockvm::noun::{Atom, IndirectAtom, Noun, D, T};
 use nockvm_macros::tas;
 use tracing::debug;
 

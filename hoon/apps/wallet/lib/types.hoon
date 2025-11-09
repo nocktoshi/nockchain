@@ -388,6 +388,8 @@
                                                           ::  if the lock is not a standard 1-of-1 pkh or coinbase, the wallet won't
                                                           ::  be able to guess it, so the funds could be lost forever if the user.
                                                           ::  doesn't keep track of the lock.
+            save-raw-tx=?                                 ::  if %.y, saves jams of the raw-tx and its hashable into a txs-debug folder
+                                                          ::  in the current working directory
         ==
         [%list-active-addresses ~]
         [%list-notes ~]
@@ -399,7 +401,11 @@
         [%update-balance-grpc balance=*]
         [%set-active-master-address address-b58=@t]
         [%list-master-addresses ~]
-        [%file %write path=@t contents=@t success=?]
+        [%file file-cause]
+    ==
+  +$  file-cause
+    $%  [%write path=@t contents=@t success=?]
+        [%batch-write result=(list [path=@t contents=@t success=?])]
     ==
   ::
   ::  $seed-mask: tracks which fields of a $seed:transact have been set
@@ -451,9 +457,9 @@
     ==
   ::
   +$  file-effect
-    $%
-      [%file %read path=@t]
-      [%file %write path=@t contents=@]
+    $%  [%file %read path=@t]
+        [%file %write path=@t contents=@]
+        [%file %batch-write files=(list [path=@t contents=@])]
     ==
   ::
   +$  grpc-effect

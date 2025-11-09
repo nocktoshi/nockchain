@@ -339,7 +339,7 @@ pub enum Commands {
     /// Create a transaction (use --refund-pkh when spending legacy v0 notes)
     #[command(
         name = "create-tx",
-        override_usage = "nockchain-wallet create-tx --names <NAMES> --recipient <RECIPIENT> --fee <FEE> [--refund-pkh <REFUND_PKH>] [--include-data <BOOL>]\n\n# NOTE: --refund-pkh is required when spending from v0 notes. For v1 notes, the refund defaults to the note owner. --include-data defaults to true (pass 'false' to exclude note data).\n\nExamples:\n  # Send to a single recipient\n  nockchain-wallet create-tx \\\n    --names \"[first1 last1],[first2 last2]\" \\\n    --recipient \"<pkh-b58>:<amount>\" \\\n    --fee 10 \\\n    --refund-pkh <pkh-b58>"
+        override_usage = "nockchain-wallet create-tx --names <NAMES> --recipient <RECIPIENT> --fee <FEE> [--refund-pkh <REFUND_PKH>] [--include-data <BOOL>] [--save-raw-tx] \n\n# NOTE: --refund-pkh is required when spending from v0 notes. For v1 notes, the refund defaults to the note owner. --include-data defaults to true (pass 'false' to exclude note data). \n\nExamples:\n  # Send to a single recipient\n  nockchain-wallet create-tx \\\n    --names \"[first1 last1],[first2 last2]\" \\\n    --recipient \"<pkh-b58>:<amount>\" \\\n    --fee 10 \\\n    --refund-pkh <pkh-b58>"
     )]
     CreateTx {
         /// Names of notes to spend (comma-separated)
@@ -368,6 +368,10 @@ pub enum Commands {
             default_value_t = true
         )]
         include_data: bool,
+        /// For debugging purposes. If true, the raw-tx jam will be saved in the
+        /// txs-debug folder in the current working directory.
+        #[arg(long, default_value = "false")]
+        save_raw_tx: bool,
     },
 
     /// Export a master public key

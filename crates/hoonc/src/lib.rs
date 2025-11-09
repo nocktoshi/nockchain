@@ -9,7 +9,8 @@ use nockapp::kernel::boot::{self, default_boot_cli, Cli as BootCli};
 use nockapp::noun::slab::{Jammer, NockJammer, NounSlab};
 use nockapp::one_punch::OnePunchWire;
 use nockapp::wire::Wire;
-use nockapp::{system_data_dir, AtomExt, Noun, NounExt};
+use nockapp::{system_data_dir, AtomExt, Noun};
+use nockvm::ext::NounExt;
 use nockvm::interpreter::{self, Context};
 use nockvm::noun::{Atom, D, T};
 use nockvm_macros::tas;
@@ -398,6 +399,13 @@ pub fn is_valid_file_or_dir(entry: &DirEntry) -> bool {
                 || s.ends_with(".hoon")
                 || s.ends_with(".txt")
                 || s.ends_with(".jam")
+                // Include common web asset types
+                || s.ends_with(".html")
+                || s.ends_with(".css")
+                || s.ends_with(".js")
+                || s.ends_with(".jpg")
+                || s.ends_with(".png")
+                || s.ends_with(".gif")
         })
         .unwrap_or(false);
 

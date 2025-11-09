@@ -65,6 +65,7 @@ tracing-tracy = { workspace = true, optional = true, features = [
 webpki-roots = { workspace = true }
 x509-parser = { workspace = true }
 yaque = { workspace = true }
+noun-serde = { workspace = true }
 
 [lib]
 name = "nockapp"

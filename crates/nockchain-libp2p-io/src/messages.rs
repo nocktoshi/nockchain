@@ -1,6 +1,7 @@
 use libp2p::PeerId;
 use nockapp::noun::slab::NounSlab;
-use nockapp::{NockAppError, NounExt};
+use nockapp::NockAppError;
+use nockvm::ext::NounExt;
 use nockvm::noun::{Noun, D};
 use nockvm_macros::tas;
 use serde_bytes::ByteBuf;

@@ -255,6 +255,7 @@ async fn main() -> Result<(), NockAppError> {
             index,
             hardened,
             include_data,
+            save_raw_tx,
         } => Wallet::create_tx(
             names.clone(),
             recipients.clone(),
@@ -263,6 +264,7 @@ async fn main() -> Result<(), NockAppError> {
             *index,
             *hardened,
             *include_data,
+            *save_raw_tx,
         ),
         Commands::SendTx { transaction } => Wallet::send_tx(transaction),
         Commands::ShowTx { transaction } => Wallet::show_tx(transaction),
@@ -827,6 +829,7 @@ impl Wallet {
         index: Option<u64>,
         hardened: bool,
         include_data: bool,
+        save_raw_tx: bool,
     ) -> CommandNoun<NounSlab> {
         let mut slab = NounSlab::new();
 
@@ -886,10 +889,14 @@ impl Wallet {
             SIG
         };
         let include_data_noun = include_data.to_noun(&mut slab);
+        let save_raw_tx_noun = save_raw_tx.to_noun(&mut slab);
 
         Self::wallet(
             "create-tx",
-            &[names_noun, order_noun, fee_noun, sign_key_noun, refund_noun, include_data_noun],
+            &[
+                names_noun, order_noun, fee_noun, sign_key_noun, refund_noun, include_data_noun,
+                save_raw_tx_noun,
+            ],
             Operation::Poke,
             &mut slab,
         )
@@ -1713,6 +1720,7 @@ mod tests {
             None,
             false,
             true,
+            false,
         )?;
         let wire = WalletWire::Command(Commands::CreateTx {
             names: names.clone(),
@@ -1722,6 +1730,7 @@ mod tests {
             index: None,
             hardened: false,
             include_data: true,
+            save_raw_tx: false,
         })
         .to_wire();
         let spend_result = wallet.app.poke(wire, noun.clone()).await?;
@@ -1757,6 +1766,7 @@ mod tests {
             None,
             false,
             true,
+            false,
         )?;
 
         let wire1 = WalletWire::Command(Commands::ImportKeys {
@@ -1777,6 +1787,7 @@ mod tests {
             index: None,
             hardened: false,
             include_data: true,
+            save_raw_tx: false,
         })
         .to_wire();
         let spend_result = wallet.app.poke(wire2, spend_noun.clone()).await?;

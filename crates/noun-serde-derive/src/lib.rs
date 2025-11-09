@@ -312,10 +312,10 @@ pub fn derive_noun_encode(input: TokenStream) -> TokenStream {
                                 // Tagged encoding: [%tag [[%field1 value1] [%field2 value2] ...]]
                                 quote! {
                                     #name::#variant_name { #(#field_names),* } => {
-                                        let tag = ::nockapp::utils::make_tas(allocator, #tag).as_noun();
+                                        let tag = ::nockvm::ext::make_tas(allocator, #tag).as_noun();
                                         let mut field_nouns = Vec::new();
                                         #(
-                                            let field_tag = ::nockapp::utils::make_tas(allocator, stringify!(#field_names)).as_noun();
+                                            let field_tag = ::nockvm::ext::make_tas(allocator, stringify!(#field_names)).as_noun();
                                             let field_value = ::noun_serde::NounEncode::to_noun(#field_names, allocator);
                                             field_nouns.push(::nockvm::noun::T(allocator, &[field_tag, field_value]));
                                         )*
@@ -334,7 +334,7 @@ pub fn derive_noun_encode(input: TokenStream) -> TokenStream {
                                 // Untagged encoding: [%tag [value1 value2 ...]]
                                 quote! {
                                     #name::#variant_name { #(#field_names),* } => {
-                                        let tag = ::nockapp::utils::make_tas(allocator, #tag).as_noun();
+                                        let tag = ::nockvm::ext::make_tas(allocator, #tag).as_noun();
                                         let mut field_nouns = vec![tag];
                                         #(
                                             let field_noun = ::noun_serde::NounEncode::to_noun(#field_names, allocator);
@@ -355,7 +355,7 @@ pub fn derive_noun_encode(input: TokenStream) -> TokenStream {
                                 let _ty = &fields.unnamed[0].ty;
                                 quote! {
                                     #name::#variant_name(value) => {
-                                        let tag = ::nockapp::utils::make_tas(allocator, #tag).as_noun();
+                                        let tag = ::nockvm::ext::make_tas(allocator, #tag).as_noun();
                                         let data = ::noun_serde::NounEncode::to_noun(value, allocator);
                                         ::nockvm::noun::T(allocator, &[tag, data])
                                     }
@@ -367,7 +367,7 @@ pub fn derive_noun_encode(input: TokenStream) -> TokenStream {
 
                                 quote! {
                                     #name::#variant_name(#(#field_idents),*) => {
-                                        let tag = ::nockapp::utils::make_tas(allocator, #tag).as_noun();
+                                        let tag = ::nockvm::ext::make_tas(allocator, #tag).as_noun();
                                         // Build nested cell structure right-to-left
                                         let mut data = ::noun_serde::NounEncode::to_noun(#first_field, allocator);
                                         #(
@@ -381,7 +381,7 @@ pub fn derive_noun_encode(input: TokenStream) -> TokenStream {
                         Fields::Unit => {
                             quote! {
                                 #name::#variant_name => {
-                                    ::nockapp::utils::make_tas(allocator, #tag).as_noun()
+                                    ::nockvm::ext::make_tas(allocator, #tag).as_noun()
                                 }
                             }
                         }
@@ -722,7 +722,7 @@ pub fn derive_noun_decode(input: TokenStream) -> TokenStream {
 
                             quote! {
                                 #name::#variant_name(#(#field_names),*) => {
-                                    let tag = ::nockapp::utils::make_tas(allocator, #tag).as_noun();
+                                    let tag = ::nockvm::ext::make_tas(allocator, #tag).as_noun();
                                     // Build nested cell structure right-to-left
                                     let mut data = ::noun_serde::NounEncode::to_noun(#first_field, allocator);
                                     #(

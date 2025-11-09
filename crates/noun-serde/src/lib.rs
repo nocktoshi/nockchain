@@ -1,13 +1,14 @@
 use std::collections::{BTreeMap, HashMap, HashSet};
+use std::str;
 
+use bytes::Bytes;
 use ibig::UBig;
 pub mod wallet;
 
-#[allow(unused_imports)]
-use nockapp::utils::make_tas;
-use nockapp::{AtomExt, NockAppError};
+use nockvm::ext::{make_tas, AtomExt};
 use nockvm::jets::util::BAIL_FAIL;
 use nockvm::jets::JetErr;
+#[allow(unused_imports)]
 #[allow(unused_imports)]
 use nockvm::noun::{Atom, FullDebugCell, Noun, NounAllocator, Slots, D, T};
 use nockvm::noun::{NO, YES};
@@ -89,14 +90,14 @@ impl From<NounDecodeError> for JetErr {
     }
 }
 
-impl From<NounDecodeError> for NockAppError {
-    fn from(err: NounDecodeError) -> Self {
-        NockAppError::NounDecodeError(Box::new(err))
+impl From<nockvm::noun::Error> for NounDecodeError {
+    fn from(err: nockvm::noun::Error) -> Self {
+        NounDecodeError::Custom(err.to_string())
     }
 }
 
-impl From<nockvm::noun::Error> for NounDecodeError {
-    fn from(err: nockvm::noun::Error) -> Self {
+impl From<str::Utf8Error> for NounDecodeError {
+    fn from(err: str::Utf8Error) -> Self {
         NounDecodeError::Custom(err.to_string())
     }
 }
@@ -160,7 +161,7 @@ impl NounDecode for u32 {
 
 impl NounEncode for String {
     fn to_noun<A: NounAllocator>(&self, allocator: &mut A) -> Noun {
-        use nockapp::utils::make_tas;
+        use nockvm::ext::make_tas;
         make_tas(allocator, self).as_noun()
     }
 }
@@ -759,12 +760,6 @@ pub fn decode_bool(noun: &Noun) -> Result<bool, NounDecodeError> {
             trace!("Failed to decode as atom: {:?}", e);
             Err(NounDecodeError::ExpectedAtom)
         }
-    }
-}
-
-impl From<nockapp::CrownError> for NounDecodeError {
-    fn from(err: nockapp::CrownError) -> Self {
-        NounDecodeError::Custom(err.to_string())
     }
 }
 
@@ -1477,5 +1472,18 @@ mod btreemap_tests {
         assert_eq!(decoded.get(&0), Some(&100u64));
         assert_eq!(decoded.get(&1), Some(&200u64));
         assert_eq!(decoded.get(&2), Some(&300u64));
+    }
+}
+impl NounEncode for Bytes {
+    fn to_noun<A: NounAllocator>(&self, allocator: &mut A) -> Noun {
+        <Atom as AtomExt>::from_bytes(allocator, self.as_ref()).as_noun()
+    }
+}
+
+impl NounDecode for Bytes {
+    fn from_noun(noun: &Noun) -> Result<Self, NounDecodeError> {
+        let atom = noun.as_atom().map_err(|_| NounDecodeError::ExpectedAtom)?;
+        let bytes = atom.as_ne_bytes().to_vec();
+        Ok(Bytes::from(bytes))
     }
 }

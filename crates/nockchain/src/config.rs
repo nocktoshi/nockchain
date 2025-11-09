@@ -126,8 +126,8 @@ pub struct NockchainCli {
     pub fakenet_v1_phase: Option<u64>,
     #[arg(long, help = "Path to fake genesis block jam file")]
     pub fakenet_genesis_jam_path: Option<PathBuf>,
-    #[arg(long, value_parser = clap::value_parser!(std::net::SocketAddr), default_value = "127.0.0.1:5555")]
-    pub bind_public_grpc_addr: std::net::SocketAddr,
+    #[arg(long, help = "Public gRPC binding address (off by default), recommended value = \"127.0.0.1:5555\"", value_parser = clap::value_parser!(std::net::SocketAddr))]
+    pub bind_public_grpc_addr: Option<std::net::SocketAddr>,
     #[arg(long, default_value = "5555")]
     pub bind_private_grpc_port: u16,
     #[arg(long, default_value = "false")]
@@ -201,7 +201,7 @@ mod tests {
             fakenet_v1_phase: None,
             fakenet_genesis_jam_path: None,
             fakenet_coinbase_timelock_min: None,
-            bind_public_grpc_addr: "127.0.0.1:5555".parse().unwrap(),
+            bind_public_grpc_addr: Some("127.0.0.1:5555".parse().unwrap()),
             bind_private_grpc_port: 5555,
             fast_sync: false,
         }

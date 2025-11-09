@@ -11,7 +11,6 @@ bytes.workspace = true
 either.workspace = true
 hex-literal.workspace = true
 ibig.workspace = true
-nockapp.workspace = true
 nockchain-math.workspace = true
 nockvm.workspace = true
 nockvm_macros.workspace = true

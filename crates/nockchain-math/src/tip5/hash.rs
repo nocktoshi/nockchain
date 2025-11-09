@@ -1,7 +1,6 @@
-use nockapp::Noun;
 use nockvm::jets::list::util::{lent, weld};
 use nockvm::jets::JetErr;
-use nockvm::noun::{NounAllocator, D, T};
+use nockvm::noun::{Noun, NounAllocator, D, T};
 use noun_serde::{NounDecode, NounEncode};
 
 use super::*;

@@ -1,5 +1,5 @@
 use ibig::UBig;
-use nockapp::NounExt;
+use nockvm::ext::NounExt;
 use nockvm::interpreter::Context;
 use nockvm::jets::util::BAIL_FAIL;
 use nockvm::jets::JetErr;
