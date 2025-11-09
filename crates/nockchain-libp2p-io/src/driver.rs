@@ -580,7 +580,10 @@ async fn handle_effect(
                 request_peers.shuffle(&mut rng);
                 request_peers.into_iter().take(2).collect()
             } else {
-                target_peers.clone()
+                let mut rng = rng();
+                let mut request_peers = target_peers.clone();
+                request_peers.shuffle(&mut rng);
+                request_peers.into_iter().take(8).collect()
             };
             debug!("Sending request to {} peers", request_peers.len());
             for peer_id in request_peers {
