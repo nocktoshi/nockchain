@@ -1840,7 +1840,7 @@ mod tests {
             index: None,
             hardened: false,
             include_data: true,
-            memo_data: None,
+            override_data: None,
             save_raw_tx: false,
         })
         .to_wire();
@@ -1899,7 +1899,7 @@ mod tests {
             index: None,
             hardened: false,
             include_data: true,
-            memo_data: None,
+            override_data: None,
             save_raw_tx: false,
         })
         .to_wire();

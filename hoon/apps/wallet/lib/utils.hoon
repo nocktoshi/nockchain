@@ -866,6 +866,32 @@
           (bool-text include-data.data)
           (spend-condition u.cond)
         ==
+      ::
+      ++  lock-metadata
+        |=  data=lock-metadata:wt
+        ^-  @t
+        =/  cond=(unit spend-condition:transact)
+          ((soft spend-condition:transact) lock.data)
+        ?~  cond
+          '\0a  - Lock data not displayable'
+        ;:  (cury cat 3)
+          '\0a  - Lock data included in note: '
+          (bool-text include-data.data)
+          (spend-condition u.cond)
+        ==
+      ::
+      ++  lock-metadata
+        |=  data=lock-metadata:wt
+        ^-  @t
+        =/  cond=(unit spend-condition:transact)
+          ((soft spend-condition:transact) lock.data)
+        ?~  cond
+          '\0a  - Lock data not displayable'
+        ;:  (cury cat 3)
+          '\0a  - Lock data included in note: '
+          (bool-text include-data.data)
+          (spend-condition u.cond)
+        ==
     ::
       ++  memo-data
         |=  data=note-data:v1:transact
