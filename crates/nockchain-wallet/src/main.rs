@@ -298,6 +298,7 @@ async fn main() -> Result<(), NockAppError> {
                 refund_pkh.clone(),
                 signing_keys,
                 *include_data,
+ memo_data.clone(),
                 *save_raw_tx,
                 *note_selection_strategy,
             )
@@ -890,6 +891,7 @@ impl Wallet {
         refund_pkh: Option<String>,
         sign_keys: Vec<(u64, bool)>,
         include_data: bool,
+        memo_data: Option<String>,
         save_raw_tx: bool,
         note_selection: NoteSelectionStrategyCli,
     ) -> CommandNoun<NounSlab> {
@@ -948,7 +950,7 @@ impl Wallet {
             "create-tx",
             &[
                 names_noun, order_noun, fee_noun, sign_key_noun, refund_noun, include_data_noun,
-                save_raw_tx_noun, note_selection_noun,
+                memo_data_noun, save_raw_tx_noun, note_selection_noun,
             ],
             Operation::Poke,
             &mut slab,
@@ -1879,7 +1881,7 @@ mod tests {
             index: None,
             hardened: false,
             include_data: true,
-            override_data: None,
+            memo_data: None,
             save_raw_tx: false,
         })
         .to_wire();
@@ -1938,7 +1940,7 @@ mod tests {
             index: None,
             hardened: false,
             include_data: true,
-            override_data: None,
+            memo_data: None,
             save_raw_tx: false,
         })
         .to_wire();
