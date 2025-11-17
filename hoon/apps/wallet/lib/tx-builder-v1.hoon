@@ -14,6 +14,7 @@
         get-note=$-(nname:transact nnote:transact)
         memo-data=(unit @t)
         include-data=?
+        override-data=(unit @t)
     ==
 |^
 ^-  [spends:v1:transact hash:transact]
