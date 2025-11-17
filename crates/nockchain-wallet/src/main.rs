@@ -283,6 +283,7 @@ async fn main() -> Result<(), NockAppError> {
             index,
             hardened,
             include_data,
+            override_data,
             sign_keys,
             memo_data,
             save_raw_tx,
@@ -1880,14 +1881,13 @@ mod tests {
             index: None,
             hardened: false,
             include_data: true,
-            memo_data: None,
+            override_data: None,
             save_raw_tx: false,
         })
         .to_wire();
         let spend_result = wallet.app.poke(wire, noun.clone()).await?;
         println!("spend_result: {:?}", spend_result);
 
-        // TODO: replace with an end-to-end test that exercises multisig recipient specs.
         Ok(())
     }
 
@@ -1940,14 +1940,13 @@ mod tests {
             index: None,
             hardened: false,
             include_data: true,
-            memo_data: None,
+            override_data: None,
             save_raw_tx: false,
         })
         .to_wire();
         let spend_result = wallet.app.poke(wire2, spend_noun.clone()).await?;
         println!("spend_result: {:?}", spend_result);
 
-        // TODO: replace with an end-to-end test for PKH recipients once fixtures exist.
         Ok(())
     }
 
