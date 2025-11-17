@@ -403,8 +403,8 @@ pub enum Commands {
         )]
         include_data: bool,
         /// Override note data with custom string instead of lock data
-        #[arg(long = "override-data", value_name = "STRING")]
-        override_data: Option<String>,
+        #[arg(long = "memo-data", value_name = "MEMO")]
+        memo_data: Option<String>,
         /// Additional signing keys. Accepts `index` or `index:hardened`.
         #[arg(long = "sign-key", value_name = "INDEX[:HARDENED]", action = ArgAction::Append)]
         sign_keys: Vec<String>,

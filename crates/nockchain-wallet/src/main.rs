@@ -283,7 +283,7 @@ async fn main() -> Result<(), NockAppError> {
             index,
             hardened,
             include_data,
-            override_data,
+            memo_data,
             sign_keys,
             memo_data,
             save_raw_tx,
@@ -1881,7 +1881,7 @@ mod tests {
             index: None,
             hardened: false,
             include_data: true,
-            override_data: None,
+            memo_data: None,
             save_raw_tx: false,
         })
         .to_wire();
@@ -1940,7 +1940,7 @@ mod tests {
             index: None,
             hardened: false,
             include_data: true,
-            override_data: None,
+            memo_data: None,
             save_raw_tx: false,
         })
         .to_wire();
