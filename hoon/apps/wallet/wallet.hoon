@@ -1278,6 +1278,7 @@
         get-note:v
         include-data.cause
         selection-strategy.cause
+        memo-data.cause 
       ==
     =/  multisig-recv-locks=(z-set:zo lock:transact)
       (gather-multisig-locks orders)
