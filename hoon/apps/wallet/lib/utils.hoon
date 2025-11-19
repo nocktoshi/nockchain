@@ -597,6 +597,20 @@
       ::     +.+.u.memo-val
       ::   %-  crip
       ::   """
+      :: ++  memo-data
+      ::   |=  memo=note-data:v1:transact
+      ::   ^-  @t
+      ::   ?~  memo-val=(~(get z-by:zo memo) %memo)
+      ::     ~>  %slog.[0 'memo data in note is missing']  'N/A'
+      ::   ?~  soft-memo=((soft memo-data:wt) u.memo-val)
+      ::     ~>  %slog.[2 'memo data in note is malformed']  'N/A'
+      ::   =/  memo-content=@t
+      ::     ?>  ?=(^ -.u.memo-val)
+      ::     ?>  ?=(^ -.+.u.memo-val)
+      ::     ?>  ?=(@ +.+.u.memo-val)
+      ::     +.+.u.memo-val
+      ::   %-  crip
+      ::   """
 
       ::     - Memo: 
       ::       {(trip memo-content)}

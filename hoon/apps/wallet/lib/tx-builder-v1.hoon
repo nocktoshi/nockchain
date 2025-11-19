@@ -2,6 +2,7 @@
 /=  utils  /apps/wallet/lib/utils
 /=  wt  /apps/wallet/lib/types
 /=  zo  /common/zoon
+/=  *  /common/zose 
 ::
 ::  Builds a simple fan-in transaction
 |=  $:  names=(list nname:transact)
@@ -11,6 +12,7 @@
         pubkey=schnorr-pubkey:transact
         refund-pkh=(unit hash:transact)
         get-note=$-(nname:transact nnote:transact)
+        memo-data=(list @ux)
         include-data=?
         override-data=(unit @t)
     ==
@@ -172,6 +174,12 @@
       gift=refund
       parent-hash=(hash:nnote:transact note)
   ==
+++  bytes-to-text
+  |=  bytes=(list @ux)
+  ^-  @t
+  =/  chars  (turn bytes |=(b=@ux `@tD`b))
+  (crip chars) :: Simple concatenation of @ux bytes back to @t
+
 ++  allocate-from-note
   |=  [orders=(list order:wt) note=nnote:transact assets=@ fee=@]
   ^-  [orders=(list order:wt) seeds=(list order:wt) fee=@]
@@ -207,6 +215,7 @@
           fee-portion=@
       ==
   ^-  seeds:v1:transact
+  ~&  "Processing specs for note with assets: {(trip (format-ui:common:display:utils assets.note))}"
   =/  [seeds=(list seed:v1:transact) gifts=@]
   %+  roll  specs
   |=  $:  spec=order:wt

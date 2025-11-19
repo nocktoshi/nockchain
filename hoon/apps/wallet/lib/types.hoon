@@ -1,6 +1,7 @@
 /=  transact  /common/tx-engine
 /=  zo  /common/zoon
 /=  *  /common/zose
+/=  *  /common/zeke
 /=  dumb  /apps/dumbnet/lib/types
 /=  s10  /apps/wallet/lib/s10
 
