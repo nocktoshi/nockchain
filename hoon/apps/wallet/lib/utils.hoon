@@ -282,49 +282,12 @@
     ::
     ++  watch-addrs
       ^-  (list @t)
-      =+  subtree=(~(kids of keys.state) watch-path)
-      %+  murn
+      =/  subtree  (~(kids of keys.state) watch-path)
+      %+  turn
         ~(tap by kid.subtree)
       |=  [=trek =meta:wt]
-      ?:  ?=(%watch-key -.meta)
-        `p.meta
-      ~
-    ::
-    ++  watch-locks
-      ^-  (list [name=@t lock=@t])
-      =+  subtree=(~(kids of keys.state) watch-path)
-      %+  murn
-        ~(tap by kid.subtree)
-      |=  [=trek =meta:wt]
-      ?.  ?=(%first-name -.meta)
-        ~
-      %-  some
-      :-  (to-b58:hash:transact name.meta)
-      ?~  lock.meta
-        'N/A'
-      (lock:v1:display u.lock.meta)
-    ::
-    ++  watch-first-names
-      ^-  (list @t)
-      =+  subtree=(~(kids of keys.state) watch-path)
-      %+  roll
-        ~(tap by kid.subtree)
-      |=  [[=trek =meta:wt] acc=(list @t)]
-      ?+    -.meta  acc
-          %watch-key
-        =+  addr=p.meta
-        ?:  (gte (met 3 addr) 132)
-          acc
-        =+  pubkey-hash=(from-b58:hash:transact addr)
-        =+  simple-name=(simple:v1:first-name:transact pubkey-hash)
-        =+  coinbase-name=(coinbase:v1:first-name:transact pubkey-hash)
-        :+  (to-b58:hash:transact simple-name)
-          (to-b58:hash:transact coinbase-name)
-        acc
-      ::
-          %first-name
-        [(to-b58:hash:transact name.meta) acc]
-      ==
+      ?>  ?=(%watch-key -.meta)
+      p.meta
     ::
     ++  keys
       ^-  (list [trek coil:wt])
@@ -803,96 +766,25 @@
           ~>  %slog.[2 'lock data in note is missing']  'N/A'
         ?~  soft-lock=((soft lock-data:wt) u.lock-data)
           ~>  %slog.[2 'lock data in note is malformed']  'N/A'
-        (lock lock.u.soft-lock)
+        ?:  ?=(@ -.lock.u.soft-lock)
+          ~>  %slog.[2 'expected m-of-n pkh lock']  'N/A'
+        =+  lp=`lock-primitive:transact`(head lock.u.soft-lock)
+        ?.  ?=(%pkh -.lp)
+          ~>  %slog.[2 'expected m-of-n pkh lock']  'N/A'
+        =/  signers=tape
+          %-  zing
+          %+  turn  ~(tap z-in:zo h.lp)
+          |=  =hash:transact
+          """
+              - {(trip (to-b58:hash:transact hash))}
+          """
+        %-  crip
+        """
+
+        {(trip memo-text)}
+
+        """
       ::
-      ++  bool-text
-        |=  flag=?
-        ^-  @t
-        ?:  flag  'yes'  'no'
-      ::
-      ++  render-lock-signers
-        |=  [required=@ participants=(list hash:transact)]
-        ^-  @t
-        =/  signer-text=@t
-          %+  roll  participants
-          |=  [hash=hash:transact acc=@t]
-          ;:  (cury cat 3)
-              acc
-              '\0a            - '
-              (to-b58:hash:transact hash)
-          ==
-        ;:  (cury cat 3)
-            '\0a        - Required Signatures: '
-            (format-ui:common required)
-            '\0a        - Signers:'
-            signer-text
-        ==
-      ::
-      ++  lock-metadata
-        |=  data=lock-metadata:wt
-        ^-  @t
-        =/  cond=(unit spend-condition:transact)
-          ((soft spend-condition:transact) lock.data)
-        ?~  cond
-          '\0a  - Lock data not displayable'
-        ;:  (cury cat 3)
-          '\0a  - Lock data included in note: '
-          (bool-text include-data.data)
-          (spend-condition u.cond)
-        ==
-      ::
-      ++  lock-metadata
-        |=  data=lock-metadata:wt
-        ^-  @t
-        =/  cond=(unit spend-condition:transact)
-          ((soft spend-condition:transact) lock.data)
-        ?~  cond
-          '\0a  - Lock data not displayable'
-        ;:  (cury cat 3)
-          '\0a  - Lock data included in note: '
-          (bool-text include-data.data)
-          (spend-condition u.cond)
-        ==
-      ::
-      ++  lock-metadata
-        |=  data=lock-metadata:wt
-        ^-  @t
-        =/  cond=(unit spend-condition:transact)
-          ((soft spend-condition:transact) lock.data)
-        ?~  cond
-          '\0a  - Lock data not displayable'
-        ;:  (cury cat 3)
-          '\0a  - Lock data included in note: '
-          (bool-text include-data.data)
-          (spend-condition u.cond)
-        ==
-      ::
-      ++  lock-metadata
-        |=  data=lock-metadata:wt
-        ^-  @t
-        =/  cond=(unit spend-condition:transact)
-          ((soft spend-condition:transact) lock.data)
-        ?~  cond
-          '\0a  - Lock data not displayable'
-        ;:  (cury cat 3)
-          '\0a  - Lock data included in note: '
-          (bool-text include-data.data)
-          (spend-condition u.cond)
-        ==
-      ::
-      ++  lock-metadata
-        |=  data=lock-metadata:wt
-        ^-  @t
-        =/  cond=(unit spend-condition:transact)
-          ((soft spend-condition:transact) lock.data)
-        ?~  cond
-          '\0a  - Lock data not displayable'
-        ;:  (cury cat 3)
-          '\0a  - Lock data included in note: '
-          (bool-text include-data.data)
-          (spend-condition u.cond)
-        ==
-    ::
       ++  memo-data
         |=  data=note-data:v1:transact
         ^-  @t
@@ -900,8 +792,8 @@
           'N/A'
         ?~  soft-memo=((soft memo-data:wt) u.memo-val)
           ~>  %slog.[2 'memo data in note is malformed']  'N/A'
-        =/  memo-bytes=(list @ux)  u.soft-memo
-        =/  memo-text=@t  (crip (turn memo-bytes @t))
+        =/  memo-bytes=(list @ux)  +.u.soft-memo
+        =/  memo-text=@t  (crip (turn memo-bytes @tD))
         %-  crip
         """
 

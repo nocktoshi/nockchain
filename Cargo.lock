@@ -1035,6 +1035,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b94f61472cee1439c0b966b47e3aca9ae07e45d070759512cd390ea2bebc6675"
 
 [[package]]
+name = "clipboard-win"
+version = "5.4.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "bde03770d3df201d4fb868f2c9c59e66a3e4e2bd06692a0fe701e7103c7e84d4"
+dependencies = [
+ "error-code",
+]
+
+[[package]]
 name = "cmac"
 version = "0.7.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4133,6 +4142,42 @@ dependencies = [
 ]
 
 [[package]]
+name = "nockchain-api"
+version = "0.1.0"
+dependencies = [
+ "clap",
+ "kernels",
+ "nockapp",
+ "nockchain",
+ "nockvm",
+ "tikv-jemallocator",
+ "tokio",
+ "tracy-client",
+ "zkvm-jetpack",
+]
+
+[[package]]
+name = "nockchain-explorer-tui"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "arboard",
+ "chrono",
+ "clap",
+ "crossterm 0.29.0",
+ "nockapp-grpc",
+ "nockapp-grpc-proto",
+ "nockchain-math",
+ "nockchain-types",
+ "ratatui 0.28.1",
+ "tokio",
+ "tonic 0.14.2",
+ "tracing",
+ "tracing-subscriber",
+ "tracing-tracy",
+]
+
+[[package]]
 name = "nockchain-libp2p-io"
 version = "0.1.0"
 dependencies = [
@@ -5276,6 +5321,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "quick-error"
+version = "2.0.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a993555f31e5a609f617c12db6250dedcac1b0a85076912c436e6fc9b2c8e6a3"
+
+[[package]]
 name = "quick-protobuf"
 version = "0.8.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5459,6 +5510,27 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "513962919efc330f829edb2535844d1b912b0fbe2ca165d613e4e8788bb05a5a"
 dependencies = [
  "rand_core 0.9.3",
+]
+
+[[package]]
+name = "ratatui"
+version = "0.28.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "fdef7f9be5c0122f890d58bdf4d964349ba6a6161f705907526d891efabba57d"
+dependencies = [
+ "bitflags 2.9.4",
+ "cassowary",
+ "compact_str",
+ "crossterm 0.28.1",
+ "instability",
+ "itertools 0.13.0",
+ "lru",
+ "paste",
+ "strum 0.26.3",
+ "strum_macros 0.26.4",
+ "unicode-segmentation",
+ "unicode-truncate",
+ "unicode-width 0.1.14",
 ]
 
 [[package]]
