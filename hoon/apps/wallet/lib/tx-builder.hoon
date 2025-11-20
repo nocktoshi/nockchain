@@ -388,10 +388,11 @@
   =?  include-data  ?=(%multisig -.spec)
     %.y
   =/  =note-data:v1:transact
-    ?.  include-data
-      ~
-    %-  ~(put z-by:zo *note-data:v1:transact)
-    [%lock ^-(lock-data:wt [%0 output-lock])]
+    ?:  include-data
+      ?~  memo-data
+        (~(put z-by:zo *note-data:v1:transact) %lock ^-(lock-data:wt [%0 output-lock]))
+      (~(put z-by:zo *note-data:v1:transact) %memo ^-(memo-data:wt memo-data))
+    ~
   =/  seed=seed:v1:transact
     :*  output-source=~
         lock-root=(hash:lock:transact output-lock)
