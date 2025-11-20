@@ -620,6 +620,104 @@
         =+  (to-b58:nname:transact name)
         :((cury cat 3) '[' first ' ' last ']')
       ::
+      :: ++  memo-data
+      ::   |=  memo=note-data:v1:transact
+      ::   ^-  @t
+      ::   ?~  memo-val=(~(get z-by:zo memo) %memo)
+      ::     ~>  %slog.[0 'memo data in note is missing']  'N/A'
+      ::   ?~  soft-memo=((soft memo-data:wt) u.memo-val)
+      ::     ~>  %slog.[2 'memo data in note is malformed']  'N/A'
+      ::   =/  memo-content=@t
+      ::     ?>  ?=(^ -.u.memo-val)
+      ::     ?>  ?=(^ -.+.u.memo-val)
+      ::     ?>  ?=(@ +.+.u.memo-val)
+      ::     +.+.u.memo-val
+      ::   %-  crip
+      ::   """
+
+      ::     - Memo: 
+      ::       {(trip memo-content)}
+
+      ::   """
+      ::
+      ++  lock
+        |=  lk=lock:transact
+        ^-  @t
+        =/  cond=(unit spend-condition:transact)
+          ((soft spend-condition:transact) lk)
+        ?~  cond
+          'Lock data not displayable'
+        (spend-condition u.cond)
+      ::
+      ++  lock-primitive
+        |=  prim=lock-primitive:transact
+        ^-  cord
+        =;  txt=@t
+          (cat 3 txt '\0a---')
+        ?-    -.prim
+            %pkh
+          =/  participants=(list hash:transact)  ~(tap z-in:zo h.prim)
+          %^  cat  3
+            '\0a  - PKH Lock (m-of-n)'
+          (render-lock-signers m.prim participants)
+        ::
+            %hax
+          =/  hashes=(list hash:transact)  ~(tap z-in:zo +.prim)
+          ;:  (cury cat 3)
+              '\0a  - Hash Lock'
+              '\0a    - Preimage Hashes:'
+              %+  roll  hashes
+              |=  [h=hash:transact hash-lines=@t]
+              ;:  (cury cat 3)
+                  hash-lines
+                  '\0a      - '
+                  (to-b58:hash:transact h)
+              ==
+          ==
+        ::
+            %tim
+          =/  rel-min=@t
+            %^  cat  3
+              '\0a      - Min Relative Height: '
+            ?~  min.rel.prim  'N/A'
+            (format-ui:common u.min.rel.prim)
+          =/  rel-max=@t
+            %^  cat  3
+              '\0a      - Max Relative Height: '
+            ?~  max.rel.prim  'N/A'
+            (format-ui:common u.max.rel.prim)
+          =/  abs-min=@t
+            %^  cat  3
+              '\0a      - Min Absolute Height: '
+            ?~  min.abs.prim  'N/A'
+            (format-ui:common u.min.abs.prim)
+          =/  abs-max=@t
+            ?~  max.abs.prim  'N/A'
+            %^  cat  3
+              '\0a      - Max Absolute Height: '
+            (format-ui:common u.max.abs.prim)
+          ;:  (cury cat 3)
+              '\0a    - Time Lock'
+              rel-min
+              rel-max
+              abs-min
+              abs-max
+          ==
+        ::
+            %brn
+          '\0a  - Unspendable (burn) condition'
+        ==
+      ::
+      ++  spend-condition
+        |=  cond=spend-condition:transact
+        ^-  @t
+        %+  roll  cond
+        |=  [lp=lock-primitive:transact lines=@t]
+        ;:  (cury cat 3)
+            lines
+            (lock-primitive lp)
+        ==
+      ::
       ++  lock
         |=  lk=lock:transact
         ^-  @t
@@ -728,6 +826,19 @@
             (format-ui:common required)
             '\0a        - Signers:'
             signer-text
+        ==
+      ::
+      ++  lock-metadata
+        |=  data=lock-metadata:wt
+        ^-  @t
+        =/  cond=(unit spend-condition:transact)
+          ((soft spend-condition:transact) lock.data)
+        ?~  cond
+          '\0a  - Lock data not displayable'
+        ;:  (cury cat 3)
+          '\0a  - Lock data included in note: '
+          (bool-text include-data.data)
+          (spend-condition u.cond)
         ==
       ::
       ++  lock-metadata
