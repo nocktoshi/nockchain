@@ -2,6 +2,7 @@
 /=  utils  /apps/wallet/lib/utils
 /=  wt  /apps/wallet/lib/types
 /=  zo  /common/zoon
+/=  *  /common/zose
 ::
 ::  Builds a fan-in transaction that can emit both simple PKH and multisig locks.
 |=  $:  names=(list nname:transact)
@@ -81,15 +82,20 @@
     (create-spends-1 notes-v1 orders fee sender-pkh refund-lock)
 ::
 ~>  %slog.[0 'Notes must all be the same version!!!']  !!
-::
-=+  min-fee=(spends:estimate-fee:utils raw-spends inputs.display)
+
+:: add memo
+=/  final-spends=spends:v1:transact
+  ?~(memo-data raw-spends (apply-memo-to-spends raw-spends))
+
+:: calculate fee based on final spends (with memo if present)
+=+  min-fee=(spends:estimate-fee:utils final-spends inputs.display)
 :: uncomment to debug out of band fee estimation
 :: =+  min-fee-ref=(calculate-min-fee:spends:transact (apply:witness-data:wt witness-data raw-spends))
 :: ~&  min-fee-est+min-fee
 :: ~&  min-fee-ref+min-fee-ref
 ?:  (lth fee min-fee)
   ~|("Min fee not met. This transaction requires at least: {(trip (format-ui:common:display:utils min-fee))} nicks" !!)
-  [raw-spends witness-data display]
+  [final-spends witness-data display]
 ::
 ::  helpers for building display metadata
 ::
@@ -389,9 +395,7 @@
     %.y
   =/  =note-data:v1:transact
     ?:  include-data
-      ?~  memo-data
-        (~(put z-by:zo *note-data:v1:transact) %lock ^-(lock-data:wt [%0 output-lock]))
-      (~(put z-by:zo *note-data:v1:transact) %memo ^-(memo-data:wt memo-data))
+      (~(put z-by:zo *note-data:v1:transact) %lock ^-(lock-data:wt [%0 output-lock]))
     ~
   =/  seed=seed:v1:transact
     :*  output-source=~
