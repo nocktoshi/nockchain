@@ -13,8 +13,9 @@ use nockapp_grpc_proto::pb::public::v2::{
 };
 use nockchain_math::noun_ext::NounMathExt;
 use nockchain_math::structs::HoonMapIter;
-use nockchain_types::tx_engine::common::{BlockHeight, Hash, Name, Page};
-use nockchain_types::tx_engine::v0::{Lock, NoteV0, RawTx};
+use nockchain_types::tx_engine::common::{BlockHeight, Hash, Name};
+use nockchain_types::tx_engine::v0::{Lock as LockV0, NoteV0, RawTx as RawTxV0};
+use nockchain_types::tx_engine::v1::{Note, RawTx as RawTxV1, Seeds, Spend};
 use nockvm::noun::{Noun, SIG};
 use noun_serde::{NounDecode, NounDecodeError, NounEncode};
 use tokio::sync::{RwLock, Semaphore};
@@ -1383,6 +1384,21 @@ struct PageAndTxs {
     txs: Noun,
 }
 
+#[derive(Debug, Clone, NounDecode)]
+struct PageNoun {
+    _digest: Hash,
+    _pow: Noun,
+    parent: Hash,
+    _tx_ids: Noun,
+    _coinbase: Noun,
+    timestamp: Noun,
+    _epoch_counter: Noun,
+    _target: Noun,
+    _accumulated_work: Noun,
+    _height: BlockHeight,
+    _msg: Noun,
+}
+
 impl TryFrom<BlockRangeEntryNoun> for BlockRangeEntry {
     type Error = NounDecodeError;
 
@@ -1440,7 +1456,7 @@ fn extract_tx_ids_from_map(
 
 struct BlockEntryWithTxs {
     metadata: BlockMetadata,
-    txs: Vec<(Hash, DecodedTx)>,
+    txs: Vec<(Hash, TxV0)>,
 }
 
 impl TryFrom<BlockRangeEntryNoun> for BlockEntryWithTxs {
@@ -1452,7 +1468,7 @@ impl TryFrom<BlockRangeEntryNoun> for BlockEntryWithTxs {
         let PageAndTxs { page, txs } = tail;
 
         let parent_id = page.parent;
-        let timestamp = page.timestamp;
+        let timestamp = u64::from_noun(&page.timestamp)?;
         let txs_full = extract_transactions_from_map(&txs)?;
         let tx_ids = txs_full.iter().map(|(hash, _)| hash.clone()).collect();
 
@@ -1471,7 +1487,7 @@ impl TryFrom<BlockRangeEntryNoun> for BlockEntryWithTxs {
 
 fn extract_transactions_from_map(
     txs_noun: &Noun,
-) -> std::result::Result<Vec<(Hash, DecodedTx)>, noun_serde::NounDecodeError> {
+) -> std::result::Result<Vec<(Hash, TxV0)>, noun_serde::NounDecodeError> {
     if let Ok(atom) = txs_noun.as_atom() {
         if atom.as_u64()? == 0 {
             return Ok(Vec::new());
@@ -1487,20 +1503,8 @@ fn extract_transactions_from_map(
             )));
         }
         let [key, value] = entry.uncell().map_err(|_| NounDecodeError::ExpectedCell)?;
-        let hash = Hash::from_noun(&key).map_err(|e| {
-            NounDecodeError::Custom(format!(
-                "extract_transactions_from_map: failed to decode tx hash at entry {}: {}",
-                idx, e
-            ))
-        })?;
-        let tx = DecodedTx::from_noun(&value).map_err(|e| {
-            NounDecodeError::Custom(format!(
-                "extract_transactions_from_map: failed to decode tx at entry {} (hash={}): {}",
-                idx,
-                hash.to_base58(),
-                e
-            ))
-        })?;
+        let hash = Hash::from_noun(&key)?;
+        let tx = TxV0::from_noun(&value)?;
         txs.push((hash, tx));
     }
 
@@ -1509,134 +1513,43 @@ fn extract_transactions_from_map(
 
 /// Transaction data decoded from kernel, supporting both v0 and v1 formats
 #[derive(Debug, Clone)]
-enum DecodedTx {
-    V0(TxV0Data),
-    V1(TxV1Data),
-}
-
-#[derive(Debug, Clone)]
-struct TxV0Data {
+struct TxV0 {
+    version: u64,
     raw_tx: RawTx,
     total_size: u64,
     outputs: Vec<TxOutputV0>,
 }
 
 #[derive(Debug, Clone)]
-struct TxV1Data {
-    total_size: u64,
-    total_fee: u64,
-    /// Simplified input info: (name_hash, assets)
-    inputs: Vec<TxV1Input>,
-    /// Simplified output info: (lock_hash, assets)
-    outputs: Vec<TxV1Output>,
-}
-
-#[derive(Debug, Clone)]
-struct TxV1Input {
-    name_first: Hash,
-    // We don't have access to input amounts in v1 spends directly
-    // The amount comes from the note being spent, which we don't have here
-}
-
-#[derive(Debug, Clone)]
-struct TxV1Output {
-    lock_root: Hash,
-    assets: u64,
-}
-
-#[derive(Debug, Clone)]
-struct TxOutputV0 {
+struct TxOutput {
     lock: Lock,
     note: NoteV0,
 }
 
-impl NounDecode for DecodedTx {
+impl NounDecode for TxV0 {
     fn from_noun(noun: &Noun) -> Result<Self, NounDecodeError> {
         let cell = noun.as_cell()?;
         let version = u64::from_noun(&cell.head())?;
 
-        match version {
-            0 => {
-                // v0 tx: [%0 raw-tx:v0 total-size outputs:v0]
-                let tail = cell.tail();
-                let cell = tail.as_cell()?;
-                let raw_tx = RawTx::from_noun(&cell.head())?;
+        let tail = cell.tail();
+        let cell = tail.as_cell()?;
+        let raw_tx = RawTx::from_noun(&cell.head())?;
 
-                let tail = cell.tail();
-                let cell = tail.as_cell()?;
-                let total_size = u64::from_noun(&cell.head())?;
-                let outputs = decode_outputs_v0(&cell.tail())?;
+        let tail = cell.tail();
+        let cell = tail.as_cell()?;
+        let total_size = u64::from_noun(&cell.head())?;
+        let outputs = decode_outputs(&cell.tail())?;
 
-                Ok(DecodedTx::V0(TxV0Data {
-                    raw_tx,
-                    total_size,
-                    outputs,
-                }))
-            }
-            1 => {
-                // v1 tx: [%1 raw-tx:v1 total-size outputs:v1]
-                // raw-tx:v1 = [%1 id spends]
-                // outputs:v1 = (z-set output:v1) where output:v1 = [note seeds]
-                let tail = cell.tail();
-                let cell = tail.as_cell().map_err(|e| {
-                    NounDecodeError::Custom(format!("v1 tx outer tail not cell: {e:?}"))
-                })?;
-                let raw_tx_noun = cell.head();
-
-                // Parse raw-tx:v1 = [%1 id spends]
-                let raw_cell = raw_tx_noun
-                    .as_cell()
-                    .map_err(|e| NounDecodeError::Custom(format!("v1 raw-tx not cell: {e:?}")))?;
-                let raw_version = u64::from_noun(&raw_cell.head()).map_err(|e| {
-                    NounDecodeError::Custom(format!("v1 raw-tx version not atom: {e:?}"))
-                })?;
-                if raw_version != 1 {
-                    return Err(NounDecodeError::Custom(format!(
-                        "Expected v1 raw-tx version 1, got {}",
-                        raw_version
-                    )));
-                }
-                let raw_tail = raw_cell.tail().as_cell().map_err(|e| {
-                    NounDecodeError::Custom(format!("v1 raw-tx tail not cell: {e:?}"))
-                })?;
-                let _tx_id = Hash::from_noun(&raw_tail.head()).map_err(|e| {
-                    NounDecodeError::Custom(format!("v1 raw-tx id parse failed: {e:?}"))
-                })?;
-                let spends_noun = raw_tail.tail();
-
-                // Parse spends: (z-map nname spend) - returns (inputs, total_fee)
-                let (inputs, total_fee) = decode_v1_spends(&spends_noun).map_err(|e| {
-                    NounDecodeError::Custom(format!("v1 spends parse failed: {e:?}"))
-                })?;
-
-                let tail = cell.tail();
-                let cell = tail.as_cell().map_err(|e| {
-                    NounDecodeError::Custom(format!("v1 tx size/outputs tail not cell: {e:?}"))
-                })?;
-                let total_size = u64::from_noun(&cell.head()).map_err(|e| {
-                    NounDecodeError::Custom(format!("v1 tx total_size not atom: {e:?}"))
-                })?;
-                let outputs = decode_outputs_v1(&cell.tail()).map_err(|e| {
-                    NounDecodeError::Custom(format!("v1 outputs parse failed: {e:?}"))
-                })?;
-
-                Ok(DecodedTx::V1(TxV1Data {
-                    total_size,
-                    total_fee,
-                    inputs,
-                    outputs,
-                }))
-            }
-            _ => Err(NounDecodeError::Custom(format!(
-                "Unknown tx version: {}",
-                version
-            ))),
-        }
+        Ok(Self {
+            version,
+            raw_tx,
+            total_size,
+            outputs,
+        })
     }
 }
 
-/// Returns (inputs, total_fee)
-fn decode_v1_spends(noun: &Noun) -> Result<(Vec<TxV1Input>, u64), NounDecodeError> {
+fn decode_outputs(noun: &Noun) -> Result<Vec<TxOutput>, NounDecodeError> {
     if let Ok(atom) = noun.as_atom() {
         if atom.as_u64()? == 0 {
             return Ok((Vec::new(), 0));
@@ -1830,22 +1743,10 @@ fn decode_outputs_v0(noun: &Noun) -> Result<Vec<TxOutputV0>, NounDecodeError> {
             )));
         }
         let [key, value] = entry.uncell().map_err(|_| NounDecodeError::ExpectedCell)?;
-        let lock = Lock::from_noun(&key).map_err(|e| {
-            NounDecodeError::Custom(format!(
-                "decode_outputs_v0: output {} lock parse failed: {}",
-                idx, e
-            ))
-        })?;
-        let value_cell = value.as_cell().map_err(|_| {
-            NounDecodeError::Custom(format!("decode_outputs_v0: output {} value not cell", idx))
-        })?;
-        let note = NoteV0::from_noun(&value_cell.head()).map_err(|e| {
-            NounDecodeError::Custom(format!(
-                "decode_outputs_v0: output {} note parse failed: {}",
-                idx, e
-            ))
-        })?;
-        outputs.push(TxOutputV0 { lock, note });
+        let lock = Lock::from_noun(&key)?;
+        let value_cell = value.as_cell().map_err(|_| NounDecodeError::ExpectedCell)?;
+        let note = NoteV0::from_noun(&value_cell.head())?;
+        outputs.push(TxOutput { lock, note });
     }
 
     Ok(outputs)
@@ -1854,20 +1755,10 @@ fn decode_outputs_v0(noun: &Noun) -> Result<Vec<TxOutputV0>, NounDecodeError> {
 fn build_transaction_details(
     metadata: &BlockMetadata,
     tx_hash: &Hash,
-    tx: DecodedTx,
+    tx: TxV0,
 ) -> TransactionDetails {
-    match tx {
-        DecodedTx::V0(tx_data) => build_transaction_details_v0(metadata, tx_hash, tx_data),
-        DecodedTx::V1(tx_data) => build_transaction_details_v1(metadata, tx_hash, tx_data),
-    }
-}
-
-fn build_transaction_details_v0(
-    metadata: &BlockMetadata,
-    tx_hash: &Hash,
-    tx: TxV0Data,
-) -> TransactionDetails {
-    let TxV0Data {
+    let TxV0 {
+        version,
         raw_tx,
         total_size,
         outputs,
@@ -1879,7 +1770,7 @@ fn build_transaction_details_v0(
         let amount = input.note.tail.assets.0 as u64;
         total_input += amount;
         inputs.push(TransactionInput {
-            note_name_b58: note_name_to_b58(name),
+            note_name_b58: note_name_to_b58(&name),
             amount: Some(pb_common::Nicks { value: amount }),
             source_tx_id: input.note.tail.source.hash.to_base58(),
             coinbase: input.note.tail.source.is_coinbase,
@@ -1893,9 +1784,7 @@ fn build_transaction_details_v0(
         total_output += amount;
         outputs_proto.push(TransactionOutput {
             note_name_b58: note_name_to_b58(&output.note.tail.name),
-            amount_required: Some(transaction_output::AmountRequired::Amount(
-                pb_common::Nicks { value: amount },
-            )),
+            amount: Some(pb_common::Nicks { value: amount }),
             lock_summary: lock_summary(&output.lock),
         });
     }
@@ -1906,78 +1795,15 @@ fn build_transaction_details_v0(
         parent: Some(hash_to_proto(&metadata.parent_id)),
         height: metadata.height,
         timestamp: metadata.timestamp,
-        version: 0,
+        version,
         size_bytes: total_size,
         total_input: Some(pb_common::Nicks { value: total_input }),
-        total_output_required: Some(transaction_details::TotalOutputRequired::TotalOutput(
-            pb_common::Nicks {
-                value: total_output,
-            },
-        )),
-        fee_required: Some(transaction_details::FeeRequired::Fee(pb_common::Nicks {
+        total_output: Some(pb_common::Nicks {
+            value: total_output,
+        }),
+        fee: Some(pb_common::Nicks {
             value: raw_tx.total_fees.0 as u64,
-        })),
-        inputs,
-        outputs: outputs_proto,
-    }
-}
-
-fn build_transaction_details_v1(
-    metadata: &BlockMetadata,
-    tx_hash: &Hash,
-    tx: TxV1Data,
-) -> TransactionDetails {
-    let TxV1Data {
-        total_size,
-        total_fee,
-        inputs: tx_inputs,
-        outputs: tx_outputs,
-    } = tx;
-
-    // For v1 inputs, we don't have direct access to input amounts
-    // (those come from the notes being spent, which aren't in the tx data)
-    let mut inputs = Vec::new();
-    for input in tx_inputs {
-        inputs.push(TransactionInput {
-            note_name_b58: input.name_first.to_base58(),
-            amount: None,                // Amount not available in v1 spend data
-            source_tx_id: String::new(), // Not directly available
-            coinbase: false,             // Would need to check the note being spent
-        });
-    }
-
-    let mut total_output = 0u64;
-    let mut outputs_proto = Vec::new();
-    for output in tx_outputs {
-        total_output += output.assets;
-        outputs_proto.push(TransactionOutput {
-            note_name_b58: output.lock_root.to_base58(),
-            amount_required: Some(transaction_output::AmountRequired::Amount(
-                pb_common::Nicks {
-                    value: output.assets,
-                },
-            )),
-            lock_summary: format!("lock:{}", &output.lock_root.to_base58()[..8]),
-        });
-    }
-
-    TransactionDetails {
-        tx_id: tx_hash.to_base58(),
-        block_id: Some(hash_to_proto(&metadata.block_id)),
-        parent: Some(hash_to_proto(&metadata.parent_id)),
-        height: metadata.height,
-        timestamp: metadata.timestamp,
-        version: 1,
-        size_bytes: total_size,
-        total_input: None, // Not directly available for v1
-        total_output_required: Some(transaction_details::TotalOutputRequired::TotalOutput(
-            pb_common::Nicks {
-                value: total_output,
-            },
-        )),
-        fee_required: Some(transaction_details::FeeRequired::Fee(pb_common::Nicks {
-            value: total_fee,
-        })),
+        }),
         inputs,
         outputs: outputs_proto,
     }
