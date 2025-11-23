@@ -102,15 +102,26 @@ impl TryFrom<PbNote> for Note {
     fn try_from(note: PbNote) -> Result<Self, Self::Error> {
         match note.note_version.required("Note", "note_version")? {
             note::NoteVersion::Legacy(legacy) => Ok(Note::V0(legacy.try_into()?)),
-            note::NoteVersion::V1(v1) => Ok(Note::V1(NoteV1 {
-                version: v1::Version::V1,
-                origin_page: v1::BlockHeight(Belt(
-                    v1.origin_page.required("NoteV1", "origin_page")?.value,
-                )),
-                name: v0::Name::try_from(v1.name.required("NoteV1", "name")?)?,
-                note_data: NoteData::try_from(v1.note_data.required("NoteV1", "note_data")?)?,
-                assets: v1.assets.required("NoteV1", "assets")?.into(),
-            })),
+            note::NoteVersion::V1(v1) => {
+                let note_data = NoteData::try_from(v1.note_data.required("NoteV1", "note_data")?)?;
+                let note_data_ref = &note_data;
+                Ok(Note::V1(NoteV1 {
+                    version: v1::Version::V1,
+                    origin_page: v1::BlockHeight(Belt(
+                        v1.origin_page.required("NoteV1", "origin_page")?.value,
+                    )),
+                    name: v0::Name::try_from(v1.name.required("NoteV1", "name")?)?,
+                    note_data: note_data_ref.clone(),
+                    assets: v1.assets.required("NoteV1", "assets")?.into(),
+                    memo: note_data_ref.0.iter().find_map(|entry| {
+                        if entry.key == "memo" {
+                            Some(String::from_utf8_lossy(&entry.blob).to_string())
+                        } else {
+                            None
+                        }
+                    }),
+                }))
+            }
         }
     }
 }

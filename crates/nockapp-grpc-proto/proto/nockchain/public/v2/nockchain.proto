@@ -153,4 +153,5 @@ message TransactionOutput {
   string note_name_b58 = 1;
   common.v1.Nicks amount = 2;
   string lock_summary = 3;
+  string memo = 4;
 }

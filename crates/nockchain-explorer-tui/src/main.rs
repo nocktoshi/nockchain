@@ -2103,6 +2103,10 @@ fn build_tx_output_lines(details: &RpcTransactionDetails) -> Vec<Line<'static>> 
                     format!("lock: {}", output.lock_summary.clone()),
                     Style::default().fg(Color::Magenta),
                 ),
+                Span::styled(
+                    output.memo.clone(),
+                    Style::default().fg(Color::LightMagenta),
+                ),
             ]));
             lines.push(Line::from(""));
         }
@@ -2972,6 +2976,11 @@ fn init_tracing() -> Result<()> {
 #[tokio::main]
 async fn main() -> Result<()> {
     init_tracing()?;
+
+    rustls::crypto::aws_lc_rs::default_provider()
+        .install_default()
+        .expect("default provider already set elsewhere");
+
     // Parse CLI args
     let args = Args::parse();
 

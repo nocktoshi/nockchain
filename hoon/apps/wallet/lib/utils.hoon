@@ -741,6 +741,22 @@
           (spend-condition u.cond)
         ==
       ::
+      ++  memo-data
+        |=  data=note-data:v1:transact
+        ^-  @t
+        ?~  memo-val=(~(get z-by:zo data) %memo)
+          'N/A'
+        ?~  soft-memo=((soft memo-data:wt) u.memo-val)
+          ~>  %slog.[2 'memo data in note is malformed']  'N/A'
+        =/  memo-bytes=(list @ux)  u.soft-memo
+        =/  memo-text=@t  (crip (turn memo-bytes @t))
+        %-  crip
+        """
+
+        {(trip memo-text)}
+
+        """
+      ::
       ++  note
         |=  [note=nnote:transact output=? output-lock-map=output-lock-map:wt]
         ^-  @t
@@ -769,6 +785,8 @@
            (format-ui:common origin-page.note)
            '\0a- Lock Information: '
            output-lock-info
+           '\0a- Memo: '
+           (memo-data note-data.note)
          ==
     ::
       ++  witness-data
@@ -928,3 +946,4 @@
       %-  trip
       (rsh [3 2] (scot %ui +<))
   --
+  

@@ -1,0 +1,13 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "type": "lldb",
+      "request": "launch",
+      "name": "Debug tui",
+      "program": "${workspaceFolder}/target/debug/nockchain-explorer-tui",
+      "args": ["--server", "https://rpc.nockchain.net"],
+      "cwd": "${workspaceFolder}"
+    }
+  ]
+}
