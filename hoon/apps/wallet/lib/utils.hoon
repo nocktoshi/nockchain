@@ -828,8 +828,8 @@
            (format-ui:common origin-page.note)
            '\0a- Lock Information: '
            lock-info
-          '\0a- Memo: '
-          (memo-data note-data.note)
+          ::  '\0a- Memo: '
+          ::  (memo-data note-data.note)
          ==
     ::
       ++  witness-data
