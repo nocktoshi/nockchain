@@ -4039,6 +4039,7 @@ dependencies = [
  "nockchain-math",
  "nockchain-types",
  "ratatui 0.28.1",
+ "rustls",
  "tokio",
  "tonic 0.14.2",
  "tracing",

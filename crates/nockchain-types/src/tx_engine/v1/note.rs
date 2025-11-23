@@ -6,6 +6,7 @@ use nockchain_math::noun_ext::NounMathExt;
 use nockchain_math::structs::HoonMapIter;
 use nockchain_math::zoon::common::DefaultTipHasher;
 use nockchain_math::zoon::zmap;
+use nockvm::mem;
 use nockvm::noun::{NounAllocator, D};
 use noun_serde::{NounDecode, NounDecodeError, NounEncode};
 
@@ -62,6 +63,7 @@ pub struct NoteV1 {
     pub name: Name,
     pub note_data: NoteData,
     pub assets: Nicks,
+    pub memo: Option<String>
 }
 
 impl NounEncode for Note {
@@ -84,13 +86,14 @@ impl NounDecode for Note {
 }
 
 impl NoteV1 {
-    pub fn new(origin_page: BlockHeight, name: Name, note_data: NoteData, assets: Nicks) -> Self {
+    pub fn new(origin_page: BlockHeight, name: Name, note_data: NoteData, assets: Nicks, memo: Option<String>) -> Self {
         Self {
             version: Version::V1,
             origin_page,
             name,
             note_data,
             assets,
+            memo,
         }
     }
 }
