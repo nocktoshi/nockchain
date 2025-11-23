@@ -1374,6 +1374,27 @@ impl Wallet {
     }
 }
 
+fn validate_memo(
+    memo_data: &Option<String>,
+) -> Option<Result<(NounSlab, Operation), NockAppError>> {
+    if let Some(memo) = memo_data {
+        let memo_bytes = memo.as_bytes().len();
+        let estimated_leaves = memo_bytes + 128;
+        if estimated_leaves > 2048 {
+            return Some(Err(NockAppError::from(CrownError::Unknown(format!(
+                "Memo too large: {} bytes would use ~{} leaves (max 2,048 bytes)",
+                memo_bytes, estimated_leaves
+            )))));
+        }
+        if memo_bytes == 0 {
+            return Some(Err(NockAppError::from(CrownError::Unknown(
+                "Memo cannot be empty. Omit --memo-data flag instead.".to_string(),
+            ))));
+        }
+    }
+    None
+}
+
 pub async fn wallet_data_dir() -> Result<PathBuf, NockAppError> {
     let wallet_data_dir = system_data_dir().join("wallet");
     if !wallet_data_dir.exists() {
