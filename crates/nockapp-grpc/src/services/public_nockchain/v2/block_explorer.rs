@@ -11,6 +11,7 @@ use nockchain_math::structs::HoonMapIter;
 use nockchain_types::tx_engine::common::{BlockHeight, Hash, Name};
 use nockchain_types::tx_engine::v0::{Lock as LockV0, NoteV0, RawTx as RawTxV0};
 use nockchain_types::tx_engine::v1::{Note, RawTx as RawTxV1, Seeds, Spend};
+use nockvm::mem;
 use nockvm::noun::{Noun, SIG};
 use noun_serde::{NounDecode, NounDecodeError, NounEncode};
 use tokio::sync::{RwLock, Semaphore};
@@ -1060,19 +1061,31 @@ fn decode_outputs_v1(noun: &Noun) -> Result<Vec<TransactionOutput>, NounDecodeEr
         let note = Note::from_noun(&output_cell.head())?;
         let _seeds = Seeds::from_noun(&output_cell.tail())?;
 
-        let (note_name, amount, lock_hash) = match &note {
+        let (note_name, amount, lock_hash, memo) = match &note {
             Note::V0(note_v0) => {
                 let name = note_v0.tail.name.clone();
                 let amount = note_v0.tail.assets.0 as u64;
                 // For v0 notes, there is no lock hash
-                (name, amount, None)
+                (name, amount, None, None)
             }
             Note::V1(note_v1) => {
                 let name = note_v1.name.clone();
                 let amount = note_v1.assets.0 as u64;
+                let note_data = &note_v1.note_data.0;
+                let memo = note_data
+                    .iter()
+                    .find_map(|entry| {
+                        let key_u64 = nockapp::ToBytesExt::to_u64(&entry.key).ok()?;
+                        if key_u64 == 1097709123u64 { // "memo" tag
+                            Some(entry.blob.clone())
+                        } else {
+                            None
+                        }
+                    })
+                    .and_then(|entry| String::from_utf8(entry.to_vec()).ok());
                 // For v1 notes, the lock hash is in note.name.first
                 let lock_hash = Some(note_v1.name.first.clone());
-                (name, amount, lock_hash)
+                (name, amount, lock_hash, memo)
             }
         };
 
@@ -1087,6 +1100,7 @@ fn decode_outputs_v1(noun: &Noun) -> Result<Vec<TransactionOutput>, NounDecodeEr
             note_name_b58: note_name_to_b58(&note_name),
             amount: Some(pb_common::Nicks { value: amount }),
             lock_summary: lock_summary_str,
+            memo: memo.unwrap_or_default(),
         });
 
         // Get left and right branches
@@ -1172,6 +1186,7 @@ fn build_transaction_details(
                     note_name_b58: note_name_to_b58(&output.note.tail.name),
                     amount: Some(pb_common::Nicks { value: amount }),
                     lock_summary: lock_summary(&output.lock),
+                    memo: String::new(),
                 });
             }
 
