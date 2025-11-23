@@ -2,7 +2,6 @@
 /=  utils  /apps/wallet/lib/utils
 /=  wt  /apps/wallet/lib/types
 /=  zo  /common/zoon
-/=  *  /common/zose
 ::
 ::  Builds a fan-in transaction that can emit both simple PKH and multisig locks.
 |=  $:  names=(list nname:transact)
@@ -82,13 +81,8 @@
     (create-spends-1 notes-v1 orders fee sender-pkh refund-lock)
 ::
 ~>  %slog.[0 'Notes must all be the same version!!!']  !!
-
-:: add memo
-=/  final-spends=spends:v1:transact
-  ?~(memo-data raw-spends (apply-memo-to-spends raw-spends))
-
-:: calculate fee based on final spends (with memo if present)
-=+  min-fee=(spends:estimate-fee:utils final-spends inputs.display)
+::
+=+  min-fee=(spends:estimate-fee:utils raw-spends inputs.display)
 :: uncomment to debug out of band fee estimation
 :: =+  min-fee-ref=(calculate-min-fee:spends:transact (apply:witness-data:wt witness-data raw-spends))
 :: ~&  min-fee-est+min-fee
