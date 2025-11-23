@@ -923,6 +923,24 @@ impl Wallet {
             SIG
         };
         let include_data_noun = include_data.to_noun(&mut slab);
+
+        // Validate memo data
+        if let Some(err) = validate_memo(&memo_data) {
+            return err;
+        }
+        // Memo: Option<String> to (list @ux)
+        let memo_data_noun = if let Some(memo_str) = memo_data {
+            let bytes = memo_str.as_bytes();
+            let mut list = D(0);
+            for &byte in bytes.iter().rev() {
+                let byte_noun = D(u64::from(byte));
+                list = Cell::new(&mut slab, byte_noun, list).as_noun();
+            }
+            list
+        } else {
+            SIG
+        };
+
         let save_raw_tx_noun = save_raw_tx.to_noun(&mut slab);
         let note_selection_noun = make_tas(&mut slab, note_selection.tas_label()).as_noun();
 
