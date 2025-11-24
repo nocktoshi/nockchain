@@ -10,7 +10,7 @@
         sign-keys=(list schnorr-seckey:transact)
         refund-pkh=(unit hash:transact)
         get-note=$-(nname:transact nnote:transact)
-        memo-data=(list @ux)
+        memo-data=memo-data:wt
         include-data=?
     ==
 |^
