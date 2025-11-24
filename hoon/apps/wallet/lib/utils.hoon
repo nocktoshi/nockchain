@@ -742,7 +742,43 @@
           (bool-text include-data.data)
           (spend-condition u.cond)
         ==
+
+      ::
+      ++  memo-data
+        |=  data=note-data:v1:transact
+        ^-  @t
+        ?~  memo-val=(~(get z-by:zo data) %memo)
+          'N/A'
+        ?~  soft-memo=((soft memo-data:wt) u.memo-val)
+          ~>  %slog.[2 'memo data in note is malformed']  'N/A'
+        =/  memo-bytes=memo-data:wt  u.soft-memo
+        =/  memo-text=@t  (crip (turn memo-bytes @tD))
+        memo-text
+      ::
+      ++  lock-metadata
+        |=  data=lock-metadata:wt
+        ^-  @t
+        =/  cond=(unit spend-condition:transact)
+          ((soft spend-condition:transact) lock.data)
+        ?~  cond
+          '\0a  - Lock data not displayable'
+        ;:  (cury cat 3)
+          '\0a  - Lock data included in note: '
+          (bool-text include-data.data)
+          (spend-condition u.cond)
+        ==
     ::
+      ++  memo-data
+        |=  data=note-data:v1:transact
+        ^-  @t
+        ?~  memo-val=(~(get z-by:zo data) %memo)
+          'N/A'
+        ?~  soft-memo=((soft memo-data:wt) u.memo-val)
+          ~>  %slog.[2 'memo data in note is malformed']  'N/A'
+        =/  memo-bytes=memo-data:wt  u.soft-memo
+        =/  memo-text=@t  (crip (turn memo-bytes @tD))
+        memo-text
+      ::
       ++  note-from-balance
         |=  note=nnote-1:v1:transact
         (^note note (lock-data note-data.note) %.n)
