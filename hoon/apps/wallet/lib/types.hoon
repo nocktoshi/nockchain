@@ -308,6 +308,8 @@
 +$  balance-v4  $+(balance-v4 balance-v3)
 +$  balance  balance-v4
 ::
++$  selection-strategy  ?(%asc %desc)
+::
 +$  ledger-v0-engine
   %-  list
   $:  name=nname:transact
@@ -458,6 +460,7 @@
                                                           ::  one memo only on the note data of the seed with highest gift
             save-raw-tx=?                                 ::  if %.y, saves jams of the raw-tx and its hashable into a txs-debug folder
                                                           ::  in the current working directory
+            =selection-strategy
         ==
         [%list-active-addresses ~]
         [%list-notes ~]
