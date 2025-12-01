@@ -762,7 +762,7 @@
       ++  note
         |%
         ++  $
-          |=  [note=nnote:transact lock-info=@t output=?]
+          |=  [note=nnote-1:v1:transact lock-info=@t output=?]
           ^-  @t
           %-  crip
           """
