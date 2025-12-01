@@ -11,7 +11,6 @@ use nockchain_math::structs::HoonMapIter;
 use nockchain_types::tx_engine::common::{BlockHeight, Hash, Name};
 use nockchain_types::tx_engine::v0::{Lock as LockV0, NoteV0, RawTx as RawTxV0};
 use nockchain_types::tx_engine::v1::{Note, RawTx as RawTxV1, Seeds, Spend};
-use nockvm::mem;
 use nockvm::noun::{Noun, SIG};
 use noun_serde::{NounDecode, NounDecodeError, NounEncode};
 use tokio::sync::{RwLock, Semaphore};
@@ -419,10 +418,8 @@ impl BlockExplorerCache {
         tracing::Span::current().record("tx_id", &tracing::field::display(tx_id.to_base58()));
         // First check cache for confirmed block metadata
         if let Some(block_meta) = self.get_block_for_tx(tx_id).await {
-            let tx_details = self
-                .fetch_transaction_from_block(handle, &block_meta, tx_id)
-                .await?;
-            return Ok(tx_details);
+            let tx = self.peek_transaction(handle, tx_id).await?;
+            return Ok(build_transaction_details(&block_meta, tx_id, tx));
         }
 
         // If not found, see if it's pending
@@ -431,33 +428,6 @@ impl BlockExplorerCache {
         }
 
         Err(NockAppGrpcError::NotFound)
-    }
-
-    #[tracing::instrument(
-        name = "block_explorer_cache.fetch_transaction_from_block",
-        skip(self, handle, meta),
-        fields(height = tracing::field::Empty, tx_id = tracing::field::Empty)
-    )]
-    async fn fetch_transaction_from_block(
-        &self,
-        handle: &Arc<dyn BalanceHandle>,
-        meta: &BlockMetadata,
-        tx_id: &Hash,
-    ) -> GrpcResult<TransactionDetails> {
-        tracing::Span::current().record("height", &tracing::field::display(meta.height));
-        tracing::Span::current().record("tx_id", &tracing::field::display(tx_id.to_base58()));
-        let block = self
-            .load_block_with_transactions(handle, meta.height)
-            .await?;
-
-        let metadata = block.metadata.clone();
-        let (hash, tx) = block
-            .txs
-            .into_iter()
-            .find(|(hash, _)| hash == tx_id)
-            .ok_or(NockAppGrpcError::NotFound)?;
-
-        Ok(build_transaction_details(&metadata, &hash, tx))
     }
 
     /// Peek /heaviest-chain ~ to get current tip
@@ -514,43 +484,31 @@ impl BlockExplorerCache {
     }
 
     #[tracing::instrument(
-        name = "block_explorer_cache.load_block_with_transactions",
+        name = "block_explorer_cache.peek_transaction",
         skip(self, handle),
-        fields(height = tracing::field::Empty)
+        fields(tx_id = tracing::field::Empty)
     )]
-    async fn load_block_with_transactions(
+    async fn peek_transaction(
         &self,
         handle: &Arc<dyn BalanceHandle>,
-        height: u64,
-    ) -> GrpcResult<BlockEntryWithTxs> {
-        tracing::Span::current().record("height", &tracing::field::display(height));
+        tx_id: &Hash,
+    ) -> GrpcResult<Transaction> {
+        tracing::Span::current().record("tx_id", &tracing::field::display(tx_id.to_base58()));
         let mut path_slab = NounSlab::new();
-        let tag = nockapp::utils::make_tas(&mut path_slab, "heaviest-chain-blocks-range").as_noun();
-        let start_noun = nockvm::noun::D(height);
-        let end_noun = nockvm::noun::D(height);
-        let path_noun = nockvm::noun::T(&mut path_slab, &[tag, start_noun, end_noun, SIG]);
+        let tag = nockapp::utils::make_tas(&mut path_slab, "raw-transaction").as_noun();
+        let tx_id_b58 = tx_id.to_base58();
+        let tx_id_noun = tx_id_b58.to_noun(&mut path_slab);
+        let path_noun = nockvm::noun::T(&mut path_slab, &[tag, tx_id_noun, SIG]);
         path_slab.set_root(path_noun);
 
         let result = handle
             .peek(path_slab)
             .await
             .map_err(NockAppGrpcError::from)?
-            .ok_or(NockAppGrpcError::PeekFailed)?;
+            .ok_or(NockAppGrpcError::NotFound)?;
 
         let result_noun = unsafe { result.root() };
-        let opt: Option<Option<Vec<BlockRangeEntryNoun>>> =
-            NounDecode::from_noun(&result_noun).map_err(NockAppGrpcError::NounDecode)?;
-        let entries = opt.flatten().ok_or(NockAppGrpcError::PeekReturnedNoData)?;
-
-        let mut parsed = Vec::new();
-        for entry in entries {
-            parsed.push(BlockEntryWithTxs::try_from(entry).map_err(NockAppGrpcError::NounDecode)?);
-        }
-
-        parsed
-            .into_iter()
-            .find(|entry| entry.metadata.height == height)
-            .ok_or(NockAppGrpcError::PeekReturnedNoData)
+        Transaction::from_noun(&result_noun).map_err(NockAppGrpcError::NounDecode)
     }
 
     /// Peek /heaviest-chain-blocks-range/[start]/[end] ~
@@ -864,65 +822,6 @@ fn extract_tx_ids_from_map(
     Ok(tx_ids)
 }
 
-struct BlockEntryWithTxs {
-    metadata: BlockMetadata,
-    txs: Vec<(Hash, Transaction)>,
-}
-
-impl TryFrom<BlockRangeEntryNoun> for BlockEntryWithTxs {
-    type Error = NounDecodeError;
-
-    fn try_from(raw: BlockRangeEntryNoun) -> std::result::Result<Self, Self::Error> {
-        let BlockRangeEntryNoun { height, tail } = raw;
-        let BlockRangeEntryTail { block_id, tail } = tail;
-        let PageAndTxs { page, txs } = tail;
-
-        let parent_id = page.parent;
-        let timestamp = u64::from_noun(&page.timestamp)?;
-        let txs_full: Vec<(Hash, Transaction)> = extract_transactions(&txs).map_err(|e| {
-            NounDecodeError::Custom(format!(
-                "Failed to decode transactions for block at height {}: {}",
-                height.0 .0, e
-            ))
-        })?;
-        let tx_ids = txs_full.iter().map(|(hash, _)| hash.clone()).collect();
-
-        Ok(Self {
-            metadata: BlockMetadata {
-                height: height.0 .0,
-                block_id,
-                parent_id,
-                timestamp,
-                tx_ids,
-            },
-            txs: txs_full,
-        })
-    }
-}
-
-fn extract_transactions(
-    txs_noun: &Noun,
-) -> std::result::Result<Vec<(Hash, Transaction)>, noun_serde::NounDecodeError> {
-    if let Ok(atom) = txs_noun.as_atom() {
-        if atom.as_u64()? == 0 {
-            return Ok(Vec::new());
-        }
-    }
-
-    let mut txs = Vec::new();
-    for entry in HoonMapIter::from(*txs_noun) {
-        if !entry.is_cell() {
-            continue;
-        }
-        let [key, value] = entry.uncell().map_err(|_| NounDecodeError::ExpectedCell)?;
-        let hash = Hash::from_noun(&key)?;
-        let tx = Transaction::from_noun(&value)?;
-        txs.push((hash, tx));
-    }
-
-    Ok(txs)
-}
-
 #[derive(Debug, Clone)]
 enum RawTransaction {
     V0(RawTxV0),
@@ -1076,7 +975,8 @@ fn decode_outputs_v1(noun: &Noun) -> Result<Vec<TransactionOutput>, NounDecodeEr
                     .iter()
                     .find_map(|entry| {
                         let key_u64 = nockapp::ToBytesExt::to_u64(&entry.key).ok()?;
-                        if key_u64 == 1097709123u64 { // "memo" tag
+                        if key_u64 == 1097709123u64 {
+                            // "memo" tag
                             Some(entry.blob.clone())
                         } else {
                             None
