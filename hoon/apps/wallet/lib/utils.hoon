@@ -805,36 +805,6 @@
         --
     ::
       ::
-      ::  +note: display note. Sometimes lock data is not included in note, it can be passed in
-      ::    separately in the output-lock-map which is accumulated in the tx-builder.
-      ++  note
-        |=  $:  note=nnote-1:v1:transact
-                lock-info=@t
-                output=?
-            ==
-        ^-  @t
-        ;:  (cury cat 3)
-           '''
-
-           ## Note Information
-
-           '''
-           '- Name: '
-           (name name.note)
-           '\0a- Version: '
-           (format-ui:common 1)
-           '\0a- Assets (nicks): '
-           (format-ui:common assets.note)
-           '\0a- Block Height: '
-           ?:  output
-             'N/A (output note has not been submitted yet)'
-           (format-ui:common origin-page.note)
-           '\0a- Lock Information: '
-           lock-info
-           '\0a- Memo: '
-           (memo-data note-data.note)
-         ==
-    ::
       ++  witness-data
         |=  wd=witness-data:wt
         ^-  @t
