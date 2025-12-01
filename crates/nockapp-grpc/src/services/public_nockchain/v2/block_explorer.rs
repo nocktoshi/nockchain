@@ -419,12 +419,13 @@ impl BlockExplorerCache {
         // First check cache for confirmed block metadata
         if let Some(block_meta) = self.get_block_for_tx(tx_id).await {
             let tx = self.peek_transaction(handle, tx_id).await?;
-            return Ok(build_transaction_details(&block_meta, tx_id, tx));
+            return Ok(build_transaction_details(Some(&block_meta), tx_id, tx));
         }
 
         // If not found, see if it's pending
         if self.transaction_pending(handle, tx_id).await? {
-            return Err(NockAppGrpcError::TxPending);
+            let tx = self.peek_transaction(handle, tx_id).await?;
+            return Ok(build_transaction_details(None, tx_id, tx));
         }
 
         Err(NockAppGrpcError::NotFound)
@@ -1019,7 +1020,7 @@ fn decode_outputs_v1(noun: &Noun) -> Result<Vec<TransactionOutput>, NounDecodeEr
 }
 
 fn build_transaction_details(
-    metadata: &BlockMetadata,
+    metadata: Option<&BlockMetadata>,
     tx_hash: &Hash,
     tx: Transaction,
 ) -> TransactionDetails {
@@ -1043,10 +1044,10 @@ fn build_transaction_details(
                     );
                     return TransactionDetails {
                         tx_id: tx_hash.to_base58(),
-                        block_id: Some(hash_to_proto(&metadata.block_id)),
-                        parent: Some(hash_to_proto(&metadata.parent_id)),
-                        height: metadata.height,
-                        timestamp: metadata.timestamp,
+                        block_id: metadata.map(|m| hash_to_proto(&m.block_id)),
+                        parent: metadata.map(|m| hash_to_proto(&m.parent_id)),
+                        height: metadata.map(|m| m.height).unwrap_or(0),
+                        timestamp: metadata.map(|m| m.timestamp).unwrap_or(0),
                         version,
                         size_bytes: total_size,
                         total_input: None,
@@ -1092,10 +1093,10 @@ fn build_transaction_details(
 
             TransactionDetails {
                 tx_id: tx_hash.to_base58(),
-                block_id: Some(hash_to_proto(&metadata.block_id)),
-                parent: Some(hash_to_proto(&metadata.parent_id)),
-                height: metadata.height,
-                timestamp: metadata.timestamp,
+                block_id: metadata.map(|m| hash_to_proto(&m.block_id)),
+                parent: metadata.map(|m| hash_to_proto(&m.parent_id)),
+                height: metadata.map(|m| m.height).unwrap_or(0),
+                timestamp: metadata.map(|m| m.timestamp).unwrap_or(0),
                 version,
                 size_bytes: total_size,
                 total_input: Some(pb_common::Nicks { value: total_input }),
@@ -1126,10 +1127,10 @@ fn build_transaction_details(
                     );
                     return TransactionDetails {
                         tx_id: tx_hash.to_base58(),
-                        block_id: Some(hash_to_proto(&metadata.block_id)),
-                        parent: Some(hash_to_proto(&metadata.parent_id)),
-                        height: metadata.height,
-                        timestamp: metadata.timestamp,
+                        block_id: metadata.map(|m| hash_to_proto(&m.block_id)),
+                        parent: metadata.map(|m| hash_to_proto(&m.parent_id)),
+                        height: metadata.map(|m| m.height).unwrap_or(0),
+                        timestamp: metadata.map(|m| m.timestamp).unwrap_or(0),
                         version,
                         size_bytes: total_size,
                         total_input: None,
@@ -1205,10 +1206,10 @@ fn build_transaction_details(
 
             TransactionDetails {
                 tx_id: tx_hash.to_base58(),
-                block_id: Some(hash_to_proto(&metadata.block_id)),
-                parent: Some(hash_to_proto(&metadata.parent_id)),
-                height: metadata.height,
-                timestamp: metadata.timestamp,
+                block_id: metadata.map(|m| hash_to_proto(&m.block_id)),
+                parent: metadata.map(|m| hash_to_proto(&m.parent_id)),
+                height: metadata.map(|m| m.height).unwrap_or(0),
+                timestamp: metadata.map(|m| m.timestamp).unwrap_or(0),
                 version,
                 size_bytes: total_size,
                 total_input: Some(pb_common::Nicks { value: total_input }),
