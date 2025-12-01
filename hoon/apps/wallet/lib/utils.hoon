@@ -758,51 +758,25 @@
         {(trip memo-text)}
 
         """
-      ::
-      ++  note
-        |%
-        ++  $
-          |=  [note=nnote-1:v1:transact lock-info=@t output=?]
-          ^-  @t
-          %-  crip
-          """
-          ## Note Information
-
-          '- Name: '
-          (name name.note)
-          '\0a- Version: '
-          (format-ui:common 1)
-          '\0a- Assets (nicks): '
-          (format-ui:common assets.note)
-          '\0a- Block Height: '
-          ?:  output
-            'N/A (output note has not been submitted yet)'
-          (format-ui:common origin-page.note)
-          '\0a- Lock Information: '
-          lock-info
-          '\0a- Memo: '
-          (memo-data note-data.note)
-          """
-        ++  note-from-balance
-          |=  note=nnote-1:v1:transact
-          ($ note (lock-data note-data.note) %.n)
-        ++  note-from-output
-          |=  $:  note=nnote-1:v1:transact
-                metadata=(unit lock-metadata:wt)
-            ==
-          ?>  ?=(@ -.note)
-          =/  lock-info=@t
-            ?~  metadata
-              (lock-data note-data.note)
-            (lock-metadata u.metadata)
-          ($ note lock-info %.y)
-        ++  note-from-input
-          |=  $:  note=nnote-1:v1:transact
-                sc=spend-condition:transact
-            ==
-          =/  lock-info=@t  (spend-condition sc)
-          ($ note lock-info %.n)
-        --
+      ++  note-from-balance
+        |=  note=nnote-1:v1:transact
+        (^note note (lock-data note-data.note) %.n)
+      ++  note-from-output
+        |=  $:  note=nnote-1:v1:transact
+              metadata=(unit lock-metadata:wt)
+          ==
+        ?>  ?=(@ -.note)
+        =/  lock-info=@t
+          ?~  metadata
+            (lock-data note-data.note)
+          (lock-metadata u.metadata)
+        (^note note lock-info %.y)
+      ++  note-from-input
+        |=  $:  note=nnote-1:v1:transact
+              sc=spend-condition:transact
+          ==
+        =/  lock-info=@t  (spend-condition sc)
+        (^note note lock-info %.n)
     ::
       ::
       ++  witness-data
@@ -915,6 +889,10 @@
 
         """
       --  ::  +v1
+    ++  note
+      |=  [n=nnote-1:v1:transact lock-info=@t output=?]
+      ^-  @t
+      lock-info
     --  ::  +display
   ::
   ++  show
