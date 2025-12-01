@@ -417,18 +417,17 @@ impl BlockExplorerCache {
     ) -> GrpcResult<TransactionDetails> {
         tracing::Span::current().record("tx_id", &tracing::field::display(tx_id.to_base58()));
         // First check cache for confirmed block metadata
-        if let Some(block_meta) = self.get_block_for_tx(tx_id).await {
-            let tx = self.peek_transaction(handle, tx_id).await?;
-            return Ok(build_transaction_details(Some(&block_meta), tx_id, tx));
-        }
+        let block_meta = self.get_block_for_tx(tx_id).await;
 
-        // If not found, see if it's pending
-        if self.transaction_pending(handle, tx_id).await? {
-            let tx = self.peek_transaction(handle, tx_id).await?;
-            return Ok(build_transaction_details(None, tx_id, tx));
+        // Try to peek the transaction directly
+        match self.peek_transaction(handle, tx_id).await {
+            Ok(tx) => Ok(build_transaction_details(block_meta.as_ref(), tx_id, tx)),
+            Err(NockAppGrpcError::NounDecode(_)) => {
+                // If we can't decode the transaction, it might not exist or be malformed
+                Err(NockAppGrpcError::NotFound)
+            }
+            Err(e) => Err(e),
         }
-
-        Err(NockAppGrpcError::NotFound)
     }
 
     /// Peek /heaviest-chain ~ to get current tip
@@ -457,31 +456,6 @@ impl BlockExplorerCache {
         let (height, hash) = opt.flatten().ok_or(NockAppGrpcError::PeekReturnedNoData)?;
 
         Ok((height.0 .0, hash)) // Extract u64 from BlockHeight(Belt)
-    }
-
-    #[tracing::instrument(
-        name = "block_explorer_cache.transaction_pending",
-        skip(self, handle),
-        fields(tx_id = tracing::field::Empty)
-    )]
-    async fn transaction_pending(
-        &self,
-        handle: &Arc<dyn BalanceHandle>,
-        tx_id: &Hash,
-    ) -> GrpcResult<bool> {
-        tracing::Span::current().record("tx_id", &tracing::field::display(tx_id.to_base58()));
-        let mut path_slab = NounSlab::new();
-        let tag = nockapp::utils::make_tas(&mut path_slab, "raw-transaction").as_noun();
-        let tx_id_b58 = tx_id.to_base58();
-        let tx_id_noun = tx_id_b58.to_noun(&mut path_slab);
-        let path_noun = nockvm::noun::T(&mut path_slab, &[tag, tx_id_noun, SIG]);
-        path_slab.set_root(path_noun);
-
-        match handle.peek(path_slab).await {
-            Ok(Some(_)) => Ok(true),
-            Ok(None) => Ok(false),
-            Err(e) => Err(NockAppGrpcError::from(e)),
-        }
     }
 
     #[tracing::instrument(
