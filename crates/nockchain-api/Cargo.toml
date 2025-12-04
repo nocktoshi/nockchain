@@ -21,3 +21,15 @@ tikv-jemallocator = { workspace = true, features = [
 ] }
 tokio.workspace = true
 tracy-client = { workspace = true, optional = true }
+
+[dev-dependencies]
+nockchain-types = { workspace = true }
+noun-serde = { workspace = true }
+tokio-test = "0.4"
+tempfile = { workspace = true }
+nockapp-grpc-proto = { workspace = true }
+tonic = { workspace = true }
+
+[[bench]]
+name = "peek_refresh"
+harness = false

@@ -1,3 +1,5 @@
+pub mod page;
+
 use anyhow::Result;
 use ibig::{ubig, UBig};
 use nockchain_math::belt::{Belt, PRIME};
@@ -7,6 +9,7 @@ use nockchain_math::zoon::common::DefaultTipHasher;
 use nockchain_math::zoon::zmap;
 use nockvm::noun::{Noun, NounAllocator, D};
 use noun_serde::{NounDecode, NounDecodeError, NounEncode};
+pub use page::{BigNum, BlockId, CoinbaseSplit, Page, PageMsg};
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, NounDecode, NounEncode)]
