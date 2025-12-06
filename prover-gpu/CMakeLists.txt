@@ -9,6 +9,10 @@ add_executable(prover-gpu
   src/kernel.cu
 )
 
+# Force certain .cpp sources to be compiled with the CUDA language
+set_source_files_properties(src/main.cpp PROPERTIES LANGUAGE CUDA)
+set_source_files_properties(src/api.cpp PROPERTIES LANGUAGE CUDA)
+
 # Try to find CUDA toolkit (provides libraries and include paths).
 find_package(CUDAToolkit REQUIRED)
 

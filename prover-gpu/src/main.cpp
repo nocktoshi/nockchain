@@ -174,8 +174,6 @@ int main(int argc, char** argv) {
     for (size_t i = 0; i < n; ++i) reordered[bitrev(i)] = poly[i];
 
     // compute twiddles (size n/2)
-    auto modmul = [&](uint64_t a, uint64_t b)->uint64_t{ __uint128_t p=(__uint128_t)a*b; return (uint64_t)(p%mod); };
-    auto modpow = [&](uint64_t a, uint64_t e){ uint64_t r=1; uint64_t base=a%mod; while(e){ if(e&1) r=modmul(r,base); base=modmul(base,base); e>>=1;} return r; };
     std::vector<uint64_t> twiddles(n/2);
     for (size_t i = 0; i < n/2; ++i) twiddles[i] = modpow(root, i);
 
@@ -245,7 +243,7 @@ int main(int argc, char** argv) {
         }
         if (!msg.empty()) blake3_hasher_update(&h, msg.data(), msg.size());
         std::vector<uint8_t> out(32);
-        blake3_hasher_finalize(&h, out.data());
+        blake3_hasher_finalize(&h, out.data(), out.size());
         return out;
     };
     auto hex = [&](const std::vector<uint8_t>& v){ std::ostringstream ss; ss<<std::hex<<std::setfill('0'); for(auto x:v) ss<<std::setw(2)<<(int)x; return ss.str(); };
