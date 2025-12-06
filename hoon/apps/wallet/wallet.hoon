@@ -1276,6 +1276,7 @@
         sign-keys
         refund-pkh.cause
         get-note:v
+        memo-data.cause
         include-data.cause
         selection-strategy.cause
       ==

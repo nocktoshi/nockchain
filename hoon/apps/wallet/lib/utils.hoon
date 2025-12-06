@@ -742,58 +742,43 @@
           (bool-text include-data.data)
           (spend-condition u.cond)
         ==
-    ::
+      ::
+      ++  memo-data
+        |=  data=note-data:v1:transact
+        ^-  @t
+        ?~  memo-val=(~(get z-by:zo data) %memo)
+          'N/A'
+        ?~  soft-memo=((soft memo-data:wt) u.memo-val)
+          ~>  %slog.[2 'memo data in note is malformed']  'N/A'
+        =/  memo-bytes=(list @ux)  u.soft-memo
+        =/  memo-text=@t  (crip (turn memo-bytes @t))
+        %-  crip
+        """
+
+        {(trip memo-text)}
+
+        """
       ++  note-from-balance
         |=  note=nnote-1:v1:transact
         (^note note (lock-data note-data.note) %.n)
-    ::
       ++  note-from-output
         |=  $:  note=nnote-1:v1:transact
-                metadata=(unit lock-metadata:wt)
-            ==
+              metadata=(unit lock-metadata:wt)
+          ==
         ?>  ?=(@ -.note)
         =/  lock-info=@t
           ?~  metadata
             (lock-data note-data.note)
           (lock-metadata u.metadata)
         (^note note lock-info %.y)
-    ::
       ++  note-from-input
         |=  $:  note=nnote-1:v1:transact
-                sc=spend-condition:transact
-            ==
+              sc=spend-condition:transact
+          ==
         =/  lock-info=@t  (spend-condition sc)
         (^note note lock-info %.n)
     ::
       ::
-      ::  +note: display note. Sometimes lock data is not included in note, it can be passed in
-      ::    separately in the output-lock-map which is accumulated in the tx-builder.
-      ++  note
-        |=  $:  note=nnote-1:v1:transact
-                lock-info=@t
-                output=?
-            ==
-        ^-  @t
-        ;:  (cury cat 3)
-           '''
-
-           ## Note Information
-
-           '''
-           '- Name: '
-           (name name.note)
-           '\0a- Version: '
-           (format-ui:common 1)
-           '\0a- Assets (nicks): '
-           (format-ui:common assets.note)
-           '\0a- Block Height: '
-           ?:  output
-             'N/A (output note has not been submitted yet)'
-           (format-ui:common origin-page.note)
-           '\0a- Lock Information: '
-           lock-info
-         ==
-    ::
       ++  witness-data
         |=  wd=witness-data:wt
         ^-  @t
@@ -904,6 +889,10 @@
 
         """
       --  ::  +v1
+    ++  note
+      |=  [n=nnote-1:v1:transact lock-info=@t output=?]
+      ^-  @t
+      lock-info
     --  ::  +display
   ::
   ++  show
@@ -977,3 +966,4 @@
       %-  trip
       (rsh [3 2] (scot %ui +<))
   --
+  
