@@ -27,7 +27,7 @@ endif()
 if(EXISTS ${CMAKE_SOURCE_DIR}/lib/blake3/blake3.c AND EXISTS ${CMAKE_SOURCE_DIR}/lib/blake3/blake3.h)
   target_sources(prover-gpu PRIVATE lib/blake3/blake3.c)
 else()
-  message(FATAL_ERROR "BLAKE3 sources not found in lib/blake3/. Run scripts/fetch_blake3.sh to download official blake3.c/blake3.h before configuring.")
+  message(FATAL_ERROR "BLAKE3 sources not found in lib/blake3/ ")
 endif()
 
 # Build a shared library providing a simple C ABI so rust can call it directly.
