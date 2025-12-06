@@ -30,6 +30,10 @@ endif()
 # include vendored blake3 implementation for Merkle hashing
 if(EXISTS ${CMAKE_SOURCE_DIR}/lib/blake3/blake3.c AND EXISTS ${CMAKE_SOURCE_DIR}/lib/blake3/blake3.h)
   target_sources(prover-gpu PRIVATE lib/blake3/blake3.c)
+  # Ensure the dispatch implementation (platform selection) is also compiled
+  if(EXISTS ${CMAKE_SOURCE_DIR}/lib/blake3/blake3_dispatch.c)
+    target_sources(prover-gpu PRIVATE lib/blake3/blake3_dispatch.c)
+  endif()
 else()
   message(FATAL_ERROR "BLAKE3 sources not found in lib/blake3/ ")
 endif()
@@ -42,6 +46,9 @@ add_library(prover_gpu SHARED
 
 # include blake3 in the shared lib as well so Rust can call hashing if needed
 target_sources(prover_gpu PRIVATE lib/blake3/blake3.c)
+if(EXISTS ${CMAKE_SOURCE_DIR}/lib/blake3/blake3_dispatch.c)
+  target_sources(prover_gpu PRIVATE lib/blake3/blake3_dispatch.c)
+endif()
 
 set_target_properties(prover_gpu PROPERTIES POSITION_INDEPENDENT_CODE ON)
 
@@ -50,16 +57,15 @@ target_compile_options(prover-gpu PRIVATE
   $<$<COMPILE_LANGUAGE:CUDA>:-lineinfo>
 )
 
-# Make the project root available on the include path so includes like
-# "lib/blake3/blake3.h" resolve from sources in `src/`.
 target_include_directories(prover-gpu PRIVATE ${CMAKE_SOURCE_DIR})
 target_include_directories(prover_gpu PRIVATE ${CMAKE_SOURCE_DIR})
 
-# Add CUDA include dir so C++ files that include <cuda_runtime.h> compile.
 target_include_directories(prover-gpu PRIVATE ${CUDA_RUNTIME_INCLUDE_DIR})
 target_include_directories(prover_gpu PRIVATE ${CUDA_RUNTIME_INCLUDE_DIR})
 
-# Link CUDA runtime to both targets so CUDA symbols and proper include
-# properties are available to the compiler and linker.
 target_link_libraries(prover-gpu PRIVATE CUDA::cudart)
 target_link_libraries(prover_gpu PRIVATE CUDA::cudart)
+
+# enforce C for the .c files to avoid name-mangling/linker issues.
+set_source_files_properties(${CMAKE_SOURCE_DIR}/lib/blake3/blake3.c PROPERTIES LANGUAGE C)
+set_source_files_properties(${CMAKE_SOURCE_DIR}/lib/blake3/blake3_dispatch.c PROPERTIES LANGUAGE C)
