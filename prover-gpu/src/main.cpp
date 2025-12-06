@@ -207,12 +207,15 @@ int main(int argc, char** argv) {
         checkCuda(cudaDeviceSynchronize(), "intt stage sync");
     }
 
+    // Bit-reverse back to normal order
+    bitrev_kernel<<<(int)((n + 255)/256), 256>>>(d_poly, n, logn);
+    checkCuda(cudaDeviceSynchronize(), "bitrev back for intt");
+
     std::vector<uint64_t> final(n);
     checkCuda(cudaMemcpy(final.data(), d_poly, n * sizeof(uint64_t), cudaMemcpyDeviceToHost), "copy final");
 
-    // undo bitrev to compare to original
-    std::vector<uint64_t> recovered(n);
-    for (size_t i = 0; i < n; ++i) recovered[i] = final[bitrev(i)];
+    // final is now in normal order
+    std::vector<uint64_t> recovered = final;
 
     bool ok = true;
     for (size_t i = 0; i < n; ++i) {
