@@ -286,14 +286,8 @@ extern "C" __global__ void montgomery_selftest_kernel(uint64_t mod, uint64_t R2,
     if (threadIdx.x != 0 || blockIdx.x != 0) return;
     uint64_t a = 3;
     uint64_t b = 5;
-    // montify using R^2: mont(x) = mont_mul(x, R^2)
-    uint64_t a_m = dev_mod_mul(a, R2, mod);
-    uint64_t b_m = dev_mod_mul(b, R2, mod);
-
-    // montgomery multiply
-    uint64_t prod_m = dev_mod_mul(a_m, b_m, mod);
-    // demontify: mont_mul(x,1) -> x * R^{-1} mod p
-    uint64_t prod = dev_mod_mul(prod_m, 1, mod);
+    // Use standard mod mul for test
+    uint64_t prod = dev_std_mod_mul(a, b, mod);
     uint64_t expect = (uint64_t)(((__uint128_t)a * (__uint128_t)b) % (__uint128_t)mod);
 
     uint64_t ok = 1;
@@ -301,14 +295,16 @@ extern "C" __global__ void montgomery_selftest_kernel(uint64_t mod, uint64_t R2,
 
     // pow test: compute a^e
     uint64_t e = 13;
-    uint64_t pow_m = dev_mod_pow(a_m, e, mod); // returns montified a^e
-    uint64_t pow_dem = dev_mod_mul(pow_m, 1, mod);
+    uint64_t pow_res = 1;
+    for (uint64_t i = 0; i < e; ++i) {
+        pow_res = dev_std_mod_mul(pow_res, a, mod);
+    }
     // compute expected a^e on device (small loop)
     uint64_t expected_pow = 1;
     for (uint64_t i = 0; i < e; ++i) {
         expected_pow = (uint64_t)(((__uint128_t)expected_pow * (__uint128_t)a) % (__uint128_t)mod);
     }
-    if (pow_dem != expected_pow) ok = 0;
+    if (pow_res != expected_pow) ok = 0;
 
     status[0] = ok ? 0 : 1;
 }

@@ -211,6 +211,11 @@ int main(int argc, char** argv) {
     bitrev_kernel<<<(int)((n + 255)/256), 256>>>(d_poly, n, logn);
     checkCuda(cudaDeviceSynchronize(), "bitrev back for intt");
 
+    // Scale by inv_n
+    uint64_t inv_n = modpow(n % mod, mod-2);
+    scale_kernel<<<(int)((n + 255)/256), 256>>>(d_poly, inv_n, mod, n);
+    checkCuda(cudaDeviceSynchronize(), "scale for intt");
+
     std::vector<uint64_t> final(n);
     checkCuda(cudaMemcpy(final.data(), d_poly, n * sizeof(uint64_t), cudaMemcpyDeviceToHost), "copy final");
 
