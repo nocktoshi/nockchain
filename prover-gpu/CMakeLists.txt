@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.18)
-project(prover-gpu LANGUAGES CXX CUDA)
+project(prover-gpu LANGUAGES C CXX CUDA)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
