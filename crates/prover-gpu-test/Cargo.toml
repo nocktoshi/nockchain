@@ -1,0 +1,14 @@
+[package]
+name = "prover-gpu-test"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+nockchain-math = { path = "../nockchain-math" }
+libloading = "0.7"
+
+[profile.dev]
+opt-level = 0
+
+[profile.release]
+opt-level = 3
