@@ -7,7 +7,7 @@
 #include <array>
 #include <sstream>
 #include <iomanip>
-#include "third_party/blake3/blake3.h"
+#include "lib/blake3/blake3.h"
 #include <cuda_runtime.h>
 
 extern "C" __global__ void mod_mul_kernel(const uint64_t* __restrict__ a,
