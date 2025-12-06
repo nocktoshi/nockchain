@@ -54,7 +54,8 @@ set_target_properties(prover_gpu PROPERTIES POSITION_INDEPENDENT_CODE ON)
 
 # Recommended flags; adjust as needed
 target_compile_options(prover-gpu PRIVATE
-  $<$<COMPILE_LANGUAGE:CUDA>:-lineinfo>
+    $<$<COMPILE_LANGUAGE:CUDA>:-lineinfo>
+    $<$<COMPILE_LANGUAGE:C>:-Wall -Wextra>
 )
 
 target_include_directories(prover-gpu PRIVATE ${CMAKE_SOURCE_DIR})
