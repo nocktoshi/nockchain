@@ -167,8 +167,7 @@ int main(int argc, char** argv) {
     std::vector<uint64_t> poly(n);
     for (size_t i = 0; i < n; ++i) poly[i] = (uint64_t)(i % 1000);
 
-    // host bit-reversal reorder
-    size_t logn = 0; while ((size_t)1<<logn < n) ++logn;
+    // host bit-reversal reorder (reuse previously computed `logn`)
     auto bitrev = [&](size_t x){ size_t y=0; for(size_t i=0;i<logn;++i){ y=(y<<1)|(x&1); x>>=1;} return y; };
     std::vector<uint64_t> reordered(n);
     for (size_t i = 0; i < n; ++i) reordered[bitrev(i)] = poly[i];
