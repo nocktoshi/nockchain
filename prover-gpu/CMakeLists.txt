@@ -70,3 +70,4 @@ target_link_libraries(prover_gpu PRIVATE CUDA::cudart)
 # enforce C for the .c files to avoid name-mangling/linker issues.
 set_source_files_properties(${CMAKE_SOURCE_DIR}/lib/blake3/blake3.c PROPERTIES LANGUAGE C)
 set_source_files_properties(${CMAKE_SOURCE_DIR}/lib/blake3/blake3_dispatch.c PROPERTIES LANGUAGE C)
+set_source_files_properties(${CMAKE_SOURCE_DIR}/lib/blake3/blake3_portable.c PROPERTIES LANGUAGE C)
