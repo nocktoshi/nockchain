@@ -174,22 +174,24 @@ int main(int argc, char** argv) {
     std::vector<uint64_t> reordered(n);
     for (size_t i = 0; i < n; ++i) reordered[bitrev(i)] = poly[i];
 
-    // compute twiddles (size n/2)
-    std::vector<uint64_t> twiddles(n/2);
-    for (size_t i = 0; i < n/2; ++i) twiddles[i] = modpow(root, i);
-
     uint64_t *d_poly, *d_tw;
     checkCuda(cudaMalloc((void**)&d_poly, n * sizeof(uint64_t)), "cudaMalloc poly");
     checkCuda(cudaMalloc((void**)&d_tw, (n/2) * sizeof(uint64_t)), "cudaMalloc tw");
 
     checkCuda(cudaMemcpy(d_poly, reordered.data(), n * sizeof(uint64_t), cudaMemcpyHostToDevice), "copy poly");
-    checkCuda(cudaMemcpy(d_tw, twiddles.data(), (n/2) * sizeof(uint64_t), cudaMemcpyHostToDevice), "copy tw");
 
     // iterative stages: len = 1,2,4,...,n/2. Each stage launches n/2 threads.
     size_t butterflies = n/2;
     int bblock = 256;
     int bgrid = (int)((butterflies + bblock - 1) / bblock);
     for (size_t len = 1; len < n; len <<= 1) {
+        size_t num_tw = len;
+        std::vector<uint64_t> tw(num_tw);
+        size_t stride = n / (2 * len);
+        for (size_t i = 0; i < num_tw; ++i) {
+            tw[i] = modpow(root, i * stride);
+        }
+        checkCuda(cudaMemcpy(d_tw, tw.data(), num_tw * sizeof(uint64_t), cudaMemcpyHostToDevice), "copy tw");
         ntt_stage_kernel<<<bgrid, bblock>>>(d_poly, d_tw, mod, n, len);
         checkCuda(cudaDeviceSynchronize(), "ntt stage sync");
     }
@@ -198,11 +200,14 @@ int main(int argc, char** argv) {
     bitrev_kernel<<<(int)((n + 255)/256), 256>>>(d_poly, n, logn);
     checkCuda(cudaDeviceSynchronize(), "bitrev for intt");
 
-    std::vector<uint64_t> inv_tw(n/2);
-    for (size_t i = 0; i < n/2; ++i) inv_tw[i] = modpow(root, i);
-    checkCuda(cudaMemcpy(d_tw, inv_tw.data(), (n/2) * sizeof(uint64_t), cudaMemcpyHostToDevice), "copy inv tw");
-
     for (size_t len = 1; len < n; len <<= 1) {
+        size_t num_tw = len;
+        std::vector<uint64_t> tw(num_tw);
+        size_t stride = n / (2 * len);
+        for (size_t i = 0; i < num_tw; ++i) {
+            tw[i] = modpow(inv_root, i * stride);
+        }
+        checkCuda(cudaMemcpy(d_tw, tw.data(), num_tw * sizeof(uint64_t), cudaMemcpyHostToDevice), "copy inv tw");
         ntt_stage_kernel<<<bgrid, bblock>>>(d_poly, d_tw, mod, n, len);
         checkCuda(cudaDeviceSynchronize(), "intt stage sync");
     }

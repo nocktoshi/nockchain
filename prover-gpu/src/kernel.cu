@@ -75,12 +75,9 @@ extern "C" __global__ void ntt_stage_kernel(uint64_t* __restrict__ a,
     size_t i = start + pos;
     size_t j = i + len;
 
-    size_t stride = (n >> 1) / len; // n/(2*len)
-    size_t tw_idx = pos * stride;
-
     uint64_t u = a[i];
     uint64_t v = a[j];
-    uint64_t w = twiddles[tw_idx];
+    uint64_t w = twiddles[pos];
     uint64_t t = dev_std_mod_mul(v, w, mod);
     a[i] = dev_mod_add(u, t, mod);
     a[j] = dev_mod_sub(u, t, mod);
