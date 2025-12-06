@@ -39,6 +39,8 @@ extern "C" __global__ void fri_fold_kernel(uint64_t* __restrict__ a,
                                            uint64_t mod,
                                            size_t n);
 
+extern "C" __global__ void bitrev_kernel(uint64_t* __restrict__ a, size_t n, size_t logn);
+
 static void checkCuda(cudaError_t e, const char* what) {
     if (e != cudaSuccess) {
         std::cerr << "CUDA error (" << what << "): " << cudaGetErrorString(e) << std::endl;
@@ -192,7 +194,10 @@ int main(int argc, char** argv) {
         checkCuda(cudaDeviceSynchronize(), "ntt stage sync");
     }
 
-    // Inverse transform: use inv_root twiddles and same stages, then multiply by inv_n
+    // Inverse transform: bitrev the input, then use inv_root twiddles and same stages
+    bitrev_kernel<<<(int)((n + 255)/256), 256>>>(d_poly, n, logn);
+    checkCuda(cudaDeviceSynchronize(), "bitrev for intt");
+
     std::vector<uint64_t> inv_tw(n/2);
     for (size_t i = 0; i < n/2; ++i) inv_tw[i] = modpow(inv_root, i);
     checkCuda(cudaMemcpy(d_tw, inv_tw.data(), (n/2) * sizeof(uint64_t), cudaMemcpyHostToDevice), "copy inv tw");
@@ -201,13 +206,6 @@ int main(int argc, char** argv) {
         ntt_stage_kernel<<<bgrid, bblock>>>(d_poly, d_tw, mod, n, len);
         checkCuda(cudaDeviceSynchronize(), "intt stage sync");
     }
-
-    // multiply by inv_n
-    // compute inv_n mod `mod` on host (mod is not necessarily prime; caller must ensure field)
-    // Here we assume mod is prime and compute inv_n = n^(mod-2)
-    uint64_t inv_n = modpow(n % mod, mod-2);
-    scale_kernel<<<(int)((n + 255)/256), 256>>>(d_poly, inv_n, mod, n);
-    checkCuda(cudaDeviceSynchronize(), "scale sync");
 
     std::vector<uint64_t> final(n);
     checkCuda(cudaMemcpy(final.data(), d_poly, n * sizeof(uint64_t), cudaMemcpyDeviceToHost), "copy final");

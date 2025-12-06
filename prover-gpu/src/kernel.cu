@@ -91,6 +91,24 @@ extern "C" __global__ void scale_kernel(uint64_t* __restrict__ a,
     a[idx] = dev_mod_mul(a[idx], scalar, mod);
 }
 
+// Bit-reverse the array in-place
+extern "C" __global__ void bitrev_kernel(uint64_t* __restrict__ a, size_t n, size_t logn)
+{
+    size_t i = blockIdx.x * blockDim.x + threadIdx.x;
+    if (i >= n) return;
+    size_t j = 0;
+    size_t x = i;
+    for (size_t k = 0; k < logn; ++k) {
+        j = (j << 1) | (x & 1);
+        x >>= 1;
+    }
+    if (i < j) {
+        uint64_t temp = a[i];
+        a[i] = a[j];
+        a[j] = temp;
+    }
+}
+
 // device binary exponentiation using montgomery multiply
 /*
  * Montgomery-aware exponentiation (device)
