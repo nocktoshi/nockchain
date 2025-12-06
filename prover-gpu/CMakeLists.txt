@@ -13,6 +13,14 @@ add_executable(prover-gpu
 set_source_files_properties(src/main.cpp PROPERTIES LANGUAGE CUDA)
 set_source_files_properties(src/api.cpp PROPERTIES LANGUAGE CUDA)
 
+# Build a shared library providing a simple C ABI so rust can call it directly.
+add_library(prover_gpu SHARED
+  src/api.cpp
+  src/kernel.cu
+)
+
+set_target_properties(prover_gpu PROPERTIES POSITION_INDEPENDENT_CODE ON)
+
 # Try to find CUDA toolkit (provides libraries and include paths).
 find_package(CUDAToolkit REQUIRED)
 
@@ -83,22 +91,6 @@ else()
   message(FATAL_ERROR "Building vendored blake3 sources has been disabled. Set -DUSE_EXTERNAL_BLAKE3=ON and provide -DBLAKE3_LIB_PATH.")
 endif()
 
-# Build a shared library providing a simple C ABI so rust can call it directly.
-add_library(prover_gpu SHARED
-  src/api.cpp
-  src/kernel.cu
-)
-
-# Link external blake3 into the shared library as well (same library used
-# above). The `target_link_libraries` call for `prover-gpu` above also adds
-# the link for the shared `prover_gpu` target below when an external library
-# is used.
-if(USE_EXTERNAL_BLAKE3)
-  target_link_libraries(prover_gpu PRIVATE ${BLAKE3_LIB})
-endif()
-
-set_target_properties(prover_gpu PROPERTIES POSITION_INDEPENDENT_CODE ON)
-
 # Recommended flags; adjust as needed
 target_compile_options(prover-gpu PRIVATE
     $<$<COMPILE_LANGUAGE:CUDA>:-lineinfo>
@@ -129,6 +121,3 @@ target_include_directories(prover_gpu PRIVATE ${CUDA_RUNTIME_INCLUDE_DIR})
 
 target_link_libraries(prover-gpu PRIVATE CUDA::cudart)
 target_link_libraries(prover_gpu PRIVATE CUDA::cudart)
-
-# enforce C for the .c files to avoid name-mangling/linker issues.
-# Vendored blake3 sources removed — linking external library instead.
