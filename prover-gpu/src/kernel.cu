@@ -46,6 +46,12 @@ static __device__ inline uint64_t dev_mont_reduction(unsigned __int128 a) {
 }
 
 static __device__ inline uint64_t dev_mod_mul(uint64_t a, uint64_t b, uint64_t mod) {
+    // Use montgomery-style reduction for 128-bit product
+    unsigned __int128 p = (unsigned __int128)a * (unsigned __int128)b;
+    return dev_mont_reduction(p);
+}
+
+static __device__ inline uint64_t dev_std_mod_mul(uint64_t a, uint64_t b, uint64_t mod) {
     // Standard modular multiplication with 128-bit intermediate
     unsigned __int128 p = (unsigned __int128)a * (unsigned __int128)b;
     return (uint64_t)(p % (unsigned __int128)mod);
@@ -75,7 +81,7 @@ extern "C" __global__ void ntt_stage_kernel(uint64_t* __restrict__ a,
     uint64_t u = a[i];
     uint64_t v = a[j];
     uint64_t w = twiddles[tw_idx];
-    uint64_t t = dev_mod_mul(v, w, mod);
+    uint64_t t = dev_std_mod_mul(v, w, mod);
     a[i] = dev_mod_add(u, t, mod);
     a[j] = dev_mod_sub(u, t, mod);
 }
@@ -88,7 +94,7 @@ extern "C" __global__ void scale_kernel(uint64_t* __restrict__ a,
 {
     size_t idx = blockIdx.x * blockDim.x + threadIdx.x;
     if (idx >= n) return;
-    a[idx] = dev_mod_mul(a[idx], scalar, mod);
+    a[idx] = dev_std_mod_mul(a[idx], scalar, mod);
 }
 
 // Bit-reverse the array in-place
