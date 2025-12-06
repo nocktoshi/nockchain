@@ -45,10 +45,10 @@ static __device__ inline uint64_t dev_mont_reduction(unsigned __int128 a) {
     }
 }
 
-static __device__ inline uint64_t dev_mod_mul(uint64_t a, uint64_t b, uint64_t /*mod*/) {
-    // Use montgomery-style reduction for 128-bit product
+static __device__ inline uint64_t dev_mod_mul(uint64_t a, uint64_t b, uint64_t mod) {
+    // Standard modular multiplication with 128-bit intermediate
     unsigned __int128 p = (unsigned __int128)a * (unsigned __int128)b;
-    return dev_mont_reduction(p);
+    return (uint64_t)(p % (unsigned __int128)mod);
 }
 
 // Each stage performs n/2 butterflies. We launch one thread per butterfly.
