@@ -749,14 +749,9 @@
           'N/A'
         ?~  soft-memo=((soft memo-data:wt) u.memo-val)
           ~>  %slog.[2 'memo data in note is malformed']  'N/A'
-        =/  memo-bytes=(list @ux)  +.u.soft-memo
+        =/  memo-bytes=memo-data:wt  u.soft-memo
         =/  memo-text=@t  (crip (turn memo-bytes @tD))
-        %-  crip
-        """
-
-        {(trip memo-text)}
-
-        """
+        memo-text
       ::
       ++  note-from-balance
         |=  note=nnote-1:v1:transact
