@@ -11,6 +11,7 @@
         refund-pkh=(unit hash:transact)
         get-note=$-(nname:transact nnote:transact)
         include-data=?
+        memo-data=memo-data:wt
         note-selection=selection-strategy:wt
     ==
 |^
@@ -80,7 +81,8 @@
     (create-spends-1 notes-v1 orders fee sender-pkh refund-lock)
 ::
 ~>  %slog.[0 'Notes must all be the same version!!!']  !!
-::
+
+:: calculate fee based on raw spends (with memo if present)
 =+  min-fee=(spends:estimate-fee:utils raw-spends inputs.display)
 :: uncomment to debug out of band fee estimation
 :: =+  min-fee-ref=(calculate-min-fee:spends:transact (apply:witness-data:wt witness-data raw-spends))
@@ -187,7 +189,7 @@
     ~|('No seeds were provided' !!)
   =/  spend=spend-0:v1:transact
     %*  .  *spend-0:v1:transact
-      seeds  seeds
+      seeds  (apply-memo seeds)
       fee    fee-portion
     ==
   %=  $
@@ -223,6 +225,35 @@
       ==
     ~|('Insufficient funds to pay fee and gift' !!)
   [spends.final-state wd.final-state display.final-state]
+::
+++  apply-memo-to-spends
+  |=  [=spends:v1:transact]
+  %-  ~(gas z-by:zo *spends:v1:transact)
+  %+  turn  ~(tap z-by:zo spends)
+  |=  [name=nname:transact spend=spend:v1:transact]
+  =/  updated-spend=spend:v1:transact
+    ?-  -.spend
+      %0  [%0 +.spend(seeds (apply-memo seeds.+.spend))]
+      %1  [%1 +.spend(seeds (apply-memo seeds.+.spend))]
+    ==
+  [name updated-spend]
+::
+++  apply-memo
+  |=  =seeds:v1:transact
+  =/  seeds-list=(list seed:v1:transact)  ~(tap z-in:zo seeds)
+  ::  Sort seeds by gift amount descending and pick the first (largest)
+  =/  sorted-seeds=(list seed:v1:transact)
+    %+  sort  seeds-list
+    |=  [a=seed:v1:transact b=seed:v1:transact]
+    (gth gift.a gift.b)
+  =/  memo-seed=seed:v1:transact  (snag 0 sorted-seeds)
+  =/  updated-note-data=note-data:v1:transact
+    (~(put z-by:zo note-data.memo-seed) %memo ^-(memo-data:wt memo-data))
+  =/  updated-seed=seed:v1:transact
+    memo-seed(note-data updated-note-data)
+  ::  Reconstruct the seeds set with the updated seed at the beginning (largest assets)
+  =/  rest-seeds=(list seed:v1:transact)  (slag 1 sorted-seeds)
+  (~(gas z-in:zo *(z-set:zo seed:v1:transact)) [updated-seed rest-seeds])
 ::
 ++  process-spends-1
   |=  $:  notes=(list nnote-1:v1:transact)
@@ -287,7 +318,7 @@
     (build-lock-merkle-proof:lock:transact input-lock 1)
   =/  spend=spend-1:v1:transact
     %*  .  *spend-1:v1:transact
-      seeds  seeds
+      seeds  (apply-memo seeds)
       fee    fee-portion
     ==
   =.  witness.spend
