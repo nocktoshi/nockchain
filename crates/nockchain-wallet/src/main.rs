@@ -33,6 +33,7 @@ use nockapp_grpc::pb::public::v2::transaction_accepted_response;
 use nockapp_grpc::{private_nockapp, public_nockchain};
 use nockchain_types::common::{Hash, SchnorrPubkey, TimelockRangeAbsolute, TimelockRangeRelative};
 use nockchain_types::{v0, v1};
+use nockvm::jets::cold::Nounable;
 use nockvm::noun::{Atom, Cell, IndirectAtom, Noun, D, NO, SIG, T, YES};
 use noun_serde::prelude::*;
 use noun_serde::NounDecodeError;
