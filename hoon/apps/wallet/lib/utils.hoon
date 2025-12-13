@@ -711,6 +711,7 @@
         |=  flag=?
         ^-  @t
         ?:  flag  'yes'  'no'
+      ::
       ++  render-lock-signers
         |=  [required=@ participants=(list hash:transact)]
         ^-  @t
@@ -741,7 +742,7 @@
           (bool-text include-data.data)
           (spend-condition u.cond)
         ==
-      ::
+    ::
       ++  memo-data
         |=  data=note-data:v1:transact
         ^-  @t
@@ -752,7 +753,7 @@
         =/  memo-bytes=memo-data:wt  u.soft-memo
         =/  memo-text=@t  (crip (turn memo-bytes @tD))
         memo-text
-      ::
+    ::
       ++  note-from-balance
         |=  note=nnote-1:v1:transact
         (^note note (lock-data note-data.note) %.n)
