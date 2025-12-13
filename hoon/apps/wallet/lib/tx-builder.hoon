@@ -10,8 +10,8 @@
         sign-keys=(list schnorr-seckey:transact)
         refund-pkh=(unit hash:transact)
         get-note=$-(nname:transact nnote:transact)
-        memo-data=memo-data:wt
         include-data=?
+        memo-data=memo-data:wt
         note-selection=selection-strategy:wt
     ==
 |^
