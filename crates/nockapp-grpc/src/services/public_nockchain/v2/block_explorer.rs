@@ -13,9 +13,8 @@ use nockapp_grpc_proto::pb::public::v2::{
 };
 use nockchain_math::noun_ext::NounMathExt;
 use nockchain_math::structs::HoonMapIter;
-use nockchain_types::tx_engine::common::{BlockHeight, Hash, Name};
-use nockchain_types::tx_engine::v0::{Lock as LockV0, NoteV0, RawTx as RawTxV0};
-use nockchain_types::tx_engine::v1::{Note, RawTx as RawTxV1, Seeds, Spend};
+use nockchain_types::tx_engine::common::{BlockHeight, Hash, Name, Page};
+use nockchain_types::tx_engine::v0::{Lock, NoteV0, RawTx};
 use nockvm::noun::{Noun, SIG};
 use noun_serde::{NounDecode, NounDecodeError, NounEncode};
 use tokio::sync::{RwLock, Semaphore};
@@ -1384,22 +1383,6 @@ struct PageAndTxs {
     txs: Noun,
 }
 
-#[derive(Debug, Clone, NounDecode)]
-struct PageNoun {
-    _version: Noun,
-    _digest: Hash,
-    _pow: Noun,
-    parent: Hash,
-    _tx_ids: Noun,
-    _coinbase: Noun,
-    timestamp: Noun,
-    _epoch_counter: Noun,
-    _target: Noun,
-    _accumulated_work: Noun,
-    _height: BlockHeight,
-    _msg: Noun,
-}
-
 impl TryFrom<BlockRangeEntryNoun> for BlockRangeEntry {
     type Error = NounDecodeError;
 
@@ -1457,7 +1440,7 @@ fn extract_tx_ids_from_map(
 
 struct BlockEntryWithTxs {
     metadata: BlockMetadata,
-    txs: Vec<(Hash, Transaction)>,
+    txs: Vec<(Hash, DecodedTx)>,
 }
 
 impl TryFrom<BlockRangeEntryNoun> for BlockEntryWithTxs {
@@ -1469,13 +1452,8 @@ impl TryFrom<BlockRangeEntryNoun> for BlockEntryWithTxs {
         let PageAndTxs { page, txs } = tail;
 
         let parent_id = page.parent;
-        let timestamp = u64::from_noun(&page.timestamp)?;
-        let txs_full: Vec<(Hash, Transaction)> = extract_transactions(&txs).map_err(|e| {
-            NounDecodeError::Custom(format!(
-                "Failed to decode transactions for block at height {}: {}",
-                height.0 .0, e
-            ))
-        })?;
+        let timestamp = page.timestamp;
+        let txs_full = extract_transactions_from_map(&txs)?;
         let tx_ids = txs_full.iter().map(|(hash, _)| hash.clone()).collect();
 
         Ok(Self {
@@ -1491,9 +1469,9 @@ impl TryFrom<BlockRangeEntryNoun> for BlockEntryWithTxs {
     }
 }
 
-fn extract_transactions(
+fn extract_transactions_from_map(
     txs_noun: &Noun,
-) -> std::result::Result<Vec<(Hash, Transaction)>, noun_serde::NounDecodeError> {
+) -> std::result::Result<Vec<(Hash, DecodedTx)>, noun_serde::NounDecodeError> {
     if let Ok(atom) = txs_noun.as_atom() {
         if atom.as_u64()? == 0 {
             return Ok(Vec::new());
@@ -1509,8 +1487,20 @@ fn extract_transactions(
             )));
         }
         let [key, value] = entry.uncell().map_err(|_| NounDecodeError::ExpectedCell)?;
-        let hash = Hash::from_noun(&key)?;
-        let tx = Transaction::from_noun(&value)?;
+        let hash = Hash::from_noun(&key).map_err(|e| {
+            NounDecodeError::Custom(format!(
+                "extract_transactions_from_map: failed to decode tx hash at entry {}: {}",
+                idx, e
+            ))
+        })?;
+        let tx = DecodedTx::from_noun(&value).map_err(|e| {
+            NounDecodeError::Custom(format!(
+                "extract_transactions_from_map: failed to decode tx at entry {} (hash={}): {}",
+                idx,
+                hash.to_base58(),
+                e
+            ))
+        })?;
         txs.push((hash, tx));
     }
 
@@ -1519,91 +1509,134 @@ fn extract_transactions(
 
 /// Transaction data decoded from kernel, supporting both v0 and v1 formats
 #[derive(Debug, Clone)]
-enum RawTransaction {
-    V0(RawTxV0),
-    V1(RawTxV1),
-}
-#[derive(Debug, Clone)]
-enum TxOutput {
-    V0(TxOutputV0),
-    V1(TransactionOutput),
+enum DecodedTx {
+    V0(TxV0Data),
+    V1(TxV1Data),
 }
 
 #[derive(Debug, Clone)]
-struct Transaction {
-    version: u64,
-    raw_tx: RawTransaction,
+struct TxV0Data {
+    raw_tx: RawTx,
     total_size: u64,
     outputs: Vec<TxOutputV0>,
 }
 
 #[derive(Debug, Clone)]
+struct TxV1Data {
+    total_size: u64,
+    total_fee: u64,
+    /// Simplified input info: (name_hash, assets)
+    inputs: Vec<TxV1Input>,
+    /// Simplified output info: (lock_hash, assets)
+    outputs: Vec<TxV1Output>,
+}
+
+#[derive(Debug, Clone)]
+struct TxV1Input {
+    name_first: Hash,
+    // We don't have access to input amounts in v1 spends directly
+    // The amount comes from the note being spent, which we don't have here
+}
+
+#[derive(Debug, Clone)]
+struct TxV1Output {
+    lock_root: Hash,
+    assets: u64,
+}
+
+#[derive(Debug, Clone)]
 struct TxOutputV0 {
-    lock: LockV0,
+    lock: Lock,
     note: NoteV0,
 }
 
-impl NounDecode for Transaction {
+impl NounDecode for DecodedTx {
     fn from_noun(noun: &Noun) -> Result<Self, NounDecodeError> {
         let cell = noun.as_cell()?;
         let version = u64::from_noun(&cell.head())?;
 
-        let tail = cell.tail();
-        let cell = tail.as_cell()?;
-        let raw_tx = match version {
+        match version {
             0 => {
-                let raw_tx_v0 = RawTxV0::from_noun(&cell.head())?;
-                RawTransaction::V0(raw_tx_v0)
+                // v0 tx: [%0 raw-tx:v0 total-size outputs:v0]
+                let tail = cell.tail();
+                let cell = tail.as_cell()?;
+                let raw_tx = RawTx::from_noun(&cell.head())?;
+
+                let tail = cell.tail();
+                let cell = tail.as_cell()?;
+                let total_size = u64::from_noun(&cell.head())?;
+                let outputs = decode_outputs_v0(&cell.tail())?;
+
+                Ok(DecodedTx::V0(TxV0Data {
+                    raw_tx,
+                    total_size,
+                    outputs,
+                }))
             }
             1 => {
-                let raw_tx_v1 = RawTxV1::from_noun(&cell.head())?;
-                RawTransaction::V1(raw_tx_v1)
-            }
-            _ => {
-                return Err(NounDecodeError::Custom(format!(
-                    "Unsupported transaction version: {}",
-                    version
-                )))
-            }
-        };
+                // v1 tx: [%1 raw-tx:v1 total-size outputs:v1]
+                // raw-tx:v1 = [%1 id spends]
+                // outputs:v1 = (z-set output:v1) where output:v1 = [note seeds]
+                let tail = cell.tail();
+                let cell = tail.as_cell().map_err(|e| {
+                    NounDecodeError::Custom(format!("v1 tx outer tail not cell: {e:?}"))
+                })?;
+                let raw_tx_noun = cell.head();
 
-        let tail = cell.tail();
-        let cell = tail.as_cell()?;
-        let total_size = u64::from_noun(&cell.head())?;
-        let outputs = match version {
-            0 => {
-                let outputs_v0 = decode_outputs_v0(&cell.tail())?;
-                outputs_v0
-                    .into_iter()
-                    .map(TxOutput::V0)
-                    .collect::<Vec<TxOutput>>()
-            }
-            1 => {
-                let outputs_v1 = decode_outputs_v1(&cell.tail())?;
-                outputs_v1
-                    .into_iter()
-                    .map(TxOutput::V1)
-                    .collect::<Vec<TxOutput>>()
-            }
-            _ => {
-                return Err(NounDecodeError::Custom(format!(
-                    "Unsupported transaction version: {}",
-                    version
-                )))
-            }
-        };
+                // Parse raw-tx:v1 = [%1 id spends]
+                let raw_cell = raw_tx_noun
+                    .as_cell()
+                    .map_err(|e| NounDecodeError::Custom(format!("v1 raw-tx not cell: {e:?}")))?;
+                let raw_version = u64::from_noun(&raw_cell.head()).map_err(|e| {
+                    NounDecodeError::Custom(format!("v1 raw-tx version not atom: {e:?}"))
+                })?;
+                if raw_version != 1 {
+                    return Err(NounDecodeError::Custom(format!(
+                        "Expected v1 raw-tx version 1, got {}",
+                        raw_version
+                    )));
+                }
+                let raw_tail = raw_cell.tail().as_cell().map_err(|e| {
+                    NounDecodeError::Custom(format!("v1 raw-tx tail not cell: {e:?}"))
+                })?;
+                let _tx_id = Hash::from_noun(&raw_tail.head()).map_err(|e| {
+                    NounDecodeError::Custom(format!("v1 raw-tx id parse failed: {e:?}"))
+                })?;
+                let spends_noun = raw_tail.tail();
 
-        Ok(Self {
-            version,
-            raw_tx,
-            total_size,
-            outputs,
-        })
+                // Parse spends: (z-map nname spend) - returns (inputs, total_fee)
+                let (inputs, total_fee) = decode_v1_spends(&spends_noun).map_err(|e| {
+                    NounDecodeError::Custom(format!("v1 spends parse failed: {e:?}"))
+                })?;
+
+                let tail = cell.tail();
+                let cell = tail.as_cell().map_err(|e| {
+                    NounDecodeError::Custom(format!("v1 tx size/outputs tail not cell: {e:?}"))
+                })?;
+                let total_size = u64::from_noun(&cell.head()).map_err(|e| {
+                    NounDecodeError::Custom(format!("v1 tx total_size not atom: {e:?}"))
+                })?;
+                let outputs = decode_outputs_v1(&cell.tail()).map_err(|e| {
+                    NounDecodeError::Custom(format!("v1 outputs parse failed: {e:?}"))
+                })?;
+
+                Ok(DecodedTx::V1(TxV1Data {
+                    total_size,
+                    total_fee,
+                    inputs,
+                    outputs,
+                }))
+            }
+            _ => Err(NounDecodeError::Custom(format!(
+                "Unknown tx version: {}",
+                version
+            ))),
+        }
     }
 }
 
-fn decode_outputs_v0(noun: &Noun) -> Result<Vec<TxOutputV0>, NounDecodeError> {
-    // v0 outputs are stored as a z-map: (z-map lock note)
+/// Returns (inputs, total_fee)
+fn decode_v1_spends(noun: &Noun) -> Result<(Vec<TxV1Input>, u64), NounDecodeError> {
     if let Ok(atom) = noun.as_atom() {
         if atom.as_u64()? == 0 {
             return Ok((Vec::new(), 0));
@@ -1797,294 +1830,156 @@ fn decode_outputs_v0(noun: &Noun) -> Result<Vec<TxOutputV0>, NounDecodeError> {
             )));
         }
         let [key, value] = entry.uncell().map_err(|_| NounDecodeError::ExpectedCell)?;
-        let lock = LockV0::from_noun(&key)?;
-        let value_cell = value.as_cell().map_err(|_| NounDecodeError::ExpectedCell)?;
-        let note = NoteV0::from_noun(&value_cell.head())?;
+        let lock = Lock::from_noun(&key).map_err(|e| {
+            NounDecodeError::Custom(format!(
+                "decode_outputs_v0: output {} lock parse failed: {}",
+                idx, e
+            ))
+        })?;
+        let value_cell = value.as_cell().map_err(|_| {
+            NounDecodeError::Custom(format!("decode_outputs_v0: output {} value not cell", idx))
+        })?;
+        let note = NoteV0::from_noun(&value_cell.head()).map_err(|e| {
+            NounDecodeError::Custom(format!(
+                "decode_outputs_v0: output {} note parse failed: {}",
+                idx, e
+            ))
+        })?;
         outputs.push(TxOutputV0 { lock, note });
     }
 
     Ok(outputs)
 }
 
-fn decode_outputs_v1(noun: &Noun) -> Result<Vec<TransactionOutput>, NounDecodeError> {
-    // v1 outputs are stored as a z-set: (z-set output) where output is [note seeds]
-    if let Ok(atom) = noun.as_atom() {
-        if atom.as_u64()? == 0 {
-            return Ok(Vec::new());
-        }
-        return Err(NounDecodeError::ExpectedCell);
-    }
-
-    let mut outputs: Vec<TransactionOutput> = Vec::new();
-
-    // Traverse the z-set
-    fn traverse_outputs(
-        node: &Noun,
-        outputs: &mut Vec<TransactionOutput>,
-    ) -> Result<(), NounDecodeError> {
-        if let Ok(atom) = node.as_atom() {
-            if atom.as_u64()? == 0 {
-                return Ok(());
-            }
-            return Err(NounDecodeError::ExpectedCell);
-        }
-
-        let cell = node
-            .as_cell()
-            .map_err(|_| NounDecodeError::Custom("z-set node must be a cell".into()))?;
-
-        let output_cell = cell.head().as_cell()?;
-        let note = Note::from_noun(&output_cell.head())?;
-        let _seeds = Seeds::from_noun(&output_cell.tail())?;
-
-        let (note_name, amount, lock_hash) = match &note {
-            Note::V0(note_v0) => {
-                let name = note_v0.tail.name.clone();
-                let amount = note_v0.tail.assets.0 as u64;
-                // For v0 notes, there is no lock hash
-                (name, amount, None)
-            }
-            Note::V1(note_v1) => {
-                let name = note_v1.name.clone();
-                let amount = note_v1.assets.0 as u64;
-                // For v1 notes, the lock hash is in note.name.first
-                let lock_hash = Some(note_v1.name.first.clone());
-                (name, amount, lock_hash)
-            }
-        };
-
-        // Create lock summary from lock hash if available
-        let lock_summary_str = if let Some(hash) = lock_hash {
-            format!("lock-hash:{}", hash.to_base58())
-        } else {
-            "unknown-lock".to_string()
-        };
-
-        outputs.push(TransactionOutput {
-            note_name_b58: note_name_to_b58(&note_name),
-            amount: Some(pb_common::Nicks { value: amount }),
-            lock_summary: lock_summary_str,
-        });
-
-        // Get left and right branches
-        let branches = cell
-            .tail()
-            .as_cell()
-            .map_err(|_| NounDecodeError::Custom("z-set branches must be a cell".into()))?;
-        traverse_outputs(&branches.head(), outputs)?;
-        traverse_outputs(&branches.tail(), outputs)?;
-
-        Ok(())
-    }
-
-    traverse_outputs(noun, &mut outputs)?;
-    Ok(outputs)
-}
-
 fn build_transaction_details(
     metadata: &BlockMetadata,
     tx_hash: &Hash,
-    tx: Transaction,
+    tx: DecodedTx,
 ) -> TransactionDetails {
-    let Transaction {
-        version,
+    match tx {
+        DecodedTx::V0(tx_data) => build_transaction_details_v0(metadata, tx_hash, tx_data),
+        DecodedTx::V1(tx_data) => build_transaction_details_v1(metadata, tx_hash, tx_data),
+    }
+}
+
+fn build_transaction_details_v0(
+    metadata: &BlockMetadata,
+    tx_hash: &Hash,
+    tx: TxV0Data,
+) -> TransactionDetails {
+    let TxV0Data {
         raw_tx,
         total_size,
         outputs,
     } = tx;
 
-    match version {
-        0 => {
-            let mut total_input = 0u64;
-            let mut inputs = Vec::new();
-            let raw_tx = match raw_tx {
-                RawTransaction::V0(raw) => raw,
-                _ => {
-                    warn!(
-                        "Mismatched transaction version {} and raw transaction type",
-                        version
-                    );
-                    return TransactionDetails {
-                        tx_id: tx_hash.to_base58(),
-                        block_id: Some(hash_to_proto(&metadata.block_id)),
-                        parent: Some(hash_to_proto(&metadata.parent_id)),
-                        height: metadata.height,
-                        timestamp: metadata.timestamp,
-                        version,
-                        size_bytes: total_size,
-                        total_input: None,
-                        total_output: None,
-                        fee: None,
-                        inputs: Vec::new(),
-                        outputs: Vec::new(),
-                    };
-                }
-            };
-            for (name, input) in &raw_tx.inputs.0 {
-                let amount = input.note.tail.assets.0 as u64;
-                total_input += amount;
-                inputs.push(TransactionInput {
-                    note_name_b58: note_name_to_b58(&name),
-                    amount: Some(pb_common::Nicks { value: amount }),
-                    source_tx_id: input.note.tail.source.hash.to_base58(),
-                    coinbase: input.note.tail.source.is_coinbase,
-                });
-            }
-            let outputs: Vec<&TxOutputV0> = outputs
-                .iter()
-                .filter_map(|output| {
-                    if let TxOutput::V0(output_v0) = output {
-                        Some(output_v0)
-                    } else {
-                        None
-                    }
-                })
-                .collect();
-            let mut total_output = 0u64;
-            let mut outputs_proto = Vec::new();
-            for output in outputs {
-                let amount = output.note.tail.assets.0 as u64;
-                total_output += amount;
-                outputs_proto.push(TransactionOutput {
-                    note_name_b58: note_name_to_b58(&output.note.tail.name),
-                    amount: Some(pb_common::Nicks { value: amount }),
-                    lock_summary: lock_summary(&output.lock),
-                });
-            }
+    let mut total_input = 0u64;
+    let mut inputs = Vec::new();
+    for (name, input) in &raw_tx.inputs.0 {
+        let amount = input.note.tail.assets.0 as u64;
+        total_input += amount;
+        inputs.push(TransactionInput {
+            note_name_b58: note_name_to_b58(name),
+            amount: Some(pb_common::Nicks { value: amount }),
+            source_tx_id: input.note.tail.source.hash.to_base58(),
+            coinbase: input.note.tail.source.is_coinbase,
+        });
+    }
 
-            TransactionDetails {
-                tx_id: tx_hash.to_base58(),
-                block_id: Some(hash_to_proto(&metadata.block_id)),
-                parent: Some(hash_to_proto(&metadata.parent_id)),
-                height: metadata.height,
-                timestamp: metadata.timestamp,
-                version,
-                size_bytes: total_size,
-                total_input: Some(pb_common::Nicks { value: total_input }),
-                total_output: Some(pb_common::Nicks {
-                    value: total_output,
-                }),
-                fee: Some(pb_common::Nicks {
-                    value: raw_tx.total_fees.0 as u64,
-                }),
-                inputs,
-                outputs: outputs_proto,
-            }
-        }
-        1 => {
-            // Extract input information from spends
-            // In V1, spends map to (Name, Spend) where Spend contains seeds and fee
-            // Each seed has a gift (output amount) and parent_hash (input note hash)
-            // Total input = sum of all seed gifts + sum of all fees
-            let mut total_input = 0u64;
-            let mut total_fee = 0u64;
-            let mut inputs = Vec::new();
-            let raw_tx = match raw_tx {
-                RawTransaction::V1(raw) => raw,
-                _ => {
-                    warn!(
-                        "Mismatched transaction version {} and raw transaction type",
-                        version
-                    );
-                    return TransactionDetails {
-                        tx_id: tx_hash.to_base58(),
-                        block_id: Some(hash_to_proto(&metadata.block_id)),
-                        parent: Some(hash_to_proto(&metadata.parent_id)),
-                        height: metadata.height,
-                        timestamp: metadata.timestamp,
-                        version,
-                        size_bytes: total_size,
-                        total_input: None,
-                        total_output: None,
-                        fee: None,
-                        inputs: Vec::new(),
-                        outputs: Vec::new(),
-                    };
-                }
-            };
+    let mut total_output = 0u64;
+    let mut outputs_proto = Vec::new();
+    for output in outputs {
+        let amount = output.note.tail.assets.0 as u64;
+        total_output += amount;
+        outputs_proto.push(TransactionOutput {
+            note_name_b58: note_name_to_b58(&output.note.tail.name),
+            amount_required: Some(transaction_output::AmountRequired::Amount(
+                pb_common::Nicks { value: amount },
+            )),
+            lock_summary: lock_summary(&output.lock),
+        });
+    }
 
-            for (name, spend) in &raw_tx.spends.0 {
-                // Extract fee from spend
-                let fee = match spend {
-                    Spend::Legacy(spend0) => spend0.fee.0 as u64,
-                    Spend::Witness(spend1) => spend1.fee.0 as u64,
-                };
-                total_fee += fee;
+    TransactionDetails {
+        tx_id: tx_hash.to_base58(),
+        block_id: Some(hash_to_proto(&metadata.block_id)),
+        parent: Some(hash_to_proto(&metadata.parent_id)),
+        height: metadata.height,
+        timestamp: metadata.timestamp,
+        version: 0,
+        size_bytes: total_size,
+        total_input: Some(pb_common::Nicks { value: total_input }),
+        total_output_required: Some(transaction_details::TotalOutputRequired::TotalOutput(
+            pb_common::Nicks {
+                value: total_output,
+            },
+        )),
+        fee_required: Some(transaction_details::FeeRequired::Fee(pb_common::Nicks {
+            value: raw_tx.total_fees.0 as u64,
+        })),
+        inputs,
+        outputs: outputs_proto,
+    }
+}
 
-                // Calculate input amount from seeds
-                // Each seed's gift represents output amount, and fee is paid from input
-                // So input amount = sum of seed gifts + fee
-                let seeds = match spend {
-                    Spend::Legacy(spend0) => &spend0.seeds,
-                    Spend::Witness(spend1) => &spend1.seeds,
-                };
+fn build_transaction_details_v1(
+    metadata: &BlockMetadata,
+    tx_hash: &Hash,
+    tx: TxV1Data,
+) -> TransactionDetails {
+    let TxV1Data {
+        total_size,
+        total_fee,
+        inputs: tx_inputs,
+        outputs: tx_outputs,
+    } = tx;
 
-                let mut input_amount = fee; // Start with fee
-                let mut source_tx_id = None;
-                let mut is_coinbase = false;
+    // For v1 inputs, we don't have direct access to input amounts
+    // (those come from the notes being spent, which aren't in the tx data)
+    let mut inputs = Vec::new();
+    for input in tx_inputs {
+        inputs.push(TransactionInput {
+            note_name_b58: input.name_first.to_base58(),
+            amount: None,                // Amount not available in v1 spend data
+            source_tx_id: String::new(), // Not directly available
+            coinbase: false,             // Would need to check the note being spent
+        });
+    }
 
-                // Sum up all seed gifts to get total output amount from this input
-                // The input amount is the sum of gifts + fee
-                for seed in &seeds.0 {
-                    input_amount += seed.gift.0 as u64;
+    let mut total_output = 0u64;
+    let mut outputs_proto = Vec::new();
+    for output in tx_outputs {
+        total_output += output.assets;
+        outputs_proto.push(TransactionOutput {
+            note_name_b58: output.lock_root.to_base58(),
+            amount_required: Some(transaction_output::AmountRequired::Amount(
+                pb_common::Nicks {
+                    value: output.assets,
+                },
+            )),
+            lock_summary: format!("lock:{}", &output.lock_root.to_base58()[..8]),
+        });
+    }
 
-                    // Try to extract source information from seed if available
-                    if let Some(source) = &seed.output_source {
-                        if source_tx_id.is_none() {
-                            source_tx_id = Some(source.hash.to_base58());
-                            is_coinbase = source.is_coinbase;
-                        }
-                    }
-                }
-
-                total_input += input_amount;
-
-                // Build TransactionInput
-                // Note: In V1, we don't have direct access to the input note's source transaction.
-                // We can only get it from seed.output_source if available. If not available,
-                // we mark it as unknown since parent_hash is the note hash, not the tx hash.
-                inputs.push(TransactionInput {
-                    note_name_b58: note_name_to_b58(name),
-                    amount: Some(pb_common::Nicks {
-                        value: input_amount,
-                    }),
-                    source_tx_id: source_tx_id.unwrap_or_else(|| "unknown".to_string()),
-                    coinbase: is_coinbase,
-                });
-            }
-            let mut total_output = 0u64;
-            let outputs = outputs
-                .into_iter()
-                .filter_map(|output| {
-                    if let TxOutput::V1(output_v1) = output {
-                        total_output += output_v1.amount.as_ref().map_or(0, |a| a.value);
-                        Some(output_v1)
-                    } else {
-                        None
-                    }
-                })
-                .collect::<Vec<TransactionOutput>>();
-
-            TransactionDetails {
-                tx_id: tx_hash.to_base58(),
-                block_id: Some(hash_to_proto(&metadata.block_id)),
-                parent: Some(hash_to_proto(&metadata.parent_id)),
-                height: metadata.height,
-                timestamp: metadata.timestamp,
-                version,
-                size_bytes: total_size,
-                total_input: Some(pb_common::Nicks { value: total_input }),
-                total_output: Some(pb_common::Nicks {
-                    value: total_output,
-                }),
-                fee: Some(pb_common::Nicks { value: total_fee }),
-                inputs,
-                outputs,
-            }
-        }
-        _ => {
-            panic!("Unsupported transaction version: {}", version);
-        }
+    TransactionDetails {
+        tx_id: tx_hash.to_base58(),
+        block_id: Some(hash_to_proto(&metadata.block_id)),
+        parent: Some(hash_to_proto(&metadata.parent_id)),
+        height: metadata.height,
+        timestamp: metadata.timestamp,
+        version: 1,
+        size_bytes: total_size,
+        total_input: None, // Not directly available for v1
+        total_output_required: Some(transaction_details::TotalOutputRequired::TotalOutput(
+            pb_common::Nicks {
+                value: total_output,
+            },
+        )),
+        fee_required: Some(transaction_details::FeeRequired::Fee(pb_common::Nicks {
+            value: total_fee,
+        })),
+        inputs,
+        outputs: outputs_proto,
     }
 }
 
@@ -2102,7 +1997,7 @@ fn note_name_to_b58(name: &Name) -> String {
     name.first.to_base58()
 }
 
-fn lock_summary(lock: &LockV0) -> String {
+fn lock_summary(lock: &Lock) -> String {
     let keys: Vec<String> = lock
         .pubkeys
         .iter()

@@ -33,9 +33,7 @@ use nockapp_grpc::pb::public::v2::transaction_accepted_response;
 use nockapp_grpc::{private_nockapp, public_nockchain};
 use nockchain_types::common::{Hash, SchnorrPubkey, TimelockRangeAbsolute, TimelockRangeRelative};
 use nockchain_types::{v0, v1};
-use nockvm::jets::cold::Nounable;
-use nockvm::mem;
-use nockvm::noun::{Atom, Cell, IndirectAtom, Noun, D, NO, NONE, SIG, T, YES};
+use nockvm::noun::{Atom, Cell, IndirectAtom, Noun, D, NO, SIG, T, YES};
 use noun_serde::prelude::*;
 use noun_serde::NounDecodeError;
 use recipient::{recipient_tokens_to_specs, RecipientSpec};
@@ -298,7 +296,7 @@ async fn main() -> Result<(), NockAppError> {
                 refund_pkh.clone(),
                 signing_keys,
                 *include_data,
- memo_data.clone(),
+                memo_data.clone(),
                 *save_raw_tx,
                 *note_selection_strategy,
             )
