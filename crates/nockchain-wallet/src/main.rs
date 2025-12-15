@@ -464,6 +464,7 @@ async fn main() -> Result<(), NockAppError> {
         index,
         hardened,
         include_data,
+        memo_data,
         sign_keys,
         save_raw_tx,
         note_selection_strategy,
@@ -481,6 +482,7 @@ async fn main() -> Result<(), NockAppError> {
                 refund_pkh.clone(),
                 signing_keys,
                 *include_data,
+                memo_data.clone(),
                 *save_raw_tx,
                 *note_selection_strategy,
             )
