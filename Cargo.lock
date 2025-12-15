@@ -8363,6 +8363,7 @@ dependencies = [
  "either",
  "hex-literal",
  "ibig",
+ "libloading 0.8.9",
  "nockchain-math",
  "nockvm",
  "nockvm_macros",
@@ -8373,6 +8374,7 @@ dependencies = [
  "rayon",
  "smallvec",
  "strum 0.27.2",
+ "thiserror 2.0.16",
  "tracing",
 ]
 
