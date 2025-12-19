@@ -3,6 +3,7 @@
 /=  *  /common/zose
 /=  bridge  /apps/bridge/types
 /=  *  /common/zeke
+/=  bridge  /apps/bridge/types
 /=  dumb  /apps/dumbnet/lib/types
 /=  s10  /apps/wallet/lib/s10
 |_  bc=blockchain-constants:transact
@@ -533,7 +534,7 @@
                                                       ::  if the lock is not a standard 1-of-1 pkh or coinbase, the wallet won't
                                                       ::  be able to guess it, so the funds could be lost forever if the user.
                                                       ::  doesn't keep track of the lock.
-        memo-data=memo-data                           ::  optional memo on note-data (highest-gift seed)
+        memo-data=(list @ux)                           ::  optional memo on note-data (highest-gift seed)
         save-raw-tx=?                                 ::  if %.y, saves jams of the raw-tx and its hashable into a txs-debug folder
                                                       ::  in the current working directory
         =selection-strategy
