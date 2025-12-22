@@ -9,8 +9,9 @@ default = []
 bazel_build = []
 
 # Specific kernels
+bridge = []
 dumb = []
-wallet = []
 miner = []
+wallet = []
 
 [dependencies]
