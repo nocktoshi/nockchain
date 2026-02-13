@@ -36,15 +36,15 @@ use tokio::{fs as tokio_fs, signal};
 use tracing::info;
 use zkvm_jetpack::hot::produce_prover_hot_state;
 
-// Default to jemalloc unless opted out via `malloc` or `snmalloc`.
-#[cfg(all(not(miri), not(feature = "malloc"), not(feature = "snmalloc")))]
-#[global_allocator]
-static ALLOC: tikv_jemallocator::Jemalloc = tikv_jemallocator::Jemalloc;
-
-// Opt into snmalloc as the global allocator.
+// When enabled, use snmalloc as the global allocator.
 #[cfg(feature = "snmalloc")]
 #[global_allocator]
 static ALLOC: snmalloc_rs::SnMalloc = snmalloc_rs::SnMalloc;
+
+// When enabled, use jemalloc as the global allocator.
+#[cfg(feature = "jemalloc")]
+#[global_allocator]
+static ALLOC: tikv_jemallocator::Jemalloc = tikv_jemallocator::Jemalloc;
 
 #[derive(Parser, Debug, Clone)]
 #[command(author, version, about, long_about = None)]
@@ -339,9 +339,6 @@ async fn main() -> Result<(), BridgeError> {
     let deposit_log =
         Arc::new(bridge::deposit_log::DepositLog::open(deposit_log_path.clone()).await?);
     info!("Using deposit queue log at {}", deposit_log_path.display());
-    bridge::metrics::update_deposit_log_max_nonce(
-        deposit_log.max_nonce_in_epoch(&nonce_epoch).await?,
-    );
 
     // Deposit log sync happens after the kernel action loop is running.
 
@@ -686,7 +683,6 @@ mod tests {
     use nockapp::kernel::boot;
     use nockchain_math::belt::Belt;
     use nockchain_types::v1::Name;
-    use nockvm::noun::NounAllocator;
     use tempfile::TempDir;
 
     use super::*;
@@ -747,7 +743,7 @@ mod tests {
             if std::env::var("RUST_LOG").is_err() {
                 std::env::set_var("RUST_LOG", "debug");
             }
-            let cli = boot::ephemeral_test_boot_cli(true);
+            let cli = boot::default_boot_cli(true);
             let temp_log_dir = std::env::temp_dir().join("bridge-test-logs");
             let _guard = init_bridge_tracing(&cli, Some(tui::new_log_buffer()), temp_log_dir, 7)
                 .expect("failed to init tracing for tests");
@@ -848,11 +844,9 @@ mod tests {
         let noun = unsafe {
             let mut ia =
                 nockvm::noun::IndirectAtom::new_raw_bytes(&mut slab, 32, proposal_hash.as_ptr());
-            let space = slab.noun_space();
-            ia.normalize_as_atom(&space)
+            ia.normalize_as_atom()
         };
-        let space = slab.noun_space();
-        let signature = bridge_signer.sign_proposal(noun.as_noun(), &space).await?;
+        let signature = bridge_signer.sign_proposal(noun.as_noun()).await?;
 
         assert!(!signature.r().is_zero(), "Expected valid r component");
         assert!(!signature.s().is_zero(), "Expected valid s component");

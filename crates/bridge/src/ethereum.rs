@@ -14,7 +14,6 @@ use alloy::signers::local::PrivateKeySigner;
 use alloy::sol_types::SolEvent;
 use alloy::transports::ws::WsConnect;
 use alloy::transports::TransportError;
-use async_trait::async_trait;
 use backon::{ExponentialBuilder, Retryable};
 use hex::encode as hex_encode;
 use op_alloy::network::Optimism;
@@ -22,11 +21,7 @@ use tokio::time::{sleep, Duration};
 use tracing::{debug, error, info, trace, warn};
 
 use crate::bridge_status::BridgeStatus;
-use crate::core::base_observer::{plan_base_tick, BasePlanAction, BasePlanInput, BasePlanState};
 use crate::errors::BridgeError;
-use crate::loop_policy::BaseObserverLoopPolicy;
-use crate::metrics;
-use crate::ports::{BaseContractPort, BaseSourcePort};
 use crate::runtime::{BaseBlockBatch, BridgeEvent, BridgeRuntimeHandle, ChainEvent};
 use crate::stop::StopHandle;
 use crate::tui::types::{BridgeTx, TxDirection, TxStatus};
@@ -121,7 +116,6 @@ fn confirmed_batch(chain_tip: u64, batch_size: u64, confirmation_depth: u64) -> 
 ///
 /// Returns `Some((start, end))` if a full batch is confirmed, `None` otherwise.
 /// The batch is always exactly `batch_size` blocks, starting at `next_needed_height`.
-#[cfg(test)]
 fn next_confirmed_window(
     next_needed_height: u64,
     confirmed_height: u64,
@@ -137,30 +131,17 @@ fn next_confirmed_window(
 }
 
 #[allow(dead_code)]
-struct BaseBridgeDeps {
+pub struct BaseBridge {
     provider: DynProvider<Optimism>,
     wallet: EthereumWallet,
-    runtime_handle: Arc<BridgeRuntimeHandle>,
-    stop: StopHandle,
-}
-
-struct BaseBridgeContracts {
     inbox_contract_address: Address,
     nock_contract_address: Address,
-}
-
-struct BaseBridgeConfig {
+    runtime_handle: Arc<BridgeRuntimeHandle>,
     /// Batch size for fetching base blocks (must match Hoon kernel's base-blocks-chunk)
     batch_size: u64,
     /// Number of confirmations required before emitting a batch to the kernel.
     confirmation_depth: u64,
-}
-
-#[allow(dead_code)]
-pub struct BaseBridge {
-    deps: BaseBridgeDeps,
-    contracts: BaseBridgeContracts,
-    config: BaseBridgeConfig,
+    stop: StopHandle,
 }
 
 impl BaseBridge {
@@ -238,20 +219,14 @@ impl BaseBridge {
         };
 
         Ok(Self {
-            deps: BaseBridgeDeps {
-                provider,
-                wallet,
-                runtime_handle,
-                stop,
-            },
-            contracts: BaseBridgeContracts {
-                inbox_contract_address,
-                nock_contract_address,
-            },
-            config: BaseBridgeConfig {
-                batch_size,
-                confirmation_depth,
-            },
+            provider,
+            wallet,
+            inbox_contract_address,
+            nock_contract_address,
+            runtime_handle,
+            batch_size,
+            confirmation_depth,
+            stop,
         })
     }
 
@@ -281,10 +256,7 @@ impl BaseBridge {
             .map(|sig| Bytes::from(sig.into_vec()))
             .collect::<Vec<Bytes>>();
 
-        let inbox = MessageInbox::new(
-            self.contracts.inbox_contract_address,
-            self.deps.provider.clone(),
-        );
+        let inbox = MessageInbox::new(self.inbox_contract_address, self.provider.clone());
 
         let tx_id_sol = MessageInbox::Tip5Hash {
             limbs: submission.tx_id.to_array(),
@@ -308,7 +280,7 @@ impl BaseBridge {
                 as_of_sol, deposit_nonce, eth_sigs,
             )
             .from(NetworkWallet::<Optimism>::default_signer_address(
-                &self.deps.wallet,
+                &self.wallet,
             ))
             .send()
             .await
@@ -353,10 +325,7 @@ impl BaseBridge {
     /// This is the source of truth for which nonce to submit next.
     /// The next valid deposit must have nonce == lastDepositNonce + 1.
     pub async fn get_last_deposit_nonce(&self) -> Result<u64, BridgeError> {
-        let inbox = MessageInbox::new(
-            self.contracts.inbox_contract_address,
-            self.deps.provider.clone(),
-        );
+        let inbox = MessageInbox::new(self.inbox_contract_address, self.provider.clone());
 
         let nonce = inbox.lastDepositNonce().call().await.map_err(|e| {
             BridgeError::BaseBridgeQuery(format!("Failed to query lastDepositNonce: {}", e))
@@ -372,10 +341,7 @@ impl BaseBridge {
         use alloy::primitives::B256;
         use tiny_keccak::{Hasher, Keccak};
 
-        let inbox = MessageInbox::new(
-            self.contracts.inbox_contract_address,
-            self.deps.provider.clone(),
-        );
+        let inbox = MessageInbox::new(self.inbox_contract_address, self.provider.clone());
 
         let be40 = tx_id.to_be_limb_bytes();
         let mut hasher = Keccak::v256();
@@ -401,13 +367,13 @@ impl BaseBridge {
     ) -> Result<Option<u64>, BridgeError> {
         let tx_hash = keccak256(tx_id.to_be_limb_bytes());
         let filter = Filter::new()
-            .address(self.contracts.inbox_contract_address)
+            .address(self.inbox_contract_address)
             .event_signature(MessageInbox::DepositProcessed::SIGNATURE_HASH)
             .topic1(tx_hash)
             .from_block(from_block)
             .to_block(BlockNumberOrTag::Latest);
 
-        let logs = self.deps.provider.get_logs(&filter).await.map_err(|e| {
+        let logs = self.provider.get_logs(&filter).await.map_err(|e| {
             BridgeError::BaseBridgeQuery(format!("Failed to query DepositProcessed logs: {e}"))
         })?;
 
@@ -469,43 +435,29 @@ impl BaseBridge {
         &self,
         bridge_status: Option<BridgeStatus>,
     ) -> Result<(), BridgeError> {
-        self.stream_base_events_with_policy(bridge_status, BaseObserverLoopPolicy::default())
-            .await
-    }
-
-    pub async fn stream_base_events_with_policy(
-        &self,
-        bridge_status: Option<BridgeStatus>,
-        policy: BaseObserverLoopPolicy,
-    ) -> Result<(), BridgeError> {
         info!(
             "starting base bridge event stream (confirmation_depth={}, batch_size={})",
-            self.config.confirmation_depth, self.config.batch_size
+            self.confirmation_depth, self.batch_size
         );
+        // Base blocks are ~2s, but we need 300 confirmations (~10 min), so 30s polling is fine.
+        const BASE_POLL_INTERVAL: Duration = Duration::from_secs(30);
 
-        let poll_interval = policy.poll_interval;
-        let rpc_retry = policy.rpc_retry;
-        let rpc_backoff = || rpc_retry.exponential_builder();
+        let rpc_backoff = || {
+            ExponentialBuilder::default()
+                .with_min_delay(Duration::from_secs(5))
+                .with_max_delay(Duration::from_secs(120))
+                .with_jitter()
+                .with_max_times(10)
+        };
 
         loop {
-            if self.deps.stop.is_stopped() {
-                sleep(poll_interval).await;
+            if self.stop.is_stopped() {
+                sleep(BASE_POLL_INTERVAL).await;
                 continue;
             }
-            sleep(poll_interval).await;
+            sleep(BASE_POLL_INTERVAL).await;
 
-            let base_hold_active = match self.deps.runtime_handle.peek_base_hold().await {
-                Ok(active) => active,
-                Err(err) => {
-                    warn!(
-                        target: "bridge.base.observer",
-                        error=%err,
-                        "failed to peek base hold state"
-                    );
-                    continue;
-                }
-            };
-            let chain_tip = match (|| async { self.deps.provider.get_block_number().await })
+            let chain_tip: u64 = match (|| async { self.provider.get_block_number().await })
                 .retry(rpc_backoff())
                 .when(is_rate_limit_error)
                 .notify(|err, dur| {
@@ -518,59 +470,31 @@ impl BaseBridge {
                 })
                 .await
             {
-                Ok(tip) => {
-                    metrics::update_base_tip_height(Some(tip));
-                    Some(tip)
-                }
+                Ok(tip) => tip,
                 Err(e) => {
-                    metrics::update_base_tip_height(None);
                     error!(
                         target: "bridge.base.observer",
                         error=%e,
                         "failed to get block number after retries"
                     );
-                    None
+                    continue;
                 }
             };
-            let state = if base_hold_active {
-                BasePlanState::HoldActive
-            } else {
-                let Some(chain_tip) = chain_tip else {
-                    continue;
-                };
-                let next_needed_height =
-                    match self.deps.runtime_handle.peek_base_next_height().await {
-                        Ok(height) => height,
-                        Err(err) => {
-                            warn!(
-                                target: "bridge.base.observer",
-                                error=%err,
-                                "failed to peek base next height"
-                            );
-                            continue;
-                        }
-                    };
-                BasePlanState::Active {
+
+            let confirmed_height = chain_tip.saturating_sub(self.confirmation_depth);
+            if confirmed_height < self.batch_size {
+                debug!(
+                    target: "bridge.base.observer",
                     chain_tip,
-                    next_needed_height,
-                }
-            };
+                    confirmed_height,
+                    "no confirmed batch yet (bootstrap)"
+                );
+                continue;
+            }
 
-            let action = plan_base_tick(BasePlanInput {
-                state,
-                batch_size: self.config.batch_size,
-                confirmation_depth: self.config.confirmation_depth,
-            });
-
-            let (chain_tip, batch_start, batch_end) = match action {
-                BasePlanAction::HoldActive => {
-                    debug!(
-                        target: "bridge.base.observer",
-                        "base hold active, skipping base batch fetch"
-                    );
-                    continue;
-                }
-                BasePlanAction::NoPendingHeight { chain_tip } => {
+            let next_needed_height = match self.runtime_handle.peek_base_next_height().await {
+                Ok(Some(height)) => height,
+                Ok(None) => {
                     debug!(
                         target: "bridge.base.observer",
                         chain_tip,
@@ -578,52 +502,39 @@ impl BaseBridge {
                     );
                     continue;
                 }
-                BasePlanAction::InvalidConfig(err) => {
-                    error!(
+                Err(err) => {
+                    warn!(
                         target: "bridge.base.observer",
-                        error=?err,
-                        batch_size=self.config.batch_size,
-                        confirmation_depth=self.config.confirmation_depth,
-                        "invalid observer planner configuration"
+                        error=%err,
+                        "failed to peek base next height"
                     );
                     continue;
                 }
-                BasePlanAction::NotYetConfirmed {
+            };
+
+            debug!(
+                target: "bridge.base.observer",
+                next_needed_height,
+                "kernel reports base-hashchain-next-height"
+            );
+
+            let Some((batch_start, batch_end)) =
+                next_confirmed_window(next_needed_height, confirmed_height, self.batch_size)
+            else {
+                // Calculate what we're waiting for to help debugging
+                let needed_confirmed = next_needed_height + self.batch_size - 1;
+                let blocks_until_ready = needed_confirmed.saturating_sub(confirmed_height);
+                debug!(
+                    target: "bridge.base.observer",
                     chain_tip,
                     confirmed_height,
                     next_needed_height,
-                    needed_confirmed_height,
+                    batch_size = self.batch_size,
+                    needed_confirmed_height = needed_confirmed,
                     blocks_until_ready,
-                    ..
-                } => {
-                    debug!(
-                        target: "bridge.base.observer",
-                        chain_tip,
-                        confirmed_height,
-                        next_needed_height,
-                        batch_size = self.config.batch_size,
-                        needed_confirmed_height,
-                        blocks_until_ready,
-                        "batch not yet confirmed for kernel need"
-                    );
-                    continue;
-                }
-                BasePlanAction::FetchWindow {
-                    chain_tip,
-                    start,
-                    end,
-                    confirmed_height,
-                    ..
-                } => {
-                    debug!(
-                        target: "bridge.base.observer",
-                        chain_tip,
-                        confirmed_height,
-                        next_needed_height = start,
-                        "kernel reports base-hashchain-next-height"
-                    );
-                    (chain_tip, start, end)
-                }
+                    "batch not yet confirmed for kernel need"
+                );
+                continue;
             };
 
             debug!(
@@ -652,8 +563,7 @@ impl BaseBridge {
                 .await
             {
                 Ok(batch) => {
-                    self.deps
-                        .runtime_handle
+                    self.runtime_handle
                         .send_event(BridgeEvent::Chain(Box::new(ChainEvent::Base(batch))))
                         .await?;
                     info!(
@@ -691,14 +601,13 @@ impl BaseBridge {
         ];
         let filter = Filter::new()
             .address(vec![
-                self.contracts.inbox_contract_address, self.contracts.nock_contract_address,
+                self.inbox_contract_address, self.nock_contract_address,
             ])
             .event_signature(event_signatures)
             .from_block(batch_start)
             .to_block(batch_end);
 
         let logs = self
-            .deps
             .provider
             .get_logs(&filter)
             .await
@@ -718,7 +627,7 @@ impl BaseBridge {
         let heights: Vec<u64> = (batch_start..=batch_end).collect();
 
         for chunk in heights.chunks(20) {
-            let mut batch = BatchRequest::new(self.deps.provider.client());
+            let mut batch = BatchRequest::new(self.provider.client());
             let mut futures = Vec::new();
 
             for &height in chunk {
@@ -786,7 +695,7 @@ impl BaseBridge {
 
         if let Some(last_block) = blocks.last() {
             let tip_hash = format!("0x{}", hex_encode(last_block.block_id.as_slice()));
-            self.deps.runtime_handle.set_base_tip_hash(tip_hash);
+            self.runtime_handle.set_base_tip_hash(tip_hash);
         }
 
         let mut withdrawals = Vec::new();
@@ -811,7 +720,7 @@ impl BaseBridge {
                 data: log.data().data.clone(),
             };
 
-            if log.address() == self.contracts.inbox_contract_address {
+            if log.address() == self.inbox_contract_address {
                 if let Some((event, settlement)) =
                     self.process_inbox_log(&raw, &tx_hash, log_index)?
                 {
@@ -856,7 +765,7 @@ impl BaseBridge {
                         }
                     }
                 }
-            } else if log.address() == self.contracts.nock_contract_address {
+            } else if log.address() == self.nock_contract_address {
                 if let Some((event, withdrawal)) =
                     self.process_nock_log(&raw, &tx_hash, log_index)?
                 {
@@ -1109,39 +1018,6 @@ impl BaseBridge {
         }
 
         Ok(None)
-    }
-}
-
-#[async_trait]
-impl BaseContractPort for BaseBridge {
-    async fn submit_deposit(
-        &self,
-        submission: DepositSubmission,
-    ) -> Result<DepositSubmissionResult, BridgeError> {
-        BaseBridge::submit_deposit(self, submission).await
-    }
-
-    async fn get_last_deposit_nonce(&self) -> Result<u64, BridgeError> {
-        BaseBridge::get_last_deposit_nonce(self).await
-    }
-
-    async fn is_deposit_processed(&self, tx_id: &Tip5Hash) -> Result<bool, BridgeError> {
-        BaseBridge::is_deposit_processed(self, tx_id).await
-    }
-}
-
-#[async_trait]
-impl BaseSourcePort for BaseBridge {
-    async fn chain_tip_height(&self) -> Result<u64, BridgeError> {
-        self.deps
-            .provider
-            .get_block_number()
-            .await
-            .map_err(|e| BridgeError::BaseBridgeMonitoring(e.to_string()))
-    }
-
-    async fn fetch_batch(&self, start: u64, end: u64) -> Result<BaseBlockBatch, BridgeError> {
-        BaseBridge::fetch_batch(self, start, end, None).await
     }
 }
 

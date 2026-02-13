@@ -229,4 +229,3 @@ string public constant VERSION = "1.1.0";  // Increment for new version
 - Always test upgrades on forks before production
 - Keep deployment records for all upgrades
 - Document any breaking changes or migration requirements
-

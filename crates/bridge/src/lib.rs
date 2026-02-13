@@ -1,22 +1,19 @@
 // Allow unwrap in unit-test-only code paths; production code is still linted with `-D clippy::unwrap_used`.
 #![cfg_attr(test, allow(clippy::unwrap_used))]
 
-#[cfg(all(feature = "snmalloc", feature = "malloc"))]
-compile_error!("features `snmalloc` and `malloc` are mutually exclusive");
+#[cfg(all(feature = "snmalloc", feature = "jemalloc"))]
+compile_error!("features `snmalloc` and `jemalloc` are mutually exclusive");
 
 pub mod bridge_status;
 pub mod config;
-pub mod core;
 pub mod deposit_log;
 pub mod errors;
 pub mod ethereum;
 pub mod grpc;
 pub mod health;
 pub mod ingress;
-pub mod loop_policy;
 pub mod metrics;
 pub mod nockchain;
-pub mod ports;
 pub mod proposal_cache;
 pub mod proposer;
 pub mod runtime;

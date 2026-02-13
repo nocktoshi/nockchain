@@ -1,99 +1,62 @@
-# Base Sepolia Deployment Reference
+# Base Sepolia Testnet Deployment
 
-Status: Active
-Owner: Nockchain Maintainers
-Last Reviewed: 2026-02-20
-Canonical/Legacy: Legacy (operational reference for Base Sepolia bridge contracts and script accounts)
+Bridge contracts deployed to real Base Sepolia network via Tenderly gateway RPC.
 
-Bridge contracts deployed to real Base Sepolia network through Tenderly Node RPC.
+## Funding Instructions
 
-## Scope
+The **deployer account** needs Base Sepolia ETH to deploy contracts. Use one of these faucets:
 
-- In scope: live contract addresses, account/env wiring used by current deploy/funding scripts.
-- Out of scope: full deployment procedure, incident response, and routine operator runtime.
+1. **Alchemy** (recommended): https://www.alchemy.com/faucets/base-sepolia
+2. **QuickNode**: https://faucet.quicknode.com/base/sepolia
+3. **GetBlock**: https://getblock.io/faucet/base-sepolia/ (requires 0.005 mainnet ETH)
 
-For full deployment flow, see [`../DEPLOYMENT.md`](../DEPLOYMENT.md).
+Fund the deployer address: `$BASE_SEPOLIA_DEPLOYER_ADDRESS` (see devenv.nix)
 
-## Funding
+## Accounts
 
-The deployer account used by contracts deployment (`TENDERLY_PRIVATE_KEY`) needs Base Sepolia ETH.
+All private keys and addresses are stored in `devenv.nix` under the `BASE_SEPOLIA_*` prefix.
 
-Faucets:
-1. Alchemy: https://www.alchemy.com/faucets/base-sepolia
-2. QuickNode: https://faucet.quicknode.com/base/sepolia
-3. GetBlock: https://getblock.io/faucet/base-sepolia/
+### Environment Variables (from devenv.nix)
 
-If your environment exports `BASE_SEPOLIA_DEPLOYER_ADDRESS`, quick balance check:
+| Variable                             | Description                |
+| ------------------------------------ | -------------------------- |
+| `BASE_SEPOLIA_DEPLOYER_ADDRESS`      | Deployer account address   |
+| `BASE_SEPOLIA_DEPLOYER_KEY`          | Deployer private key       |
+| `BASE_SEPOLIA_BRIDGE_NODE_ADDR_0..4` | Bridge node addresses      |
+| `BASE_SEPOLIA_BRIDGE_NODE_KEY_0..4`  | Bridge node private keys   |
+| `BASE_SEPOLIA_RPC_URL`               | Tenderly gateway HTTPS URL |
+| `BASE_SEPOLIA_WS_URL`                | Tenderly gateway WSS URL   |
+
+## Check Balance
 
 ```bash
-cast balance "$BASE_SEPOLIA_DEPLOYER_ADDRESS" --rpc-url "$BASE_SEPOLIA_RPC_URL"
+cast balance $BASE_SEPOLIA_DEPLOYER_ADDRESS --rpc-url $BASE_SEPOLIA_RPC_URL
 ```
 
-## Environment Variables By Consumer
-
-### Contracts deployment (`crates/bridge/contracts/scripts/deploy_tenderly.sh`)
-
-Required:
-- `TENDERLY_RPC_URL`
-- `TENDERLY_PRIVATE_KEY`
-- `NOCK_NAME`
-- `NOCK_SYMBOL`
-- `BRIDGE_NODE_0`
-- `BRIDGE_NODE_1`
-- `BRIDGE_NODE_2`
-- `BRIDGE_NODE_3`
-- `BRIDGE_NODE_4`
-
-Common optional:
-- `DEPLOY_TARGET_NETWORK` (typically `base-sepolia`)
-- `DEPLOYER_ADDRESS`
-- `TENDERLY_ACCESS_KEY` (for verification)
-
-### Bridge helper scripts (`crates/bridge/scripts/*.sh`)
-
-Common Base Sepolia inputs:
-- `BASE_SEPOLIA_RPC_URL`
-- `BASE_SEPOLIA_WS_URL`
-- `BASE_SEPOLIA_DEPLOYER_KEY`
-- `BASE_SEPOLIA_DEPLOYER_ADDRESS`
-- `BASE_SEPOLIA_BRIDGE_NODE_ADDR_0..4`
-- `BASE_SEPOLIA_BRIDGE_NODE_KEY_0..4`
-
-`scripts/fund-bridge-nodes.sh` requires `BASE_SEPOLIA_RPC_URL` and `BASE_SEPOLIA_DEPLOYER_KEY`.
-
-## Deploy (Contracts)
+## Quick Deploy (after funding)
 
 ```bash
-cd crates/bridge/contracts
-cp environments/base-sepolia.example .env
-# edit .env values
+cd open/crates/bridge/contracts
+source environments/base-sepolia.env
 make deploy
 ```
 
-`make deploy` auto-loads `.env` if present.
+## Deployed Contracts (2025-12-17)
 
-## Fund Bridge Nodes (Scripts)
+| Contract             | Address                                      | Basescan                                                                                     |
+| -------------------- | -------------------------------------------- | -------------------------------------------------------------------------------------------- |
+| MessageInbox (Proxy) | `0x9b1becA13c39b9Be10dB616F1bE10C3CeF9Dfb36` | [View](https://sepolia.basescan.org/address/0x9b1becA13c39b9Be10dB616F1bE10C3CeF9Dfb36#code) |
+| MessageInbox (Impl)  | `0x7627Db3A99596668c9d42693efa352Ca69F089e3` | [View](https://sepolia.basescan.org/address/0x7627Db3A99596668c9d42693efa352Ca69F089e3#code) |
+| Nock Token           | `0xA9cd4087D9B050D8B35727AAf810296CA957c7B3` | [View](https://sepolia.basescan.org/address/0xA9cd4087D9B050D8B35727AAf810296CA957c7B3#code) |
 
-```bash
-cd crates/bridge
-./scripts/fund-bridge-nodes.sh
-```
-
-## Live Deployment (2025-12-17)
-
-| Contract                      | Address                                      | Basescan                                                                             |
-| ----------------------------- | -------------------------------------------- | ------------------------------------------------------------------------------------ |
-| MessageInbox (Proxy)          | `0x9b1becA13c39b9Be10dB616F1bE10C3CeF9Dfb36` | https://sepolia.basescan.org/address/0x9b1becA13c39b9Be10dB616F1bE10C3CeF9Dfb36#code |
-| MessageInbox (Implementation) | `0x7627Db3A99596668c9d42693efa352Ca69F089e3` | https://sepolia.basescan.org/address/0x7627Db3A99596668c9d42693efa352Ca69F089e3#code |
-| Nock Token                    | `0xA9cd4087D9B050D8B35727AAf810296CA957c7B3` | https://sepolia.basescan.org/address/0xA9cd4087D9B050D8B35727AAf810296CA957c7B3#code |
-
-Tenderly dashboard: https://dashboard.tenderly.co/zorp/bridge/contracts
+**Tenderly Dashboard**: https://dashboard.tenderly.co/zorp/bridge/contracts
 
 ## Verification
 
-Preferred path for this repo:
+Contracts are verified on Basescan using Etherscan API V2. To verify new deployments:
 
 ```bash
-cd crates/bridge/contracts
-make verify DEPLOYMENTS_PATH=deployments/base-sepolia.json
+forge verify-contract <address> <contract> --chain base-sepolia --verifier etherscan --watch
 ```
+
+Requires `ETHERSCAN_API_KEY` environment variable (set in devenv.nix).
