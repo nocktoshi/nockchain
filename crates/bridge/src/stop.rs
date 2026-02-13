@@ -1,7 +1,6 @@
 use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use nockvm::noun::NounAllocator;
 use tokio::sync::watch;
 
 use crate::bridge_status::BridgeStatus;
@@ -75,16 +74,7 @@ pub(crate) async fn trigger_local_stop(
     bridge_status: BridgeStatus,
     reason: String,
 ) {
-    use tracing::{info, warn};
-
-    let metrics = crate::metrics::init_metrics();
-    metrics.stop_local_requests.increment();
-
-    info!(
-        target: "bridge.stop",
-        reason=%reason,
-        "local stop requested"
-    );
+    use tracing::warn;
 
     let last = match runtime.peek_stop_info().await {
         Ok(v) => v,
@@ -106,22 +96,8 @@ pub(crate) async fn trigger_local_stop(
     };
 
     if !stop_controller.trigger(info) {
-        metrics.stop_local_duplicate.increment();
-        info!(
-            target: "bridge.stop",
-            reason=%reason,
-            "local stop already active, ignoring duplicate request"
-        );
         return;
     }
-
-    metrics.stop_local_triggered.increment();
-    info!(
-        target: "bridge.stop",
-        reason=%reason,
-        has_last = last.is_some(),
-        "local stop activated"
-    );
 
     bridge_status.push_alert(
         AlertSeverity::Error,
@@ -131,10 +107,6 @@ pub(crate) async fn trigger_local_stop(
     );
 
     if let Some(last) = last {
-        info!(
-            target: "bridge.stop",
-            "forwarding local stop cause to kernel"
-        );
         if let Err(err) = runtime.send_stop(last).await {
             warn!(
                 target: "bridge.stop",
@@ -142,11 +114,6 @@ pub(crate) async fn trigger_local_stop(
                 "failed to poke kernel with stop cause after local stop trigger"
             );
         }
-    } else {
-        info!(
-            target: "bridge.stop",
-            "no stop-info snapshot available; skipping kernel stop poke"
-        );
     }
 }
 
@@ -180,12 +147,9 @@ pub fn create_stop_driver(
                 };
 
                 let root = unsafe { effect.root() };
-                let bridge_effect = {
-                    let space = effect.noun_space();
-                    match BridgeEffect::from_noun(root, &space) {
-                        Ok(effect) => effect,
-                        Err(_) => continue,
-                    }
+                let bridge_effect = match BridgeEffect::from_noun(root) {
+                    Ok(effect) => effect,
+                    Err(_) => continue,
                 };
 
                 let BridgeEffectVariant::Stop(data) = bridge_effect.variant else {
