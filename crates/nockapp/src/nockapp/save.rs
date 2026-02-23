@@ -589,7 +589,7 @@ impl LoadedCheckpoint {
     ) -> Result<SaveableCheckpoint, CheckpointError> {
         match self {
             LoadedCheckpoint::V2(cp) => SaveableCheckpoint::from_jammed_checkpoint_v2(cp, metrics),
-            LoadedCheckpoint::V1(cp) => SaveableCheckpoint::from_jammed_checkpoint_v1(cp, metrics),
+            LoadedCheckpoint::V2(cp) => SaveableCheckpoint::from_jammed_checkpoint_v2::<J>(cp, metrics),
         }
     }
 }
