@@ -568,7 +568,7 @@ enum LoadedCheckpoint {
     V1(JammedCheckpointV1),
 }
 
-impl<J: Jammer> LoadedCheckpoint {
+impl LoadedCheckpoint {
     fn event_num(&self) -> u64 {
         match self {
             LoadedCheckpoint::V2(cp) => cp.event_num,
@@ -588,8 +588,12 @@ impl<J: Jammer> LoadedCheckpoint {
         metrics: Option<Arc<NockAppMetrics>>,
     ) -> Result<SaveableCheckpoint, CheckpointError> {
         match self {
-            LoadedCheckpoint::V2(cp) => SaveableCheckpoint::from_jammed_checkpoint_v2::<J>(cp, metrics),
-            LoadedCheckpoint::V1(cp) => SaveableCheckpoint::from_jammed_checkpoint_v1::<J>(cp, metrics),
+            LoadedCheckpoint::V2(cp) => {
+                SaveableCheckpoint::from_jammed_checkpoint_v2::<J>(cp, metrics)
+            }
+            LoadedCheckpoint::V1(cp) => {
+                SaveableCheckpoint::from_jammed_checkpoint_v1::<J>(cp, metrics)
+            }
         }
     }
 }
