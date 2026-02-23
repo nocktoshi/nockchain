@@ -159,7 +159,7 @@ impl<J: Jammer> Saver<J> {
             }
         };
         let last_event_num = loaded_checkpoint.event_num();
-        let saveable = loaded_checkpoint.into_saveable(metrics.clone())?;
+        let saveable = loaded_checkpoint.into_saveable::<J>(metrics.clone())?;
         trace!("After from_jammed_checkpoint");
         let c = C::from_saveable(saveable)?;
         Ok((
@@ -568,7 +568,7 @@ enum LoadedCheckpoint {
     V1(JammedCheckpointV1),
 }
 
-impl LoadedCheckpoint {
+impl<J: Jammer> LoadedCheckpoint {
     fn event_num(&self) -> u64 {
         match self {
             LoadedCheckpoint::V2(cp) => cp.event_num,
@@ -583,13 +583,13 @@ impl LoadedCheckpoint {
         }
     }
 
-    fn into_saveable(
+    fn into_saveable<J: Jammer>(
         self,
         metrics: Option<Arc<NockAppMetrics>>,
     ) -> Result<SaveableCheckpoint, CheckpointError> {
         match self {
-            LoadedCheckpoint::V2(cp) => SaveableCheckpoint::from_jammed_checkpoint_v2(cp, metrics),
             LoadedCheckpoint::V2(cp) => SaveableCheckpoint::from_jammed_checkpoint_v2::<J>(cp, metrics),
+            LoadedCheckpoint::V1(cp) => SaveableCheckpoint::from_jammed_checkpoint_v1::<J>(cp, metrics),
         }
     }
 }
