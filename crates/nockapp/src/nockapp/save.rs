@@ -272,7 +272,7 @@ impl SaveableCheckpoint {
         })
     }
 
-    fn from_jammed_checkpoint_v2<J: Jammer>(
+    pub fn from_jammed_checkpoint_v2<J: Jammer>(
         jammed: JammedCheckpointV2,
         metrics: Option<Arc<NockAppMetrics>>,
     ) -> Result<Self, CheckpointError> {
