@@ -588,12 +588,8 @@ impl LoadedCheckpoint {
         metrics: Option<Arc<NockAppMetrics>>,
     ) -> Result<SaveableCheckpoint, CheckpointError> {
         match self {
-            LoadedCheckpoint::V2(cp) => {
-                SaveableCheckpoint::from_jammed_checkpoint_v2::<J>(cp, metrics)
-            }
-            LoadedCheckpoint::V1(cp) => {
-                SaveableCheckpoint::from_jammed_checkpoint_v1::<J>(cp, metrics)
-            }
+            LoadedCheckpoint::V2(cp) => SaveableCheckpoint::from_jammed_checkpoint_v2::<J>(cp, metrics),
+            LoadedCheckpoint::V1(cp) => SaveableCheckpoint::from_jammed_checkpoint_v1::<J>(cp, metrics),
         }
     }
 }

@@ -9,7 +9,17 @@ fn main() {
     println!("cargo:rerun-if-env-changed=KERNEL_JAM_PATH");
     println!("cargo:rerun-if-changed={}", jam_path.display());
 
-    if env::var_os("KERNEL_JAM_PATH").is_none() {
-        println!("cargo:rustc-env=KERNEL_JAM_PATH={}", jam_path.display());
-    }
+    let jam_path = if let Some(ref p) = env::var_os("KERNEL_JAM_PATH") {
+        PathBuf::from(p)
+    } else {
+        if !jam_path.exists() {
+            panic!(
+                "assets/dumb.jam not found at {}. Build it with: make assets/dumb.jam",
+                jam_path.display()
+            );
+        }
+        jam_path
+    };
+
+    println!("cargo:rustc-env=KERNEL_JAM_PATH={}", jam_path.display());
 }
