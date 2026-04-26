@@ -14,8 +14,7 @@ use nockchain_math::noun_ext::NounMathExtHandle;
 use nockchain_math::structs::HoonMapIter;
 use nockchain_types::tx_engine::common::{BlockHeight, Hash, Name, Page};
 use nockchain_types::tx_engine::v0::{Lock, NoteV0, RawTx};
-use nockchain_types::tx_engine::v1::note::NoteData;
-use nockchain_types::tx_engine::v1::tx::{Spend, Spends};
+use nockchain_types::tx_engine::v1::{NoteData, Spend, Spends};
 use nockvm::noun::{Noun, NounAllocator, NounHandle, NounSpace, SIG};
 use noun_serde::{NounDecode, NounDecodeError, NounEncode};
 use tokio::sync::{RwLock, Semaphore};
@@ -2610,8 +2609,7 @@ mod tests {
     use bytes::Bytes;
     use nockchain_math::belt::Belt;
     use nockchain_types::tx_engine::common::{BlockHeight, Hash};
-    use nockchain_types::tx_engine::v1::note::NoteDataEntry;
-    use nockvm::noun::NounAllocator;
+    use nockchain_types::tx_engine::v1::NoteDataEntry;
     use noun_serde::{NounDecode, NounEncode};
 
     use super::*;
