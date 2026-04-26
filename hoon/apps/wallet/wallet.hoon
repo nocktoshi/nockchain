@@ -1431,7 +1431,6 @@
         refund-pkh.cause
         get-note:v
         include-data.cause
-        memo-data.cause 
         selection-strategy.cause
         height.balance.state
       ==

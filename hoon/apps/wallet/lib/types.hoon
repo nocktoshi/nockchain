@@ -255,6 +255,7 @@
       chunks  [chunk chunks]
       a       (rsh [0 63] a)
     ==
+  ::  +based: map each list atom through +chunk-63 and weld (used by +hashable).
   ++  based
     |=  =form
     ^-  (list @ux)
@@ -428,10 +429,10 @@
   =<  form
   |%
   +$  form
-    $%  [%pkh recipient=hash:transact gift=coins:transact]
-        [%multisig threshold=@ participants=(list hash:transact) gift=coins:transact]
-        [%lock-root root=hash:transact gift=coins:transact]
-        [%bridge-deposit address=evm-address:bridge gift=coins:transact]
+    $%  [%pkh recipient=hash:transact gift=coins:transact memo=(unit memo-data)]
+        [%multisig threshold=@ participants=(list hash:transact) gift=coins:transact memo=(unit memo-data)]
+        [%lock-root root=hash:transact gift=coins:transact memo=(unit memo-data)]
+        [%bridge-deposit address=evm-address:bridge gift=coins:transact memo=(unit memo-data)]
     ==
   ++  gift
     |=  =form
@@ -462,7 +463,6 @@
                                                       ::  if the lock is not a standard 1-of-1 pkh or coinbase, the wallet won't
                                                       ::  be able to guess it, so the funds could be lost forever if the user.
                                                       ::  doesn't keep track of the lock.
-        memo-data=memo-data                           ::  optional memo bytes (see ++memo-data)
         save-raw-tx=?                                 ::  if %.y, saves jams of the raw-tx and its hashable into a txs-debug folder
                                                       ::  in the current working directory
         =selection-strategy

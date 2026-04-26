@@ -15,6 +15,8 @@ pub const NOTE_DATA_KEY_LOCK: &str = "lock";
 pub const NOTE_DATA_KEY_BRIDGE_DEPOSIT: &str = "bridge";
 /// Canonical note-data key for bridge withdrawal payloads.
 pub const NOTE_DATA_KEY_BRIDGE_WITHDRAWAL: &str = "bridge-w";
+/// Canonical note-data key for UTF-8 memo bytes (`(list @ux)` in Hoon).
+pub const NOTE_DATA_KEY_MEMO: &str = "memo";
 
 #[derive(Debug, Clone, PartialEq, Eq, NounEncode, NounDecode)]
 /// Internal noun parser for `%lock` payload shape `[%0 lock]`.
@@ -52,6 +54,8 @@ pub enum TypedNoteDataEntry {
         lock_root: Hash,
         base_batch_end: u64,
     },
+    /// `%memo` => jam of `(list @ux)` (one atom per byte, matching wallet `++memo-data`).
+    Memo { bytes: Vec<u8> },
 }
 
 impl TypedNoteDataEntry {
@@ -82,12 +86,18 @@ impl TypedNoteDataEntry {
         }
     }
 
+    /// Memo bytes stored as `(list @ux)` (same encoding as `Vec<u8>` in noun-serde).
+    pub fn memo(bytes: Vec<u8>) -> Self {
+        Self::Memo { bytes }
+    }
+
     /// Returns the canonical note-data key for this typed entry.
     pub fn key(&self) -> &'static str {
         match self {
             Self::Lock { .. } => NOTE_DATA_KEY_LOCK,
             Self::BridgeDeposit { .. } => NOTE_DATA_KEY_BRIDGE_DEPOSIT,
             Self::BridgeWithdrawal { .. } => NOTE_DATA_KEY_BRIDGE_WITHDRAWAL,
+            Self::Memo { .. } => NOTE_DATA_KEY_MEMO,
         }
     }
 
@@ -109,6 +119,7 @@ impl TypedNoteDataEntry {
                 lock_root.clone(),
                 *base_batch_end,
             )),
+            Self::Memo { bytes } => jam_payload(bytes),
         };
         RawNoteDataEntry {
             key: self.key().to_string(),
@@ -138,6 +149,11 @@ impl RawNoteDataEntry {
         TypedNoteDataEntry::bridge_withdrawal(base_event_id, base_hash, lock_root, base_batch_end)
             .to_raw_entry()
     }
+
+    /// Encodes a `%memo` note-data entry as jammed `(list @ux)`.
+    pub fn from_memo_bytes(bytes: Vec<u8>) -> Self {
+        TypedNoteDataEntry::memo(bytes).to_raw_entry()
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -149,6 +165,8 @@ pub enum NormalizedNoteDataKey {
     Bridge,
     /// `%bridge-w` payload.
     BridgeWithdrawal,
+    /// `%memo` payload (`(list @ux)`).
+    Memo,
     /// Any unrecognized key preserved verbatim.
     Other(String),
 }
@@ -161,6 +179,7 @@ impl NormalizedNoteDataKey {
             NOTE_DATA_KEY_LOCK => Self::Lock,
             NOTE_DATA_KEY_BRIDGE_DEPOSIT => Self::Bridge,
             NOTE_DATA_KEY_BRIDGE_WITHDRAWAL => Self::BridgeWithdrawal,
+            NOTE_DATA_KEY_MEMO => Self::Memo,
             other => Self::Other(other.to_string()),
         }
     }
@@ -313,6 +332,26 @@ impl BridgeWithdrawalDataPayload {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+/// Decoded `%memo` payload (`(list @ux)`).
+pub struct MemoDataPayload {
+    /// Raw memo bytes (UTF-8 in typical wallet usage).
+    pub bytes: Vec<u8>,
+}
+
+impl MemoDataPayload {
+    /// Parses a `%memo` jam blob as a `(list @ux)`.
+    pub fn from_blob(blob: &Bytes) -> Result<Self, NoteDataDecodeError> {
+        let mut slab: NounSlab<NockJammer> = NounSlab::new();
+        let noun = slab
+            .cue_into(blob.clone())
+            .map_err(|error| NoteDataDecodeError::InvalidJam(error.to_string()))?;
+        let bytes = Vec::<u8>::from_noun(&noun)
+            .map_err(|err| NoteDataDecodeError::NounDecode(format!("memo list: {err}")))?;
+        Ok(Self { bytes })
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 /// Best-effort typed decode of a note-data blob.
 pub enum DecodedNoteDataPayload {
     /// Successfully decoded `%lock`.
@@ -321,6 +360,8 @@ pub enum DecodedNoteDataPayload {
     BridgeDeposit(BridgeDepositDataPayload),
     /// Successfully decoded `%bridge-w`.
     BridgeWithdrawal(BridgeWithdrawalDataPayload),
+    /// Successfully decoded `%memo`.
+    Memo(MemoDataPayload),
     /// Raw or failed-to-decode payload.
     Raw,
 }
@@ -392,6 +433,9 @@ impl DecodedNoteDataEntry {
             NormalizedNoteDataKey::BridgeWithdrawal => {
                 BridgeWithdrawalDataPayload::from_blob(&entry.blob)
                     .map(DecodedNoteDataPayload::BridgeWithdrawal)
+            }
+            NormalizedNoteDataKey::Memo => {
+                MemoDataPayload::from_blob(&entry.blob).map(DecodedNoteDataPayload::Memo)
             }
             NormalizedNoteDataKey::Other(_) => Ok(DecodedNoteDataPayload::Raw),
         };
@@ -596,6 +640,19 @@ mod tests {
                 assert_eq!(bridge_payload.base_batch_end, 57_600);
             }
             other => panic!("expected typed bridge withdrawal payload, got {other:?}"),
+        }
+        assert!(decoded.decode_error.is_none());
+    }
+
+    #[test]
+    fn typed_memo_note_data_entry_encodes_and_decodes() {
+        let entry = RawNoteDataEntry::from_memo_bytes(vec![0x68, 0x69]);
+        assert_eq!(entry.key, NOTE_DATA_KEY_MEMO);
+
+        let decoded = DecodedNoteDataEntry::from_raw_entry(&entry);
+        match decoded.payload {
+            DecodedNoteDataPayload::Memo(m) => assert_eq!(m.bytes, vec![0x68, 0x69]),
+            other => panic!("expected typed memo payload, got {other:?}"),
         }
         assert!(decoded.decode_error.is_none());
     }
@@ -855,7 +912,9 @@ mod tests {
         let note_data = fixture_note_data("all-keys");
         let decoded = DecodedNoteData::from(&note_data).0;
         assert_eq!(decoded.len(), 4);
-        assert!(decoded.iter().all(|entry| entry.decode_error.is_none()));
+        assert!(decoded.iter().all(|entry| {
+            entry.raw_key == "memo" || entry.decode_error.is_none()
+        }));
 
         let lock_entry = decoded
             .iter()
@@ -884,13 +943,20 @@ mod tests {
             DecodedNoteDataPayload::BridgeWithdrawal(_)
         ));
 
-        let wildcard_entry = decoded
+        let memo_entry = decoded
             .iter()
             .find(|entry| entry.raw_key == "memo")
-            .expect("wildcard entry");
+            .expect("memo entry");
+        // Fixture `%memo` blob is opaque (not a valid `(list @ux)`), so it falls back to Raw.
         assert!(matches!(
-            wildcard_entry.payload,
-            DecodedNoteDataPayload::Raw
+            memo_entry.payload,
+            DecodedNoteDataPayload::Raw | DecodedNoteDataPayload::Memo(_)
         ));
+        if matches!(memo_entry.payload, DecodedNoteDataPayload::Raw) {
+            assert!(
+                memo_entry.decode_error.is_some(),
+                "opaque memo fixture should record a decode error"
+            );
+        }
     }
 }

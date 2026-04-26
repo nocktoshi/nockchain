@@ -799,15 +799,18 @@ fn planner_recipient_outputs_match_hoon_lock_root_vectors() {
         RecipientSpec::P2pkh {
             address: address_a.clone(),
             amount: 5,
+            memo: None,
         },
         RecipientSpec::Multisig {
             threshold: 2,
             addresses: vec![address_a.clone(), address_b],
             amount: 7,
+            memo: None,
         },
         RecipientSpec::BridgeDeposit {
             evm_address: bridge_address,
             amount: 9,
+            memo: None,
         },
     ];
 
@@ -844,15 +847,18 @@ fn planner_recipient_outputs_respect_include_data_for_p2pkh_but_not_multisig_or_
         RecipientSpec::P2pkh {
             address: address_a.clone(),
             amount: 5,
+            memo: None,
         },
         RecipientSpec::Multisig {
             threshold: 2,
             addresses: vec![address_a.clone(), address_b],
             amount: 7,
+            memo: None,
         },
         RecipientSpec::BridgeDeposit {
             evm_address: bridge_address,
             amount: 9,
+            memo: None,
         },
     ];
 
@@ -862,6 +868,21 @@ fn planner_recipient_outputs_respect_include_data_for_p2pkh_but_not_multisig_or_
     assert_eq!(outputs[1].note_data[0].key, "lock");
     assert_eq!(outputs[2].note_data.len(), 1);
     assert_eq!(outputs[2].note_data[0].key, "bridge");
+}
+
+#[test]
+fn planner_recipient_outputs_attach_memo_even_when_p2pkh_lock_data_disabled() {
+    const ADDRESS_A_B58: &str = "9yPePjfWAdUnzaQKyxcRXKRa5PpUzKKEwtpECBZsUYt9Jd7egSDEWoV";
+    let address_a = Hash::from_base58(ADDRESS_A_B58).expect("address a should parse");
+    let recipients = vec![RecipientSpec::P2pkh {
+        address: address_a,
+        amount: 5,
+        memo: Some(b"hello".to_vec()),
+    }];
+    let outputs = planner_recipient_outputs(&recipients, false).expect("recipient outputs");
+    assert_eq!(outputs.len(), 1);
+    assert_eq!(outputs[0].note_data.len(), 1);
+    assert_eq!(outputs[0].note_data[0].key, "memo");
 }
 
 #[test]
@@ -993,6 +1014,7 @@ async fn fakenet_create_tx_accepts_discounted_fee_schedule() -> Result<(), NockA
     let recipient = RecipientSpec::P2pkh {
         address: signer_pkh,
         amount: 4_000,
+        memo: None,
     };
     let (noun, _) = Wallet::create_tx_command_for_tests(
         format_note_names(std::slice::from_ref(&note_name)),
@@ -1002,7 +1024,6 @@ async fn fakenet_create_tx_accepts_discounted_fee_schedule() -> Result<(), NockA
         None,
         Vec::new(),
         true,
-        None,
         false,
         NoteSelectionStrategyCli::Ascending,
     )?;
@@ -1015,7 +1036,6 @@ async fn fakenet_create_tx_accepts_discounted_fee_schedule() -> Result<(), NockA
         index: None,
         hardened: false,
         include_data: true,
-        memo_data: None,
         sign_keys: Vec::new(),
         save_raw_tx: false,
         note_selection_strategy: NoteSelectionStrategyCli::Ascending,
@@ -1477,12 +1497,12 @@ async fn create_tx_with_planner_accepts_manual_all_v0_notes() -> Result<(), Nock
             vec![RecipientSpec::P2pkh {
                 address: destination.clone(),
                 amount: 20_000,
+                memo: None,
             }],
             false,
             Some(destination.to_base58()),
             Vec::new(),
             true,
-            None,
             false,
             NoteSelectionStrategyCli::Ascending,
         )
@@ -1531,6 +1551,7 @@ async fn migrate_v0_notes_wallet_tx_matches_planner_word_and_fee_counts() -> Res
         &[RecipientSpec::P2pkh {
             address: destination_hash,
             amount: 0,
+            memo: None,
         }],
         true,
     )?;

@@ -5,9 +5,34 @@ use nockchain_types::tx_engine::v1::tx::{Lock, LockPrimitive, Pkh, SpendConditio
 use nockchain_types::{EthAddress, EthAddressParseError};
 use noun_serde::{NounDecode, NounEncode};
 use serde::Deserialize;
+use wallet_tx_builder::note_data::TypedNoteDataEntry;
 use wallet_tx_builder::types::{PlannedOutput, RawNoteDataEntry};
 
 use crate::{CrownError, NockAppError};
+
+/// Validates optional UTF-8 memo text for per-recipient note-data (matches kernel limits).
+pub(crate) fn validate_memo_utf8(memo: Option<&str>) -> Result<Option<Vec<u8>>, NockAppError> {
+    let Some(memo) = memo else {
+        return Ok(None);
+    };
+    let memo_bytes = memo.as_bytes();
+    let estimated_leaves = memo_bytes.len() + 128;
+    if estimated_leaves > 2048 {
+        return Err(CrownError::Unknown(format!(
+            "Memo too large: {} bytes would use ~{} leaves (max 2,048 bytes)",
+            memo_bytes.len(),
+            estimated_leaves
+        ))
+        .into());
+    }
+    if memo_bytes.is_empty() {
+        return Err(CrownError::Unknown(
+            "Memo cannot be empty. Omit the memo field instead.".to_string(),
+        )
+        .into());
+    }
+    Ok(Some(memo_bytes.to_vec()))
+}
 
 pub const BRIDGE_LOCK_ROOT_DEFAULT_B58: &str =
     "AcsPkuhXQoGeEsF91yynpm1kcW17PQ2Z1MEozgx7YnDPkZwrtzLuuqd";
@@ -18,34 +43,46 @@ pub enum RecipientSpecToken {
     P2pkh {
         address: String,
         amount: u64,
+        #[serde(default)]
+        memo: Option<String>,
     },
     Multisig {
         threshold: u64,
         addresses: Vec<String>,
         amount: u64,
+        #[serde(default)]
+        memo: Option<String>,
     },
     #[serde(rename = "bridge-deposit")]
     BridgeDeposit {
         #[serde(rename = "evm-address")]
         evm_address: String,
         amount: u64,
+        #[serde(default)]
+        memo: Option<String>,
     },
 }
 
 #[derive(Debug, Clone, NounEncode, NounDecode, PartialEq)]
 pub enum RecipientSpec {
     #[noun(tag = "pkh")]
-    P2pkh { address: Hash, amount: u64 },
+    P2pkh {
+        address: Hash,
+        amount: u64,
+        memo: Option<Vec<u8>>,
+    },
     #[noun(tag = "multisig")]
     Multisig {
         threshold: u64,
         addresses: Vec<Hash>,
         amount: u64,
+        memo: Option<Vec<u8>>,
     },
     #[noun(tag = "bridge-deposit")]
     BridgeDeposit {
         evm_address: EthAddress,
         amount: u64,
+        memo: Option<Vec<u8>>,
     },
 }
 
@@ -94,12 +131,13 @@ impl RecipientSpecToken {
         Ok(RecipientSpecToken::P2pkh {
             address: p2pkh.to_string(),
             amount,
+            memo: None,
         })
     }
 
     pub fn into_recipient_spec(self) -> Result<RecipientSpec, NockAppError> {
         match self {
-            RecipientSpecToken::P2pkh { address, amount } => {
+            RecipientSpecToken::P2pkh { address, amount, memo } => {
                 if amount == 0 {
                     return Err(CrownError::Unknown(
                         "Recipient amount must be greater than zero".into(),
@@ -111,15 +149,18 @@ impl RecipientSpecToken {
                         "Invalid recipient address '{address}': {err}"
                     )))
                 })?;
+                let memo = validate_memo_utf8(memo.as_deref())?;
                 Ok(RecipientSpec::P2pkh {
                     address: recipient,
                     amount,
+                    memo,
                 })
             }
             RecipientSpecToken::Multisig {
                 threshold,
                 addresses,
                 amount,
+                memo,
             } => {
                 if amount == 0 {
                     return Err(CrownError::Unknown(
@@ -164,15 +205,18 @@ impl RecipientSpecToken {
                         .into(),
                     );
                 }
+                let memo = validate_memo_utf8(memo.as_deref())?;
                 Ok(RecipientSpec::Multisig {
                     threshold,
                     addresses: parsed,
                     amount,
+                    memo,
                 })
             }
             RecipientSpecToken::BridgeDeposit {
                 evm_address,
                 amount,
+                memo,
             } => {
                 if amount == 0 {
                     return Err(CrownError::Unknown(
@@ -187,9 +231,11 @@ impl RecipientSpecToken {
                         format_eth_addr_error(err)
                     )))
                 })?;
+                let memo = validate_memo_utf8(memo.as_deref())?;
                 Ok(RecipientSpec::BridgeDeposit {
                     evm_address: parsed,
                     amount,
+                    memo,
                 })
             }
         }
@@ -259,13 +305,20 @@ pub fn planner_recipient_output(
     include_data: bool,
 ) -> Result<PlannedOutput, NockAppError> {
     match recipient {
-        RecipientSpec::P2pkh { address, amount } => {
+        RecipientSpec::P2pkh {
+            address,
+            amount,
+            memo,
+        } => {
             let lock = pkh_lock(1, std::slice::from_ref(address));
-            let note_data = if include_data {
+            let mut note_data = if include_data {
                 vec![RawNoteDataEntry::from_lock(lock.clone())]
             } else {
                 Vec::new()
             };
+            if let Some(bytes) = memo {
+                note_data.push(TypedNoteDataEntry::memo(bytes.clone()).to_raw_entry());
+            }
             Ok(PlannedOutput {
                 lock_root: lock_root(&lock)?,
                 amount: *amount,
@@ -276,30 +329,41 @@ pub fn planner_recipient_output(
             threshold,
             addresses,
             amount,
+            memo,
         } => {
             let lock = pkh_lock(*threshold, addresses);
+            let mut note_data = vec![RawNoteDataEntry::from_lock(lock.clone())];
+            if let Some(bytes) = memo {
+                note_data.push(TypedNoteDataEntry::memo(bytes.clone()).to_raw_entry());
+            }
             Ok(PlannedOutput {
                 lock_root: lock_root(&lock)?,
                 amount: *amount,
-                // Hoon always includes lock note-data for multisig outputs.
-                note_data: vec![RawNoteDataEntry::from_lock(lock.clone())],
+                note_data,
             })
         }
         RecipientSpec::BridgeDeposit {
             evm_address,
             amount,
-        } => Ok(PlannedOutput {
-            lock_root: Hash::from_base58(BRIDGE_LOCK_ROOT_DEFAULT_B58).map_err(|err| {
-                NockAppError::from(CrownError::Unknown(format!(
-                    "Invalid bridge lock root constant '{}': {}",
-                    BRIDGE_LOCK_ROOT_DEFAULT_B58, err
-                )))
-            })?,
-            amount: *amount,
-            note_data: vec![RawNoteDataEntry::from_bridge_deposit(evm_address_to_based(
+            memo,
+        } => {
+            let mut note_data = vec![RawNoteDataEntry::from_bridge_deposit(evm_address_to_based(
                 *evm_address,
-            ))],
-        }),
+            ))];
+            if let Some(bytes) = memo {
+                note_data.push(TypedNoteDataEntry::memo(bytes.clone()).to_raw_entry());
+            }
+            Ok(PlannedOutput {
+                lock_root: Hash::from_base58(BRIDGE_LOCK_ROOT_DEFAULT_B58).map_err(|err| {
+                    NockAppError::from(CrownError::Unknown(format!(
+                        "Invalid bridge lock root constant '{}': {}",
+                        BRIDGE_LOCK_ROOT_DEFAULT_B58, err
+                    )))
+                })?,
+                amount: *amount,
+                note_data,
+            })
+        }
     }
 }
 
@@ -324,8 +388,7 @@ pub fn planner_refund_output_template(
 #[cfg(test)]
 mod tests {
     use nockapp::noun::slab::{NockJammer, NounSlab};
-    use nockvm::noun::FullDebugCell;
-    use noun_serde::NounDecode;
+    use noun_serde::{NounDecode, NounEncode};
 
     use super::*;
 
@@ -407,22 +470,26 @@ mod tests {
             RecipientSpecToken::P2pkh {
                 address: SAMPLE_P2PKH.to_string(),
                 amount: 1000,
+                memo: None,
             },
             RecipientSpecToken::Multisig {
                 threshold: 1,
                 addresses: vec![SAMPLE_P2PKH_ALT.to_string(), SAMPLE_P2PKH.to_string()],
                 amount: 5,
+                memo: None,
             },
             RecipientSpecToken::BridgeDeposit {
                 evm_address: SAMPLE_EVM_ADDRESS.to_string(),
                 amount: 9,
+                memo: None,
             },
         ];
         let specs = recipient_tokens_to_specs(tokens).expect("tokens -> specs");
         assert_eq!(specs.len(), 3);
         match &specs[0] {
-            RecipientSpec::P2pkh { address, amount } => {
+            RecipientSpec::P2pkh { address, amount, memo } => {
                 assert_eq!(*amount, 1000);
+                assert!(memo.is_none());
                 assert_eq!(
                     address,
                     &Hash::from_base58(SAMPLE_P2PKH).expect("sample p2pkh hash")
@@ -435,6 +502,7 @@ mod tests {
                 threshold,
                 addresses,
                 amount,
+                memo,
             } => {
                 assert_eq!(*threshold, 1);
                 assert_eq!(*amount, 5);
@@ -447,6 +515,7 @@ mod tests {
                     addresses[1],
                     Hash::from_base58(SAMPLE_P2PKH).expect("sample alt hash")
                 );
+                assert!(memo.is_none());
             }
             _ => panic!("second spec should be multisig"),
         }
@@ -454,6 +523,7 @@ mod tests {
             RecipientSpec::BridgeDeposit {
                 evm_address,
                 amount,
+                memo,
                 ..
             } => {
                 assert_eq!(*amount, 9);
@@ -461,6 +531,7 @@ mod tests {
                     evm_address,
                     &EthAddress::from_hex_str(SAMPLE_EVM_ADDRESS).expect("sample evm address")
                 );
+                assert!(memo.is_none());
             }
             _ => panic!("third spec should be bridge deposit"),
         }
@@ -478,6 +549,7 @@ mod tests {
             RecipientSpec::P2pkh {
                 address: Hash::from_base58(SAMPLE_P2PKH).expect("p2pkh hash"),
                 amount: 10,
+                memo: None,
             },
             RecipientSpec::Multisig {
                 threshold: 1,
@@ -486,18 +558,19 @@ mod tests {
                     Hash::from_base58(SAMPLE_P2PKH).expect("p2pkh hash"),
                 ],
                 amount: 20,
+                memo: None,
             },
             RecipientSpec::BridgeDeposit {
                 evm_address: EthAddress::from_hex_str(SAMPLE_EVM_ADDRESS)
                     .expect("sample evm address"),
                 amount: 30,
+                memo: None,
             },
         ];
 
         let mut slab = NounSlab::<NockJammer>::new();
         for spec in specs {
             let noun = spec.to_noun(&mut slab);
-            eprintln!("spec noun: {:?}", FullDebugCell(&noun.as_cell().unwrap()));
             let decoded =
                 RecipientSpec::from_noun(&noun).expect("recipient spec should decode from noun");
             assert_eq!(decoded, spec);
