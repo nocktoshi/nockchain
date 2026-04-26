@@ -1002,6 +1002,7 @@ async fn fakenet_create_tx_accepts_discounted_fee_schedule() -> Result<(), NockA
         None,
         Vec::new(),
         true,
+        None,
         false,
         NoteSelectionStrategyCli::Ascending,
     )?;
@@ -1014,6 +1015,7 @@ async fn fakenet_create_tx_accepts_discounted_fee_schedule() -> Result<(), NockA
         index: None,
         hardened: false,
         include_data: true,
+        memo_data: None,
         sign_keys: Vec::new(),
         save_raw_tx: false,
         note_selection_strategy: NoteSelectionStrategyCli::Ascending,
@@ -1480,6 +1482,7 @@ async fn create_tx_with_planner_accepts_manual_all_v0_notes() -> Result<(), Nock
             Some(destination.to_base58()),
             Vec::new(),
             true,
+            None,
             false,
             NoteSelectionStrategyCli::Ascending,
         )

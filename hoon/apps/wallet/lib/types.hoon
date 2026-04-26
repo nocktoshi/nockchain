@@ -2,6 +2,8 @@
 /=  zo  /common/zoon
 /=  *  /common/zose
 /=  bridge  /apps/bridge/types
+/=  *  /common/zeke
+/=  bridge  /apps/bridge/types
 /=  dumb  /apps/dumbnet/lib/types
 /=  s10  /apps/wallet/lib/s10
 |_  bc=blockchain-constants:transact
@@ -235,6 +237,48 @@
 +$  lock-data
   $%  [%0 =lock:transact]
   ==
+::  Memos: Optional memo data stored in note-data
+::  this data is stored under the %memo key in $note-data.
+++  memo-data
+  =<  form
+  |%
+  +$  form  (list @ux)
+  ++  chunk-63
+    |=  a=@ux
+    ^-  (list @ux)
+    =|  chunks=(list @ux)
+    |-
+    ?:  =(a 0)
+      chunks
+    =/  chunk  (dis a (dec (bex 63)))
+    %=  $
+      chunks  [chunk chunks]
+      a       (rsh [0 63] a)
+    ==
+  ++  based
+    |=  =form
+    ^-  (list @ux)
+    =|  result=(list @ux)
+    |-
+    ?~  form  result
+    %=  $
+      result  (weld result (chunk-63 i.form))
+      form    t.form
+    ==
+  ++  hashable
+    |=  =form
+    ^-  hashable:tip5
+    |-
+    ?~  form  leaf+~
+    [leaf+i.form $(form t.form)]
+  ++  hash
+    |=  =form
+    %-  hash-hashable:tip5
+    (hashable form)
+  --
+
+::
+::  $transaction-tree: tree of transactions
 ::
 +$  transaction-tree
   $+  wallet-transaction-tree
@@ -418,6 +462,7 @@
                                                       ::  if the lock is not a standard 1-of-1 pkh or coinbase, the wallet won't
                                                       ::  be able to guess it, so the funds could be lost forever if the user.
                                                       ::  doesn't keep track of the lock.
+        memo-data=memo-data                           ::  optional memo bytes (see ++memo-data)
         save-raw-tx=?                                 ::  if %.y, saves jams of the raw-tx and its hashable into a txs-debug folder
                                                       ::  in the current working directory
         =selection-strategy
