@@ -237,33 +237,6 @@
 +$  lock-data
   $%  [%0 =lock:transact]
   ==
-::  Blob Data (packed blob):
-::    Flat $(list belt)$ as `[byte-len=@ belt=little-endian-u32]`
-++  blob-data
-  =<  form
-  |%
-  +$  form
-    $+  blob-data
-    (list belt)
-  ++  based
-    |=  =form
-    ^-  ?
-    |-
-    ?~  form  %&
-    ?&  (^based i.form)
-        $(form t.form)
-    ==
-  ++  hashable
-    |=  =form
-    ^-  hashable:tip5
-    |-
-    ?~  form  leaf+~
-    [leaf+i.form $(form t.form)]
-  ++  hash
-    |=  =form
-    %-  hash-hashable:tip5
-    (hashable form)
-  --
 ::  Memos: Optional memo data stored in note-data
 ::  this data is stored under the %memo key in $note-data.
 ++  memo-data
@@ -282,6 +255,7 @@
       chunks  [chunk chunks]
       a       (rsh [0 63] a)
     ==
+  ::  +based: map each list atom through +chunk-63 and weld (used by +hashable).
   ++  based
     |=  =form
     ^-  (list @ux)
@@ -303,6 +277,7 @@
     %-  hash-hashable:tip5
     (hashable form)
   --
+
 ::
 ::  $transaction-tree: tree of transactions
 ::
@@ -500,10 +475,10 @@
   =<  form
   |%
   +$  form
-    $%  [%pkh recipient=hash:transact gift=coins:transact memo=(unit blob-data) blob=(unit blob-data)]
-        [%multisig threshold=@ participants=(list hash:transact) gift=coins:transact memo=(unit blob-data) blob=(unit blob-data)]
-        [%lock-root root=hash:transact gift=coins:transact]
-        [%bridge-deposit address=evm-address:bridge gift=coins:transact]
+    $%  [%pkh recipient=hash:transact gift=coins:transact memo=(unit memo-data) blob-data=(list [key=@tas jam=@])]
+        [%multisig threshold=@ participants=(list hash:transact) gift=coins:transact memo=(unit memo-data) blob-data=(list [key=@tas jam=@])]
+        [%lock-root root=hash:transact gift=coins:transact memo=(unit memo-data) blob-data=(list [key=@tas jam=@])]
+        [%bridge-deposit address=evm-address:bridge gift=coins:transact memo=(unit memo-data) blob-data=(list [key=@tas jam=@])]
     ==
   ++  gift
     |=  =form
@@ -534,7 +509,6 @@
                                                       ::  if the lock is not a standard 1-of-1 pkh or coinbase, the wallet won't
                                                       ::  be able to guess it, so the funds could be lost forever if the user.
                                                       ::  doesn't keep track of the lock.
-        memo-data=(list @ux)                           ::  optional memo on note-data (highest-gift seed)
         save-raw-tx=?                                 ::  if %.y, saves jams of the raw-tx and its hashable into a txs-debug folder
                                                       ::  in the current working directory
         =selection-strategy

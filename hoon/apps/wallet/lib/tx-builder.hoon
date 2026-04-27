@@ -17,7 +17,6 @@
         refund-pkh=(unit hash:transact)
         get-note=$-(nname:transact nnote:transact)
         include-data=?
-        memo-data=memo-data:wt
         note-selection=selection-strategy:wt
         height=page-number:transact
     ==
@@ -85,7 +84,7 @@
         [%pkh [m=1 (z-silt:zo ~[u.refund-pkh])]]~
       %+  fall  multisig-lock
       [%pkh [m=1 (z-silt:zo ~[sender-pkh])]]~
-    (create-spends-1 notes-v1 orders fee sender-pkh refund-lock memo-data)
+    (create-spends-1 notes-v1 orders fee sender-pkh refund-lock)
 ::
 ~>  %slog.[0 'Notes must all be the same version!!!']  !!
 ::
@@ -215,7 +214,6 @@
           fee=@
           sender-pkh=hash:transact
           refund-lock=lock:transact
-          =memo-data:wt
       ==
   ^-  [=spends:v1:transact witness-data:wt transaction-display:wt]
   =/  initial-state=spend-build-state:wt
@@ -233,100 +231,11 @@
           =(0 remaining-fee)
       ==
     ~|('Insufficient funds to pay fee and gift' !!)
-  ::  apply memo to spends after they're built (before signing)
-  =/  [final-spends=spends:v1:transact modified-name=(unit nname:transact)]
-    ?:  =(~ memo-data)
-      [spends.final-state ~]
-    (add-memo-to-last-seed-by-lock spends.final-state memo-data)
-  ::  sign all spends once (including any with memo applied)
   =/  final-wd=witness-data:wt
-    %+  roll  ~(tap z-by:zo final-spends)
+    %+  roll  ~(tap z-by:zo spends.final-state)
     |=  [[nam=nname:transact sp=spend:v1:transact] acc=witness-data:wt]
     (sign-spend nam sp acc)
-  [final-spends final-wd display.final-state]
-::
-++  add-memo-to-last-seed-by-lock
-  |=  [=spends:v1:transact =memo-data:wt]
-  ^-  [spends:v1:transact (unit nname:transact)]
-  =/  all-seeds=(list [=nname:transact seed-idx=@ =seed:v1:transact])
-    %+  roll  ~(tap z-by:zo spends)
-    |=  $:  [nam=nname:transact sp=spend:v1:transact]
-            acc=(list [nname:transact @ seed:v1:transact])
-        ==
-    =/  seed-list=(list seed:v1:transact)
-      ?-  -.sp
-        %0  ~(tap z-in:zo seeds.+.sp)
-        %1  ~(tap z-in:zo seeds.+.sp)
-      ==
-    %+  weld  acc
-    %+  turn  (gulf 0 (dec (lent seed-list)))
-    |=  idx=@
-    [nam idx (snag idx seed-list)]
-  ::
-  ::  group seeds by lock-root
-  =/  by-lock=(z-map:zo hash:transact (list [nname:transact @ seed:v1:transact]))
-    %+  roll  all-seeds
-    |=  $:  item=[nam=nname:transact idx=@ sed=seed:v1:transact]
-            acc=(z-map:zo hash:transact (list [nname:transact @ seed:v1:transact]))
-        ==
-    =/  existing=(unit (list [nname:transact @ seed:v1:transact]))
-      (~(get z-by:zo acc) lock-root.sed.item)
-    %+  ~(put z-by:zo acc)
-      lock-root.sed.item
-    ?~  existing  ~[item]
-    [item u.existing]
-  ::
-  ::  NOTE: tx engine processes seeds in order and only preserves note-data
-  ::  from the LAST seed for each lock-root. We add memo to the LAST seed
-  ::  so it survives the merge.
-  ::
-  ::  find the lock-root with highest total gift and add memo to its last seed
-  =/  best-lock-info=(unit [hash:transact @])
-    %+  roll  ~(tap z-by:zo by-lock)
-    |=  $:  [lock=hash:transact seeds=(list [nname:transact @ seed:v1:transact])]
-            acc=(unit [hash:transact @])
-        ==
-    =/  total-gift=@
-      %+  roll  seeds
-      |=([[* * sed=seed:v1:transact] sum=@] (add gift.sed sum))
-    ?~  acc  `[lock total-gift]
-    ?:  (gth total-gift +.u.acc)  `[lock total-gift]
-    acc
-  ::
-  ?~  best-lock-info  [spends ~]
-  =/  best-lock=hash:transact  -.u.best-lock-info
-  =/  target-seeds=(unit (list [nname:transact @ seed:v1:transact]))
-    (~(get z-by:zo by-lock) best-lock)
-  ?~  target-seeds  [spends ~]
-  ::  get the LAST seed in the group (first in list since we prepended)
-  =/  target=[nam=nname:transact idx=@ sed=seed:v1:transact]
-    (snag 0 u.target-seeds)
-  =/  target-spend=(unit spend:v1:transact)
-    (~(get z-by:zo spends) nam.target)
-  ?~  target-spend  [spends ~]
-  =/  seed-list=(list seed:v1:transact)
-    ?-  -.u.target-spend
-      %0  ~(tap z-in:zo seeds.+.u.target-spend)
-      %1  ~(tap z-in:zo seeds.+.u.target-spend)
-    ==
-  =/  updated-seeds=seeds:v1:transact
-    %-  z-silt:zo
-    %+  turn  (gulf 0 (dec (lent seed-list)))
-    |=  i=@
-    =/  s=seed:v1:transact  (snag i seed-list)
-    ?:  &(=(i idx.target) =(lock-root.s lock-root.sed.target))
-      =/  new-note-data=note-data:v1:transact
-        (~(put z-by:zo note-data.s) %memo memo-data)
-      s(note-data new-note-data)
-    s
-  =/  updated-spend=spend:v1:transact
-    ?-  -.u.target-spend
-      %0  [%0 +.u.target-spend(seeds updated-seeds)]
-      %1  [%1 +.u.target-spend(seeds updated-seeds)]
-    ==
-  =/  updated-spends=spends:v1:transact
-    (~(put z-by:zo spends) nam.target updated-spend)
-  [updated-spends `nam.target]
+  [spends.final-state final-wd display.final-state]
 ::
 ++  process-spends-1
   |=  $:  notes=(list nnote-1:v1:transact)
@@ -494,22 +403,32 @@
       %-  ~(put z-by:zo nd)
       [%bridge [%0 %base (evm-address-to-based:bridge addr.metadata)]]
     ==
-  =/  memo=(unit blob-data:wt)
-    ?-    -.spec
-      %pkh           memo.spec
-      %multisig      memo.spec
-      %lock-root     ~
-      %bridge-deposit  ~
+  ::  optional structured note-data (e.g. nns/v1/* keys); jam is raw cue input
+  =/  maybe-blob-data=(list [key=@tas jam=@])
+    ?-  -.spec
+      %pkh              blob-data.spec
+      %multisig         blob-data.spec
+      %lock-root        blob-data.spec
+      %bridge-deposit   blob-data.spec
     ==
-  =/  blob=(unit blob-data:wt)
-    ?-    -.spec
-      %pkh           blob.spec
-      %multisig      blob.spec
-      %lock-root     ~
-      %bridge-deposit  ~
+  =.  nd
+    %+  roll  maybe-blob-data
+    |=  [[key=@tas jam=@] acc=_nd]
+    =/  maybe=(unit *)  ((soft *) (cue jam))
+    ?~  maybe
+      ~|('wallet: blob-data jam did not cue to a valid noun' !!)
+    (~(put z-by:zo acc) key u.maybe)
+  =/  maybe-memo=(unit memo-data:wt)
+    ?-  -.spec
+      %pkh              memo.spec
+      %multisig         memo.spec
+      %lock-root        memo.spec
+      %bridge-deposit   memo.spec
     ==
-  =.  nd  ?~(memo nd (~(put z-by:zo nd) %memo u.memo))
-  =.  nd  ?~(blob nd (~(put z-by:zo nd) %blob u.blob))
+  =.  nd
+    ?~  maybe-memo
+      nd
+    (~(put z-by:zo nd) %memo u.maybe-memo)
   =/  seed=seed:v1:transact
     :*  output-source=~
         lock-root=lock-root
@@ -521,6 +440,23 @@
       (add gifts (order-gift spec))
       %-  ~(put z-by:zo output-lock-map)
       [(first:nname:transact lock-root.seed) metadata]
+  ==
+::
+++  memo-order-valid
+  |=  ord=order:wt
+  ^-  ?
+  ::  memo is optional: ~ means omit; only validate when a payload is present
+  =/  maybe-memo=(unit memo-data:wt)
+    ?-  -.ord
+      %pkh              memo.ord
+      %multisig         memo.ord
+      %lock-root        memo.ord
+      %bridge-deposit   memo.ord
+    ==
+  ?~  maybe-memo  %.y
+  =/  m=memo-data:wt  u.maybe-memo
+  ?&  (gth (lent m) 0)
+      (lte (lent m) 2.048)
   ==
 ::
 ++  orders-valid
@@ -535,6 +471,8 @@
       [%.n %bridge-orders-exceeds-one]
     [%.y ~]
   =/  ord=order:wt  i.orders
+  ?.  (memo-order-valid ord)
+    [%.n %memo-invalid]
   ?-    -.ord
       %pkh
     ?:  =(0 gift.ord)
@@ -601,7 +539,7 @@
   ::
       %pkh
     [%lock [%pkh [m=1 (z-silt:zo ~[recipient.ord])]]~ include-data]
-  ::
+    ::
       %multisig
     =/  participants=(list hash:transact)  participants.ord
     =/  allowed=(z-set:zo hash:transact)  (z-silt:zo participants)
@@ -621,8 +559,8 @@
   ?~  participants
     ~|('Invalid lock, no participants specified.' !!)
   ?:  &(=(threshold 1) =(1 (lent participants)))
-    (some [%pkh recipient=i.participants gift=gift memo=~ blob=~])
-  (some [%multisig threshold=threshold participants=participants gift=gift memo=~ blob=~])
+    (some [%pkh recipient=i.participants gift=gift memo=~ blob-data=~])
+  (some [%multisig threshold=threshold participants=participants gift=gift memo=~ blob-data=~])
 ::
 ++  build-refund-order
   |=  [refund=@ refund-lock=lock:transact]
