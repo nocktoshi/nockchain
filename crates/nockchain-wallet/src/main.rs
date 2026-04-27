@@ -83,8 +83,8 @@ async fn main() -> Result<(), NockAppError> {
         .expect("default provider already set elsewhere");
 
     let mut cli = WalletCli::parse();
-    // Tiny stacks fault on Tip5-heavy paths (e.g. z-map +tip ordering in create-tx).
-    cli.boot.stack_size = NockStackSize::Normal;
+    // Use a smaller stack size for the wallet
+    cli.boot.stack_size = NockStackSize::Tiny;
     boot::init_default_tracing(&cli.boot.clone()); // Init tracing early
 
     if let Commands::TxAccepted { tx_id } = &cli.command {
