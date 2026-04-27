@@ -411,9 +411,19 @@
       %lock-root        blob-data.spec
       %bridge-deposit   blob-data.spec
     ==
+  ::  Insert blob keys in +gor-tip order (same ordering as +z-by). Unsorted
+  ::  JSON blob order can otherwise interleave badly with %lock and trip +z-by
+  ::  +put jets (see /common/zoon.hoon +put ~> ?> ?=(^ d)).
+  =/  sorted-blob-data=(list [key=@tas jam=@])
+    %+  sort  maybe-blob-data
+    |=  [[ka=@tas ja=@] [kb=@tas jb=@]]
+    ?:  =(ka kb)
+      (lth ja jb)
+    (gor-tip:zo ka kb)
   =.  nd
-    %+  roll  maybe-blob-data
+    %+  roll  sorted-blob-data
     |=  [[key=@tas jam=@] acc=_nd]
+    ?>  ?=(@ jam)
     =/  maybe=(unit *)  ((soft *) (cue jam))
     ?~  maybe
       ~|('wallet: blob-data jam did not cue to a valid noun' !!)
