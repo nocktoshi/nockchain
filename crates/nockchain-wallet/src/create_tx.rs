@@ -9,25 +9,6 @@ use wallet_tx_builder::types::CandidateNote;
 
 use super::*;
 
-fn validate_memo_data(memo_data: &Option<String>) -> Result<(), NockAppError> {
-    if let Some(memo) = memo_data {
-        let memo_bytes = memo.as_bytes().len();
-        let estimated_leaves = memo_bytes + 128;
-        if estimated_leaves > 2048 {
-            return Err(NockAppError::from(CrownError::Unknown(format!(
-                "Memo too large: {} bytes would use ~{} leaves (max 2,048 bytes)",
-                memo_bytes, estimated_leaves
-            ))));
-        }
-        if memo_bytes == 0 {
-            return Err(NockAppError::from(CrownError::Unknown(
-                "Memo cannot be empty. Omit --memo-data flag instead.".to_string(),
-            )));
-        }
-    }
-    Ok(())
-}
-
 pub(crate) fn ensure_manual_planner_parity(
     requested_names: &[Name],
     planned_names: &[Name],
@@ -197,7 +178,6 @@ struct CreateTxRequest {
     refund_pkh: Option<String>,
     sign_keys: Vec<(u64, bool)>,
     include_data: bool,
-    memo_data: Option<String>,
     save_raw_tx: bool,
     note_selection: NoteSelectionStrategyCli,
 }
@@ -824,15 +804,12 @@ impl Wallet {
         refund_pkh: Option<String>,
         sign_keys: Vec<(u64, bool)>,
         include_data: bool,
-        memo_data: Option<String>,
         save_raw_tx: bool,
         note_selection: NoteSelectionStrategyCli,
     ) -> CommandNoun<NounSlab> {
         let planner_error = |reason: String| -> CommandNoun<NounSlab> {
             Err(CrownError::Unknown(format!("create-tx planner failed: {}", reason)).into())
         };
-
-        validate_memo_data(&memo_data)?;
 
         let snapshot = if let Some(snapshot) = synced_snapshot {
             snapshot
@@ -1098,7 +1075,6 @@ impl Wallet {
             refund_pkh,
             sign_keys,
             include_data,
-            memo_data,
             save_raw_tx,
             note_selection,
         })
@@ -1232,7 +1208,7 @@ impl Wallet {
                 address: destination_hash.clone(),
                 amount: 0,
                 memo: None,
-                blob: None,
+                blob_data: vec![],
             }],
             true,
         )
@@ -1331,14 +1307,13 @@ impl Wallet {
                                 address: destination_hash.clone(),
                                 amount: migrated_amount,
                                 memo: None,
-                                blob: None,
+                                blob_data: vec![],
                             }],
                             fee: plan.final_fee,
                             allow_low_fee: false,
                             refund_pkh: Some(destination_hash.to_base58()),
                             sign_keys: signer.sign_keys(),
                             include_data: true,
-                            memo_data: None,
                             save_raw_tx: false,
                             note_selection: NoteSelectionStrategyCli::Ascending,
                         },
@@ -1435,8 +1410,6 @@ impl Wallet {
         slab: &mut NounSlab,
         request: &CreateTxRequest,
     ) -> Result<Noun, NockAppError> {
-        validate_memo_data(&request.memo_data)?;
-
         let names_vec = Self::parse_note_names(&request.names)?;
         let names_noun = names_vec
             .into_iter()
@@ -1466,17 +1439,6 @@ impl Wallet {
         };
         let include_data_noun = request.include_data.to_noun(slab);
         let allow_low_fee_noun = request.allow_low_fee.to_noun(slab);
-        let memo_data_noun = if let Some(memo_str) = request.memo_data.as_ref() {
-            let bytes = memo_str.as_bytes();
-            let mut list = D(0);
-            for &byte in bytes.iter().rev() {
-                let byte_noun = D(u64::from(byte));
-                list = Cell::new(slab, byte_noun, list).as_noun();
-            }
-            list
-        } else {
-            SIG
-        };
         let save_raw_tx_noun = request.save_raw_tx.to_noun(slab);
         let note_selection_noun = make_tas(slab, request.note_selection.tas_label()).as_noun();
 
@@ -1484,7 +1446,7 @@ impl Wallet {
             slab,
             &[
                 names_noun, order_noun, fee_noun, allow_low_fee_noun, sign_key_noun, refund_noun,
-                include_data_noun, memo_data_noun, save_raw_tx_noun, note_selection_noun,
+                include_data_noun, save_raw_tx_noun, note_selection_noun,
             ],
         ))
     }
@@ -1537,7 +1499,6 @@ impl Wallet {
             refund_pkh,
             sign_keys,
             include_data,
-            memo_data: None,
             save_raw_tx,
             note_selection,
         })

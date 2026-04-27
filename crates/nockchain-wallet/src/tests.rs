@@ -21,7 +21,6 @@ use tempfile::TempDir;
 use tokio::sync::mpsc;
 use wallet_tx_builder::adapter::normalize_balance_pages;
 use wallet_tx_builder::fee::{compute_minimum_fee, FeeInputs};
-use wallet_tx_builder::note_data::PackedBlob;
 use wallet_tx_builder::planner::plan_create_tx;
 use wallet_tx_builder::types::{
     CandidateVersionPolicy, ChainContext, PlanRequest, PlanningMode, RawNoteDataEntry,
@@ -866,18 +865,20 @@ fn planner_recipient_outputs_match_hoon_lock_root_vectors() {
             address: address_a.clone(),
             amount: 5,
             memo: None,
-            blob: None,
+            blob_data: vec![],
         },
         RecipientSpec::Multisig {
             threshold: 2,
             addresses: vec![address_a.clone(), address_b],
             amount: 7,
             memo: None,
-            blob: None,
+            blob_data: vec![],
         },
         RecipientSpec::BridgeDeposit {
             evm_address: bridge_address,
             amount: 9,
+            memo: None,
+            blob_data: vec![],
         },
     ];
 
@@ -915,18 +916,20 @@ fn planner_recipient_outputs_respect_include_data_for_p2pkh_but_not_multisig_or_
             address: address_a.clone(),
             amount: 5,
             memo: None,
-            blob: None,
+            blob_data: vec![],
         },
         RecipientSpec::Multisig {
             threshold: 2,
             addresses: vec![address_a.clone(), address_b],
             amount: 7,
             memo: None,
-            blob: None,
+            blob_data: vec![],
         },
         RecipientSpec::BridgeDeposit {
             evm_address: bridge_address,
             amount: 9,
+            memo: None,
+            blob_data: vec![],
         },
     ];
 
@@ -945,8 +948,8 @@ fn planner_recipient_outputs_attach_memo_even_when_p2pkh_lock_data_disabled() {
     let recipients = vec![RecipientSpec::P2pkh {
         address: address_a,
         amount: 5,
-        memo: Some(PackedBlob(b"hello".to_vec())),
-        blob: None,
+        memo: Some(b"hello".to_vec()),
+        blob_data: vec![],
     }];
     let outputs = planner_recipient_outputs(&recipients, false).expect("recipient outputs");
     assert_eq!(outputs.len(), 1);
@@ -1087,7 +1090,7 @@ async fn fakenet_create_tx_accepts_discounted_fee_schedule() -> Result<(), NockA
         address: signer_pkh,
         amount: 4_000,
         memo: None,
-        blob: None,
+        blob_data: vec![],
     };
     let (noun, _) = Wallet::create_tx_command_for_tests(
         format_note_names(std::slice::from_ref(&note_name)),
@@ -1109,7 +1112,6 @@ async fn fakenet_create_tx_accepts_discounted_fee_schedule() -> Result<(), NockA
         index: None,
         hardened: false,
         include_data: true,
-        memo_data: None,
         sign_keys: Vec::new(),
         save_raw_tx: false,
         note_selection_strategy: NoteSelectionStrategyCli::Ascending,
@@ -1572,13 +1574,12 @@ async fn create_tx_with_planner_accepts_manual_all_v0_notes() -> Result<(), Nock
                 address: destination.clone(),
                 amount: 20_000,
                 memo: None,
-                blob: None,
+                blob_data: vec![],
             }],
             false,
             Some(destination.to_base58()),
             Vec::new(),
             true,
-            None,
             false,
             NoteSelectionStrategyCli::Ascending,
         )
@@ -1628,7 +1629,7 @@ async fn migrate_v0_notes_wallet_tx_matches_planner_word_and_fee_counts() -> Res
             address: destination_hash,
             amount: 0,
             memo: None,
-            blob: None,
+            blob_data: vec![],
         }],
         true,
     )?;
