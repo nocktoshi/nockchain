@@ -429,10 +429,10 @@
   =<  form
   |%
   +$  form
-    $%  [%pkh recipient=hash:transact gift=coins:transact memo=(unit memo-data)]
-        [%multisig threshold=@ participants=(list hash:transact) gift=coins:transact memo=(unit memo-data)]
-        [%lock-root root=hash:transact gift=coins:transact memo=(unit memo-data)]
-        [%bridge-deposit address=evm-address:bridge gift=coins:transact memo=(unit memo-data)]
+    $%  [%pkh recipient=hash:transact gift=coins:transact memo=(unit memo-data) blob-data=(list [key=@tas jam=@])]
+        [%multisig threshold=@ participants=(list hash:transact) gift=coins:transact memo=(unit memo-data) blob-data=(list [key=@tas jam=@])]
+        [%lock-root root=hash:transact gift=coins:transact memo=(unit memo-data) blob-data=(list [key=@tas jam=@])]
+        [%bridge-deposit address=evm-address:bridge gift=coins:transact memo=(unit memo-data) blob-data=(list [key=@tas jam=@])]
     ==
   ++  gift
     |=  =form

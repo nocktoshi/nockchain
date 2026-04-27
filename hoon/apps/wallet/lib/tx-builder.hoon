@@ -403,6 +403,21 @@
       %-  ~(put z-by:zo nd)
       [%bridge [%0 %base (evm-address-to-based:bridge addr.metadata)]]
     ==
+  ::  optional structured note-data (e.g. nns/v1/* keys); jam is raw cue input
+  =/  maybe-blob-data=(list [key=@tas jam=@])
+    ?-  -.spec
+      %pkh              blob-data.spec
+      %multisig         blob-data.spec
+      %lock-root        blob-data.spec
+      %bridge-deposit   blob-data.spec
+    ==
+  =.  nd
+    %+  roll  maybe-blob-data
+    |=  [[key=@tas jam=@] acc=_nd]
+    =/  maybe=(unit *)  ((soft *) (cue jam))
+    ?~  maybe
+      ~|('wallet: blob-data jam did not cue to a valid noun' !!)
+    (~(put z-by:zo acc) key u.maybe)
   =/  maybe-memo=(unit memo-data:wt)
     ?-  -.spec
       %pkh              memo.spec
@@ -544,8 +559,8 @@
   ?~  participants
     ~|('Invalid lock, no participants specified.' !!)
   ?:  &(=(threshold 1) =(1 (lent participants)))
-    (some [%pkh recipient=i.participants gift=gift memo=~])
-  (some [%multisig threshold=threshold participants=participants gift=gift memo=~])
+    (some [%pkh recipient=i.participants gift=gift memo=~ blob-data=~])
+  (some [%multisig threshold=threshold participants=participants gift=gift memo=~ blob-data=~])
 ::
 ++  build-refund-order
   |=  [refund=@ refund-lock=lock:transact]

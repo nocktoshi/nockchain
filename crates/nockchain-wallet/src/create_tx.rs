@@ -1189,6 +1189,7 @@ impl Wallet {
                 address: destination_hash.clone(),
                 amount: 0,
                 memo: None,
+                blob_data: vec![],
             }],
             true,
         )
@@ -1287,6 +1288,7 @@ impl Wallet {
                                 address: destination_hash.clone(),
                                 amount: migrated_amount,
                                 memo: None,
+                                blob_data: vec![],
                             }],
                             fee: plan.final_fee,
                             allow_low_fee: false,

@@ -1,5 +1,7 @@
 use std::collections::BTreeSet;
 
+use bytes::Bytes;
+use hex::FromHex;
 use nockchain_types::common::Hash;
 use nockchain_types::tx_engine::v1::tx::{Lock, LockPrimitive, Pkh, SpendCondition};
 use nockchain_types::{EthAddress, EthAddressParseError};
@@ -9,6 +11,70 @@ use wallet_tx_builder::note_data::TypedNoteDataEntry;
 use wallet_tx_builder::types::{PlannedOutput, RawNoteDataEntry};
 
 use crate::{CrownError, NockAppError};
+
+/// JSON shape for per-output blob note-data entries (`jam_hex` is raw jam bytes; kernel `cue`s into the map).
+#[derive(Debug, Clone, Deserialize)]
+pub struct BlobDataJson {
+    /// Note-data key (e.g. `nns/v1/claim-id`); must be a valid `@tas`-style path.
+    pub key: String,
+    /// Lowercase hex encoding of jam bytes for this key.
+    pub jam_hex: String,
+}
+
+const MAX_BLOB_DATA_TOTAL_BYTES: usize = 256 * 1024;
+
+pub(crate) fn parse_blob_data_json(
+    entries: Vec<BlobDataJson>,
+) -> Result<Vec<RawNoteDataEntry>, NockAppError> {
+    if entries.is_empty() {
+        return Ok(Vec::new());
+    }
+    let mut out = Vec::with_capacity(entries.len());
+    let mut total = 0usize;
+    for entry in entries {
+        let key = entry.key.trim().to_string();
+        if key.is_empty() {
+            return Err(CrownError::Unknown(
+                "blob_data entry key cannot be empty".into(),
+            )
+            .into());
+        }
+        let jam_hex = entry.jam_hex.trim().replace(' ', "");
+        if jam_hex.len() % 2 != 0 {
+            return Err(CrownError::Unknown(format!(
+                "blob_data key '{}': jam_hex must have even length",
+                key
+            ))
+            .into());
+        }
+        let jam = Vec::from_hex(&jam_hex).map_err(|err| {
+            NockAppError::from(CrownError::Unknown(format!(
+                "blob_data key '{}': invalid hex: {err}",
+                key
+            )))
+        })?;
+        if jam.is_empty() {
+            return Err(CrownError::Unknown(format!(
+                "blob_data key '{}': jam must not be empty",
+                key
+            ))
+            .into());
+        }
+        total = total.saturating_add(jam.len());
+        if total > MAX_BLOB_DATA_TOTAL_BYTES {
+            return Err(CrownError::Unknown(format!(
+                "blob_data exceeds max total jam size ({} bytes)",
+                MAX_BLOB_DATA_TOTAL_BYTES
+            ))
+            .into());
+        }
+        out.push(RawNoteDataEntry {
+            key,
+            blob: Bytes::from(jam),
+        });
+    }
+    Ok(out)
+}
 
 /// Validates optional UTF-8 memo text for per-recipient note-data (matches kernel limits).
 pub(crate) fn validate_memo_utf8(memo: Option<&str>) -> Result<Option<Vec<u8>>, NockAppError> {
@@ -45,6 +111,8 @@ pub enum RecipientSpecToken {
         amount: u64,
         #[serde(default)]
         memo: Option<String>,
+        #[serde(default)]
+        blob_data: Vec<BlobDataJson>,
     },
     Multisig {
         threshold: u64,
@@ -52,6 +120,8 @@ pub enum RecipientSpecToken {
         amount: u64,
         #[serde(default)]
         memo: Option<String>,
+        #[serde(default)]
+        blob_data: Vec<BlobDataJson>,
     },
     #[serde(rename = "bridge-deposit")]
     BridgeDeposit {
@@ -60,6 +130,8 @@ pub enum RecipientSpecToken {
         amount: u64,
         #[serde(default)]
         memo: Option<String>,
+        #[serde(default)]
+        blob_data: Vec<BlobDataJson>,
     },
 }
 
@@ -70,6 +142,7 @@ pub enum RecipientSpec {
         address: Hash,
         amount: u64,
         memo: Option<Vec<u8>>,
+        blob_data: Vec<RawNoteDataEntry>,
     },
     #[noun(tag = "multisig")]
     Multisig {
@@ -77,12 +150,14 @@ pub enum RecipientSpec {
         addresses: Vec<Hash>,
         amount: u64,
         memo: Option<Vec<u8>>,
+        blob_data: Vec<RawNoteDataEntry>,
     },
     #[noun(tag = "bridge-deposit")]
     BridgeDeposit {
         evm_address: EthAddress,
         amount: u64,
         memo: Option<Vec<u8>>,
+        blob_data: Vec<RawNoteDataEntry>,
     },
 }
 
@@ -132,12 +207,18 @@ impl RecipientSpecToken {
             address: p2pkh.to_string(),
             amount,
             memo: None,
+            blob_data: Vec::new(),
         })
     }
 
     pub fn into_recipient_spec(self) -> Result<RecipientSpec, NockAppError> {
         match self {
-            RecipientSpecToken::P2pkh { address, amount, memo } => {
+            RecipientSpecToken::P2pkh {
+                address,
+                amount,
+                memo,
+                blob_data,
+            } => {
                 if amount == 0 {
                     return Err(CrownError::Unknown(
                         "Recipient amount must be greater than zero".into(),
@@ -150,10 +231,12 @@ impl RecipientSpecToken {
                     )))
                 })?;
                 let memo = validate_memo_utf8(memo.as_deref())?;
+                let blob_data = parse_blob_data_json(blob_data)?;
                 Ok(RecipientSpec::P2pkh {
                     address: recipient,
                     amount,
                     memo,
+                    blob_data,
                 })
             }
             RecipientSpecToken::Multisig {
@@ -161,6 +244,7 @@ impl RecipientSpecToken {
                 addresses,
                 amount,
                 memo,
+                blob_data,
             } => {
                 if amount == 0 {
                     return Err(CrownError::Unknown(
@@ -206,17 +290,20 @@ impl RecipientSpecToken {
                     );
                 }
                 let memo = validate_memo_utf8(memo.as_deref())?;
+                let blob_data = parse_blob_data_json(blob_data)?;
                 Ok(RecipientSpec::Multisig {
                     threshold,
                     addresses: parsed,
                     amount,
                     memo,
+                    blob_data,
                 })
             }
             RecipientSpecToken::BridgeDeposit {
                 evm_address,
                 amount,
                 memo,
+                blob_data,
             } => {
                 if amount == 0 {
                     return Err(CrownError::Unknown(
@@ -232,10 +319,12 @@ impl RecipientSpecToken {
                     )))
                 })?;
                 let memo = validate_memo_utf8(memo.as_deref())?;
+                let blob_data = parse_blob_data_json(blob_data)?;
                 Ok(RecipientSpec::BridgeDeposit {
                     evm_address: parsed,
                     amount,
                     memo,
+                    blob_data,
                 })
             }
         }
@@ -288,6 +377,15 @@ fn evm_address_to_based(evm_address: EthAddress) -> [u64; 3] {
     [limbs[0], limbs[1], limbs[2]]
 }
 
+fn push_blob_data(note_data: &mut Vec<RawNoteDataEntry>, blobs: &[RawNoteDataEntry]) {
+    for entry in blobs {
+        note_data.push(RawNoteDataEntry {
+            key: entry.key.clone(),
+            blob: entry.blob.clone(),
+        });
+    }
+}
+
 /// Converts CLI recipient specs into planner outputs with tx-builder-compatible note-data.
 pub fn planner_recipient_outputs(
     recipients: &[RecipientSpec],
@@ -309,6 +407,7 @@ pub fn planner_recipient_output(
             address,
             amount,
             memo,
+            blob_data,
         } => {
             let lock = pkh_lock(1, std::slice::from_ref(address));
             let mut note_data = if include_data {
@@ -316,6 +415,7 @@ pub fn planner_recipient_output(
             } else {
                 Vec::new()
             };
+            push_blob_data(&mut note_data, blob_data);
             if let Some(bytes) = memo {
                 note_data.push(TypedNoteDataEntry::memo(bytes.clone()).to_raw_entry());
             }
@@ -330,9 +430,11 @@ pub fn planner_recipient_output(
             addresses,
             amount,
             memo,
+            blob_data,
         } => {
             let lock = pkh_lock(*threshold, addresses);
             let mut note_data = vec![RawNoteDataEntry::from_lock(lock.clone())];
+            push_blob_data(&mut note_data, blob_data);
             if let Some(bytes) = memo {
                 note_data.push(TypedNoteDataEntry::memo(bytes.clone()).to_raw_entry());
             }
@@ -346,10 +448,12 @@ pub fn planner_recipient_output(
             evm_address,
             amount,
             memo,
+            blob_data,
         } => {
             let mut note_data = vec![RawNoteDataEntry::from_bridge_deposit(evm_address_to_based(
                 *evm_address,
             ))];
+            push_blob_data(&mut note_data, blob_data);
             if let Some(bytes) = memo {
                 note_data.push(TypedNoteDataEntry::memo(bytes.clone()).to_raw_entry());
             }
@@ -387,6 +491,7 @@ pub fn planner_refund_output_template(
 
 #[cfg(test)]
 mod tests {
+    use bytes::Bytes;
     use nockapp::noun::slab::{NockJammer, NounSlab};
     use noun_serde::{NounDecode, NounEncode};
 
@@ -471,25 +576,34 @@ mod tests {
                 address: SAMPLE_P2PKH.to_string(),
                 amount: 1000,
                 memo: None,
+                blob_data: Vec::new(),
             },
             RecipientSpecToken::Multisig {
                 threshold: 1,
                 addresses: vec![SAMPLE_P2PKH_ALT.to_string(), SAMPLE_P2PKH.to_string()],
                 amount: 5,
                 memo: None,
+                blob_data: Vec::new(),
             },
             RecipientSpecToken::BridgeDeposit {
                 evm_address: SAMPLE_EVM_ADDRESS.to_string(),
                 amount: 9,
                 memo: None,
+                blob_data: Vec::new(),
             },
         ];
         let specs = recipient_tokens_to_specs(tokens).expect("tokens -> specs");
         assert_eq!(specs.len(), 3);
         match &specs[0] {
-            RecipientSpec::P2pkh { address, amount, memo } => {
+            RecipientSpec::P2pkh {
+                address,
+                amount,
+                memo,
+                blob_data,
+            } => {
                 assert_eq!(*amount, 1000);
                 assert!(memo.is_none());
+                assert!(blob_data.is_empty());
                 assert_eq!(
                     address,
                     &Hash::from_base58(SAMPLE_P2PKH).expect("sample p2pkh hash")
@@ -503,6 +617,7 @@ mod tests {
                 addresses,
                 amount,
                 memo,
+                blob_data,
             } => {
                 assert_eq!(*threshold, 1);
                 assert_eq!(*amount, 5);
@@ -516,6 +631,7 @@ mod tests {
                     Hash::from_base58(SAMPLE_P2PKH).expect("sample alt hash")
                 );
                 assert!(memo.is_none());
+                assert!(blob_data.is_empty());
             }
             _ => panic!("second spec should be multisig"),
         }
@@ -524,7 +640,7 @@ mod tests {
                 evm_address,
                 amount,
                 memo,
-                ..
+                blob_data,
             } => {
                 assert_eq!(*amount, 9);
                 assert_eq!(
@@ -532,6 +648,7 @@ mod tests {
                     &EthAddress::from_hex_str(SAMPLE_EVM_ADDRESS).expect("sample evm address")
                 );
                 assert!(memo.is_none());
+                assert!(blob_data.is_empty());
             }
             _ => panic!("third spec should be bridge deposit"),
         }
@@ -550,6 +667,7 @@ mod tests {
                 address: Hash::from_base58(SAMPLE_P2PKH).expect("p2pkh hash"),
                 amount: 10,
                 memo: None,
+                blob_data: Vec::new(),
             },
             RecipientSpec::Multisig {
                 threshold: 1,
@@ -559,12 +677,14 @@ mod tests {
                 ],
                 amount: 20,
                 memo: None,
+                blob_data: Vec::new(),
             },
             RecipientSpec::BridgeDeposit {
                 evm_address: EthAddress::from_hex_str(SAMPLE_EVM_ADDRESS)
                     .expect("sample evm address"),
                 amount: 30,
                 memo: None,
+                blob_data: Vec::new(),
             },
         ];
 
@@ -575,5 +695,43 @@ mod tests {
                 RecipientSpec::from_noun(&noun).expect("recipient spec should decode from noun");
             assert_eq!(decoded, spec);
         }
+    }
+
+    #[test]
+    fn parse_recipient_json_accepts_blob_data() {
+        let raw = format!(
+            r#"{{"kind":"p2pkh","address":"{}","amount":1,"blob_data":[{{"key":"nns/v1/claim","jam_hex":"01"}}]}}"#,
+            SAMPLE_P2PKH
+        );
+        let token = RecipientSpecToken::from_cli_arg(&raw).expect("json with blob_data");
+        let spec = token.into_recipient_spec().expect("into spec");
+        match spec {
+            RecipientSpec::P2pkh {
+                blob_data, ..
+            } => {
+                assert_eq!(blob_data.len(), 1);
+                assert_eq!(blob_data[0].key, "nns/v1/claim");
+                assert_eq!(blob_data[0].blob.as_ref(), &[1_u8]);
+            }
+            _ => panic!("expected p2pkh"),
+        }
+    }
+
+    #[test]
+    fn planner_p2pkh_inserts_blob_data_before_memo() {
+        let address = Hash::from_base58(SAMPLE_P2PKH).expect("p2pkh hash");
+        let recipients = vec![RecipientSpec::P2pkh {
+            address,
+            amount: 5,
+            memo: Some(b"hi".to_vec()),
+            blob_data: vec![RawNoteDataEntry {
+                key: "nns/v1/claim".into(),
+                blob: Bytes::from(vec![1_u8]),
+            }],
+        }];
+        let outputs = planner_recipient_outputs(&recipients, true).expect("planner outputs");
+        assert_eq!(outputs.len(), 1);
+        let keys: Vec<_> = outputs[0].note_data.iter().map(|e| e.key.as_str()).collect();
+        assert_eq!(keys, vec!["lock", "nns/v1/claim", "memo"]);
     }
 }
