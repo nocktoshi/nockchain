@@ -964,16 +964,10 @@ mod tests {
             .iter()
             .find(|entry| entry.raw_key == "memo")
             .expect("memo entry");
-        // Fixture `%memo` blob is opaque (not a valid `(list @ux)`), so it falls back to Raw.
+
         assert!(matches!(
             memo_entry.payload,
-            DecodedNoteDataPayload::Raw | DecodedNoteDataPayload::Memo(_)
+            DecodedNoteDataPayload::Memo(_)
         ));
-        if matches!(memo_entry.payload, DecodedNoteDataPayload::Raw) {
-            assert!(
-                memo_entry.decode_error.is_some(),
-                "opaque memo fixture should record a decode error"
-            );
-        }
     }
 }

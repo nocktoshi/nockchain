@@ -35,18 +35,6 @@ pub(crate) fn validate_blob_data_field(
     Ok(Some(bytes.to_vec()))
 }
 
-fn raw_note_data_from_blob_data(
-    blob_data: &Option<Vec<u8>>,
-) -> Result<Vec<RawNoteDataEntry>, NockAppError> {
-    let Some(bytes) = blob_data.as_ref() else {
-        return Ok(Vec::new());
-    };
-    if bytes.is_empty() {
-        return Ok(Vec::new());
-    }
-    Ok(vec![TypedNoteDataEntry::blob(bytes.clone()).to_raw_entry()])
-}
-
 /// Validates optional UTF-8 memo text for per-recipient note-data (matches kernel limits).
 pub(crate) fn validate_memo_utf8(memo: Option<&str>) -> Result<Option<Vec<u8>>, NockAppError> {
     let Some(memo) = memo else {
@@ -378,9 +366,11 @@ pub fn planner_recipient_output(
             } else {
                 Vec::new()
             };
-            note_data.extend(raw_note_data_from_blob_data(blob_data)?);
             if let Some(bytes) = memo {
                 note_data.push(TypedNoteDataEntry::memo(bytes.clone()).to_raw_entry());
+            }
+            if let Some(bytes) = blob_data {
+                note_data.push(TypedNoteDataEntry::blob(bytes.clone()).to_raw_entry());
             }
             Ok(PlannedOutput {
                 lock_root: lock_root(&lock)?,
@@ -397,29 +387,26 @@ pub fn planner_recipient_output(
         } => {
             let lock = pkh_lock(*threshold, addresses);
             let mut note_data = vec![RawNoteDataEntry::from_lock(lock.clone())];
-            note_data.extend(raw_note_data_from_blob_data(blob_data)?);
             if let Some(bytes) = memo {
                 note_data.push(TypedNoteDataEntry::memo(bytes.clone()).to_raw_entry());
+            }
+            if let Some(bytes) = blob_data {
+                note_data.push(TypedNoteDataEntry::blob(bytes.clone()).to_raw_entry());
             }
             Ok(PlannedOutput {
                 lock_root: lock_root(&lock)?,
                 amount: *amount,
-                note_data,
+                // Hoon always includes lock note-data for multisig outputs.
+                note_data: vec![RawNoteDataEntry::from_lock(lock.clone())],
             })
         }
         RecipientSpec::BridgeDeposit {
             evm_address,
             amount,
-            memo,
-            blob_data,
         } => {
-            let mut note_data = vec![RawNoteDataEntry::from_bridge_deposit(evm_address_to_based(
+            let note_data = vec![RawNoteDataEntry::from_bridge_deposit(evm_address_to_based(
                 *evm_address,
             ))];
-            note_data.extend(raw_note_data_from_blob_data(blob_data)?);
-            if let Some(bytes) = memo {
-                note_data.push(TypedNoteDataEntry::memo(bytes.clone()).to_raw_entry());
-            }
             Ok(PlannedOutput {
                 lock_root: Hash::from_base58(BRIDGE_LOCK_ROOT_DEFAULT_B58).map_err(|err| {
                     NockAppError::from(CrownError::Unknown(format!(

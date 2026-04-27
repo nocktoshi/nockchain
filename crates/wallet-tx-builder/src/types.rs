@@ -68,24 +68,6 @@ pub struct RawNoteDataEntry {
     pub blob: Bytes,
 }
 
-impl NounEncode for RawNoteDataEntry {
-    fn to_noun<A: NounAllocator>(&self, allocator: &mut A) -> Noun {
-        let key_noun = make_tas(allocator, &self.key).as_noun();
-        let jam_atom = Atom::from_bytes(allocator, self.blob.as_ref()).as_noun();
-        T(allocator, &[key_noun, jam_atom])
-    }
-}
-
-impl NounDecode for RawNoteDataEntry {
-    fn from_noun(noun: &Noun) -> Result<Self, NounDecodeError> {
-        let cell = noun.as_cell().map_err(|_| NounDecodeError::ExpectedCell)?;
-        let key = String::from_noun(&cell.head())?;
-        let jam_atom = cell.tail().as_atom().map_err(|_| NounDecodeError::ExpectedAtom)?;
-        let blob = Bytes::from(jam_atom.as_ne_bytes().to_vec());
-        Ok(RawNoteDataEntry { key, blob })
-    }
-}
-
 #[derive(Debug, Clone, PartialEq, Eq)]
 /// Candidate payload for a legacy v0 note.
 pub struct CandidateV0Note {

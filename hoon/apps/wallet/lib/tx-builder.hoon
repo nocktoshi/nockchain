@@ -86,9 +86,14 @@
       [%pkh [m=1 (z-silt:zo ~[sender-pkh])]]~
     (create-spends-1 notes-v1 orders fee sender-pkh refund-lock)
 ::
-~|('Notes must all be the same version (mixed v0 / v1 note set).' !!)
+~>  %slog.[0 'Notes must all be the same version!!!']  !!
+::
 
 =+  min-fee=(spends:estimate-fee:utils raw-spends inputs.display height)
+:: uncomment to debug out of band fee estimation
+:: =+  min-fee-ref=(calculate-min-fee:spends:transact (apply:witness-data:wt witness-data raw-spends))
+:: ~&  min-fee-est+min-fee
+:: ~&  min-fee-ref+min-fee-ref
 ?:  (lth fee min-fee)
   ?:  =(allow-low-fee %.n)
     ~|("Min fee not met. This transaction requires at least: {(trip (format-ui:common:display:utils min-fee))} nicks" !!)
@@ -174,7 +179,7 @@
               (~(has z-in:zo pubkeys.sig.note) pubkey)
           ==
       ==
-    ~|('Note not spendable by signing key' !!)
+    ~>  %slog.[0 'Note not spendable by signing key']  !!
   =/  [pending-orders=(list order:wt) specs=(list order:wt) remainder=@]
     (allocate-orders orders.state assets.note)
   =/  fee-portion=@  (min fee.state remainder)
@@ -227,11 +232,7 @@
           =(0 remaining-fee)
       ==
     ~|('Insufficient funds to pay fee and gift' !!)
-  =/  final-wd=witness-data:wt
-    %+  roll  ~(tap z-by:zo spends.final-state)
-    |=  [[nam=nname:transact sp=spend:v1:transact] acc=witness-data:wt]
-    (sign-spend nam sp acc)
-  [spends.final-state final-wd display.final-state]
+  [spends.final-state wd.final-state display.final-state]
 ::
 ++  process-spends-1
   |=  $:  notes=(list nnote-1:v1:transact)
@@ -246,7 +247,7 @@
   =/  nd=(unit note-data:v1:transact)
     ((soft note-data:v1:transact) note-data.note)
   ?~  nd
-    ~|('note-data malformed in note' !!)
+    ~>  %slog.[0 'error: note-data malformed in note!']  !!
   =+  pulled=(pull:locks:utils [u.nd name.note (some sender-pkh)])
   ?~  pulled
     =+  name-cord=(name:v1:display:utils name.note)
@@ -313,6 +314,7 @@
     fee.state      new-fee
     orders.state   pending-orders
     display.state  (update-display-1 name.note display.state output-map input-lock)
+    wd.state       (sign-spend name.note [%1 spend] wd.state)
   ==
 ++  sign-spend
   |=  [name=nname:transact =spend:v1:transact wd=witness-data:wt]
@@ -370,6 +372,7 @@
   ^-  [seeds:v1:transact output-lock-map:wt]
   =;  [seeds=(list seed:v1:transact) total-gifts=@ =output-lock-map:wt]
     ?.  =(assets.note (add total-gifts fee-portion))
+      ~&  [assets+assets.note total-gifts+total-gifts fee-portion+fee-portion]
       ~|  "assets in must equal gift + fee + refund"  !!
     [(z-silt:zo seeds) output-lock-map]
   %+  roll  specs
@@ -381,24 +384,24 @@
   =/  metadata=lock-metadata-1:wt  (extract-metadata spec)
   =?  include-data  ?=(%multisig -.spec)
     %.y
-  =/  [lock-root=hash:transact base-entries=(list [key=@tas jam=@ val=*])]
+  =|  nd=note-data:v1:transact
+  =/  [lock-root=hash:transact nd=note-data:v1:transact]
     ?-    -.+.metadata
         %lock
-      :-  (hash:lock:transact lock.metadata)
-      ?:  include-data
-        :~  [%lock 0 ^-(lock-data:wt [%0 lock.metadata])]
-        ==
-      ~
+      =?  nd  include-data
+        %-  ~(put z-by:zo nd)
+        [%lock ^-(lock-data:wt [%0 lock.metadata])]
+      [(hash:lock:transact lock.metadata) nd]
     ::
         %lock-root
-      [root.metadata ~]
+       [root.metadata nd]
     ::
         %bridge-deposit
       :-  root.metadata
-      :~  [%bridge 0 [%0 %base (evm-address-to-based:bridge addr.metadata)]]
+      %-  ~(put z-by:zo nd)
+      [%bridge [%0 %base (evm-address-to-based:bridge addr.metadata)]]
       ==
     ==
-  ::  optional opaque UTF-8 blob as $(list @ux)$ (same encoding as ++memo-data / ++blob-data)
   =/  maybe-blob=(unit blob-data:wt)
     ?-  -.spec
       %pkh              blob-data.spec
@@ -465,7 +468,6 @@
 ++  memo-order-valid
   |=  ord=order:wt
   ^-  ?
-  ::  memo is optional: ~ means omit; only validate when a payload is present
   =/  maybe-memo=(unit memo-data:wt)
     ?-  -.ord
       %pkh              memo.ord
@@ -482,7 +484,6 @@
 ++  blob-order-valid
   |=  ord=order:wt
   ^-  ?
-  ::  blob is optional; if present, ++blob-data must be non-empty UTF-8 bytes as $(list @ux)$
   =/  maybe-blob=(unit blob-data:wt)
     ?-  -.ord
       %pkh              blob-data.ord
@@ -598,7 +599,7 @@
   =/  participants=(list hash:transact)  ~(tap z-in:zo allowed)
   ?~  participants
     ~|('Invalid lock, no participants specified.' !!)
-    ?:  &(=(threshold 1) =(1 (lent participants)))
+  ?:  &(=(threshold 1) =(1 (lent participants)))
     (some [%pkh recipient=i.participants gift=gift memo=~ blob=~])
   (some [%multisig threshold=threshold participants=participants gift=gift memo=~ blob=~])
 ::
@@ -615,7 +616,7 @@
  ?~  lock-noun=(~(get z-by:zo note-data.note) %lock)
    ~
  ?~  soft-lock=((soft lock-data:wt) u.lock-noun)
-   ~
+   ~>  %slog.[0 'lock data in note is malformed']  ~
  =+  pulled=lock.u.soft-lock
  ?@  -.pulled
    ~
