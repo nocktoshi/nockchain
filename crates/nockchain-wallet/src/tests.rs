@@ -865,20 +865,20 @@ fn planner_recipient_outputs_match_hoon_lock_root_vectors() {
             address: address_a.clone(),
             amount: 5,
             memo: None,
-            blob_utf8: None,
+            blob_data: None,
         },
         RecipientSpec::Multisig {
             threshold: 2,
             addresses: vec![address_a.clone(), address_b],
             amount: 7,
             memo: None,
-            blob_utf8: None,
+            blob_data: None,
         },
         RecipientSpec::BridgeDeposit {
             evm_address: bridge_address,
             amount: 9,
             memo: None,
-            blob_utf8: None,
+            blob_data: None,
         },
     ];
 
@@ -916,20 +916,20 @@ fn planner_recipient_outputs_respect_include_data_for_p2pkh_but_not_multisig_or_
             address: address_a.clone(),
             amount: 5,
             memo: None,
-            blob_utf8: None,
+            blob_data: None,
         },
         RecipientSpec::Multisig {
             threshold: 2,
             addresses: vec![address_a.clone(), address_b],
             amount: 7,
             memo: None,
-            blob_utf8: None,
+            blob_data: None,
         },
         RecipientSpec::BridgeDeposit {
             evm_address: bridge_address,
             amount: 9,
             memo: None,
-            blob_utf8: None,
+            blob_data: None,
         },
     ];
 
@@ -949,7 +949,7 @@ fn planner_recipient_outputs_attach_memo_even_when_p2pkh_lock_data_disabled() {
         address: address_a,
         amount: 5,
         memo: Some(b"hello".to_vec()),
-        blob_utf8: None,
+        blob_data: None,
     }];
     let outputs = planner_recipient_outputs(&recipients, false).expect("recipient outputs");
     assert_eq!(outputs.len(), 1);
@@ -1090,7 +1090,7 @@ async fn fakenet_create_tx_accepts_discounted_fee_schedule() -> Result<(), NockA
         address: signer_pkh,
         amount: 4_000,
         memo: None,
-        blob_utf8: None,
+        blob_data: None,
     };
     let (noun, _) = Wallet::create_tx_command_for_tests(
         format_note_names(std::slice::from_ref(&note_name)),
@@ -1574,7 +1574,7 @@ async fn create_tx_with_planner_accepts_manual_all_v0_notes() -> Result<(), Nock
                 address: destination.clone(),
                 amount: 20_000,
                 memo: None,
-                blob_utf8: None,
+                blob_data: None,
             }],
             false,
             Some(destination.to_base58()),
@@ -1629,7 +1629,7 @@ async fn migrate_v0_notes_wallet_tx_matches_planner_word_and_fee_counts() -> Res
             address: destination_hash,
             amount: 0,
             memo: None,
-            blob_utf8: None,
+            blob_data: None,
         }],
         true,
     )?;
