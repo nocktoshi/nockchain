@@ -813,6 +813,23 @@
         =/  memo-text=@t  (crip (turn memo-bytes @tD))
         memo-text
     ::
+      ::  +blob-line: memo-style line for blob (UTF-8 cord jammed as atom in wallet / tx-builder)
+      ++  blob-line
+        |=  data=note-data:v1:transact
+        ^-  @t
+        ?~  got=(~(get z-by:zo data) %blob)
+          ''
+        =/  text=@t
+          ?:  ?=(@ u.got)
+            ^-  @t
+            u.got
+          ~>  %slog.[2 'wallet display: blob payload is not an atom']
+            '[blob: cannot decode]'
+        ;:  (cury cat 3)
+            '\0a- Blob: '
+            (trip (crip text))
+        ==
+    ::
       ++  note-from-balance
         |=  note=nnote-1:v1:transact
         (^note note (lock-data note-data.note) %.n)
@@ -844,6 +861,7 @@
                 output=?
             ==
         ^-  @t
+        =/  blob-line=@t  (blob-line note-data.note)
         ;:  (cury cat 3)
            '''
 
@@ -866,6 +884,7 @@
                 '\0a- Memo: '
                 (memo-data note-data.note)
             ==
+            blob-line
            '\0a- Lock Information: '
            lock-info
          ==

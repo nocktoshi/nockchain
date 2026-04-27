@@ -16,7 +16,7 @@ use crate::{CrownError, NockAppError};
 
 /// Note-data key for JSON `blob_utf8`: the wallet jams the UTF-8 string as an atom;
 /// consumers decide how to interpret the string (names, claims, opaque payloads, etc.).
-pub const BLOB_UTF8_NOTE_DATA_KEY: &str = "blob/v1";
+pub const BLOB_UTF8_NOTE_DATA_KEY: &str = "blob";
 
 const MAX_BLOB_UTF8_JAM_BYTES: usize = 256 * 1024;
 
