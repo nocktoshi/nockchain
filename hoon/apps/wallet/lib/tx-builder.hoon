@@ -86,13 +86,9 @@
       [%pkh [m=1 (z-silt:zo ~[sender-pkh])]]~
     (create-spends-1 notes-v1 orders fee sender-pkh refund-lock)
 ::
-~>  %slog.[0 'Notes must all be the same version!!!']  !!
-::
+~|('Notes must all be the same version (mixed v0 / v1 note set).' !!)
+
 =+  min-fee=(spends:estimate-fee:utils raw-spends inputs.display height)
-:: uncomment to debug out of band fee estimation
-:: =+  min-fee-ref=(calculate-min-fee:spends:transact (apply:witness-data:wt witness-data raw-spends))
-:: ~&  min-fee-est+min-fee
-:: ~&  min-fee-ref+min-fee-ref
 ?:  (lth fee min-fee)
   ?:  =(allow-low-fee %.n)
     ~|("Min fee not met. This transaction requires at least: {(trip (format-ui:common:display:utils min-fee))} nicks" !!)
@@ -178,7 +174,7 @@
               (~(has z-in:zo pubkeys.sig.note) pubkey)
           ==
       ==
-    ~>  %slog.[0 'Note not spendable by signing key']  !!
+    ~|('Note not spendable by signing key' !!)
   =/  [pending-orders=(list order:wt) specs=(list order:wt) remainder=@]
     (allocate-orders orders.state assets.note)
   =/  fee-portion=@  (min fee.state remainder)
@@ -250,7 +246,7 @@
   =/  nd=(unit note-data:v1:transact)
     ((soft note-data:v1:transact) note-data.note)
   ?~  nd
-    ~>  %slog.[0 'error: note-data malformed in note!']  !!
+    ~|('note-data malformed in note' !!)
   =+  pulled=(pull:locks:utils [u.nd name.note (some sender-pkh)])
   ?~  pulled
     =+  name-cord=(name:v1:display:utils name.note)
@@ -374,7 +370,6 @@
   ^-  [seeds:v1:transact output-lock-map:wt]
   =;  [seeds=(list seed:v1:transact) total-gifts=@ =output-lock-map:wt]
     ?.  =(assets.note (add total-gifts fee-portion))
-      ~&  [assets+assets.note total-gifts+total-gifts fee-portion+fee-portion]
       ~|  "assets in must equal gift + fee + refund"  !!
     [(z-silt:zo seeds) output-lock-map]
   %+  roll  specs
@@ -386,48 +381,43 @@
   =/  metadata=lock-metadata-1:wt  (extract-metadata spec)
   =?  include-data  ?=(%multisig -.spec)
     %.y
-  =|  nd=note-data:v1:transact
-  =/  [lock-root=hash:transact nd=note-data:v1:transact]
+  =/  [lock-root=hash:transact base-entries=(list [key=@tas jam=@ val=*])]
     ?-    -.+.metadata
         %lock
-      =?  nd  include-data
-        %-  ~(put z-by:zo nd)
-        [%lock ^-(lock-data:wt [%0 lock.metadata])]
-      [(hash:lock:transact lock.metadata) nd]
+      :-  (hash:lock:transact lock.metadata)
+      ?:  include-data
+        :~  [%lock 0 ^-(lock-data:wt [%0 lock.metadata])]
+        ==
+      ~
     ::
         %lock-root
-      [root.metadata nd]
+      [root.metadata ~]
     ::
         %bridge-deposit
       :-  root.metadata
-      %-  ~(put z-by:zo nd)
-      [%bridge [%0 %base (evm-address-to-based:bridge addr.metadata)]]
+      :~  [%bridge 0 [%0 %base (evm-address-to-based:bridge addr.metadata)]]
+      ==
     ==
-  ::  optional structured note-data (e.g. nns/v1/* keys); jam is raw cue input
-  =/  maybe-blob-data=(list [key=@tas jam=@])
+  ::  optional opaque UTF-8 blob; wallet jams cord as atom under blob/v1 (consumer interprets text)
+  =/  maybe-blob-text=(unit @t)
     ?-  -.spec
-      %pkh              blob-data.spec
-      %multisig         blob-data.spec
-      %lock-root        blob-data.spec
-      %bridge-deposit   blob-data.spec
+      %pkh              blob-utf8.spec
+      %multisig         blob-utf8.spec
+      %lock-root        blob-utf8.spec
+      %bridge-deposit   blob-utf8.spec
     ==
-  ::  Insert blob keys in +gor-tip order (same ordering as +z-by). Unsorted
-  ::  JSON blob order can otherwise interleave badly with %lock and trip +z-by
-  ::  +put jets (see /common/zoon.hoon +put ~> ?> ?=(^ d)).
-  =/  sorted-blob-data=(list [key=@tas jam=@])
-    %+  sort  maybe-blob-data
-    |=  [[ka=@tas ja=@] [kb=@tas jb=@]]
-    ?:  =(ka kb)
-      (lth ja jb)
-    (gor-tip:zo ka kb)
-  =.  nd
-    %+  roll  sorted-blob-data
-    |=  [[key=@tas jam=@] acc=_nd]
-    ?>  ?=(@ jam)
+  =/  blob-key=@tas  (crip "blob/v1")
+  =/  blob-entries=(list [key=@tas jam=@ val=*])
+    ?~  maybe-blob-text  ~
+    ?:  =(0 (met 3 u.maybe-blob-text))
+      ::
+      ::  treat empty cord like ~
+      ~
+    =/  jam=@  (jam u.maybe-blob-text)
     =/  maybe=(unit *)  ((soft *) (cue jam))
     ?~  maybe
-      ~|('wallet: blob-data jam did not cue to a valid noun' !!)
-    (~(put z-by:zo acc) key u.maybe)
+      ~|('wallet: blob-utf8 jam did not cue to a valid noun' !!)
+    ~[[blob-key jam u.maybe]]
   =/  maybe-memo=(unit memo-data:wt)
     ?-  -.spec
       %pkh              memo.spec
@@ -435,10 +425,30 @@
       %lock-root        memo.spec
       %bridge-deposit   memo.spec
     ==
-  =.  nd
-    ?~  maybe-memo
-      nd
-    (~(put z-by:zo nd) %memo u.maybe-memo)
+  =/  memo-entries=(list [key=@tas jam=@ val=*])
+    ?~  maybe-memo  ~
+    :~  [%memo 0 u.maybe-memo]
+    ==
+  =/  all-entries=(list [key=@tas jam=@ val=*])
+    ;:  weld
+      base-entries
+      blob-entries
+      memo-entries
+    ==
+  ::  One insert per %tas key (last wins): base then blobs then memo — same
+  ::  layering as planner output note-data rows before z-map encoding.
+  =/  deduped-pairs=(list [key=@tas val=*])
+    %+  roll  all-entries
+    |=  [[key=@tas jam=@ val=*] acc=(list [key=@tas val=*])]
+    =/  without-old=(list [key=@tas val=*])
+      %+  skim  acc
+      |=  [k=@tas v=*]
+      !=(k key)
+    (snoc without-old [key val])
+  =/  nd=note-data:v1:transact
+    %+  roll  deduped-pairs
+    |=  [[key=@tas val=*] acc=note-data:v1:transact]
+    (~(put z-by:zo acc) key val)
   =/  seed=seed:v1:transact
     :*  output-source=~
         lock-root=lock-root
@@ -448,8 +458,7 @@
     ==
   :*  [seed seeds]
       (add gifts (order-gift spec))
-      %-  ~(put z-by:zo output-lock-map)
-      [(first:nname:transact lock-root.seed) metadata]
+      (~(put z-by:zo output-lock-map) (first:nname:transact lock-root.seed) metadata)
   ==
 ::
 ++  memo-order-valid
@@ -469,6 +478,20 @@
       (lte (lent m) 2.048)
   ==
 ::
+++  blob-order-valid
+  |=  ord=order:wt
+  ^-  ?
+  ::  blob-utf8 is optional; if present, cord must be non-empty (same idea as memo)
+  =/  maybe-blob=(unit @t)
+    ?-  -.ord
+      %pkh              blob-utf8.ord
+      %multisig         blob-utf8.ord
+      %lock-root        blob-utf8.ord
+      %bridge-deposit   blob-utf8.ord
+    ==
+  ?~  maybe-blob  %.y
+  (gth (met 3 u.maybe-blob) 0)
+::
 ++  orders-valid
   |=  orders=(list order:wt)
   ^-  (reason:transact ~)
@@ -483,6 +506,8 @@
   =/  ord=order:wt  i.orders
   ?.  (memo-order-valid ord)
     [%.n %memo-invalid]
+  ?.  (blob-order-valid ord)
+    [%.n %blob-utf8-invalid]
   ?-    -.ord
       %pkh
     ?:  =(0 gift.ord)
@@ -568,9 +593,9 @@
   =/  participants=(list hash:transact)  ~(tap z-in:zo allowed)
   ?~  participants
     ~|('Invalid lock, no participants specified.' !!)
-  ?:  &(=(threshold 1) =(1 (lent participants)))
-    (some [%pkh recipient=i.participants gift=gift memo=~ blob-data=~])
-  (some [%multisig threshold=threshold participants=participants gift=gift memo=~ blob-data=~])
+    ?:  &(=(threshold 1) =(1 (lent participants)))
+    (some [%pkh recipient=i.participants gift=gift memo=~ blob-utf8=~])
+  (some [%multisig threshold=threshold participants=participants gift=gift memo=~ blob-utf8=~])
 ::
 ++  build-refund-order
   |=  [refund=@ refund-lock=lock:transact]
@@ -585,7 +610,7 @@
  ?~  lock-noun=(~(get z-by:zo note-data.note) %lock)
    ~
  ?~  soft-lock=((soft lock-data:wt) u.lock-noun)
-   ~>  %slog.[0 'lock data in note is malformed']  ~
+   ~
  =+  pulled=lock.u.soft-lock
  ?@  -.pulled
    ~
