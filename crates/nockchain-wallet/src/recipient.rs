@@ -2,7 +2,10 @@ use std::collections::BTreeSet;
 
 use bytes::Bytes;
 use hex::FromHex;
+use nockapp::noun::slab::{NockJammer, NounSlab};
 use nockchain_types::common::Hash;
+use nockvm::ext::AtomExt;
+use nockvm::noun::Atom;
 use nockchain_types::tx_engine::v1::tx::{Lock, LockPrimitive, Pkh, SpendCondition};
 use nockchain_types::{EthAddress, EthAddressParseError};
 use noun_serde::{NounDecode, NounEncode};
@@ -12,16 +15,34 @@ use wallet_tx_builder::types::{PlannedOutput, RawNoteDataEntry};
 
 use crate::{CrownError, NockAppError};
 
-/// JSON shape for per-output blob note-data entries (`jam_hex` is raw jam bytes; kernel `cue`s into the map).
+/// JSON shape for per-output blob note-data entries (kernel `cue`s the stored blob into the map).
 #[derive(Debug, Clone, Deserialize)]
 pub struct BlobDataJson {
     /// Note-data key (e.g. `nns/v1/claim-id`); must be a valid `@tas`-style path.
     pub key: String,
-    /// Lowercase hex encoding of jam bytes for this key.
-    pub jam_hex: String,
+    /// Lowercase hex of **already jammed** bytes for this key. Omit if `utf8` is set.
+    #[serde(default)]
+    pub jam_hex: Option<String>,
+    /// UTF-8 text jammed here as an indirect atom (same packing as `Atom::from_bytes` / cord-style tooling); omit if `jam_hex` is set.
+    #[serde(default)]
+    pub utf8: Option<String>,
 }
 
 const MAX_BLOB_DATA_TOTAL_BYTES: usize = 256 * 1024;
+
+fn jam_utf8_atom(text: &str) -> Result<Vec<u8>, NockAppError> {
+    let bytes = text.as_bytes();
+    if bytes.is_empty() {
+        return Err(CrownError::Unknown(
+            "blob_data utf8 value cannot be empty".into(),
+        )
+        .into());
+    }
+    let mut slab: NounSlab<NockJammer> = NounSlab::new();
+    let atom = Atom::from_bytes(&mut slab, bytes);
+    slab.set_root(atom.as_noun());
+    Ok(slab.jam().to_vec())
+}
 
 pub(crate) fn parse_blob_data_json(
     entries: Vec<BlobDataJson>,
@@ -39,24 +60,49 @@ pub(crate) fn parse_blob_data_json(
             )
             .into());
         }
-        let jam_hex = entry.jam_hex.trim().replace(' ', "");
-        if jam_hex.len() % 2 != 0 {
-            return Err(CrownError::Unknown(format!(
-                "blob_data key '{}': jam_hex must have even length",
-                key
-            ))
-            .into());
-        }
-        let jam = Vec::from_hex(&jam_hex).map_err(|err| {
-            NockAppError::from(CrownError::Unknown(format!(
-                "blob_data key '{}': invalid hex: {err}",
-                key
-            )))
-        })?;
+        let jam_hex_raw = entry
+            .jam_hex
+            .as_deref()
+            .map(str::trim)
+            .map(|s| s.replace(' ', ""))
+            .filter(|s| !s.is_empty());
+        let utf8_raw = entry
+            .utf8
+            .as_deref()
+            .map(str::trim)
+            .filter(|s| !s.is_empty());
+
+        let jam = match (&jam_hex_raw, &utf8_raw) {
+            (Some(_), Some(_)) => {
+                return Err(CrownError::Unknown(format!(
+                    "blob_data key '{key}': specify only one of jam_hex or utf8, not both"
+                ))
+                .into());
+            }
+            (Some(jam_hex), None) => {
+                if jam_hex.len() % 2 != 0 {
+                    return Err(CrownError::Unknown(format!(
+                        "blob_data key '{key}': jam_hex must have even length"
+                    ))
+                    .into());
+                }
+                Vec::from_hex(jam_hex).map_err(|err| {
+                    NockAppError::from(CrownError::Unknown(format!(
+                        "blob_data key '{key}': invalid hex: {err}"
+                    )))
+                })?
+            }
+            (None, Some(text)) => jam_utf8_atom(text)?,
+            (None, None) => {
+                return Err(CrownError::Unknown(format!(
+                    "blob_data key '{key}': set jam_hex (pre-jammed) or utf8 (wallet jams for you)"
+                ))
+                .into());
+            }
+        };
         if jam.is_empty() {
             return Err(CrownError::Unknown(format!(
-                "blob_data key '{}': jam must not be empty",
-                key
+                "blob_data key '{key}': jam must not be empty"
             ))
             .into());
         }
@@ -715,6 +761,40 @@ mod tests {
             }
             _ => panic!("expected p2pkh"),
         }
+    }
+
+    #[test]
+    fn parse_recipient_json_blob_data_utf8_is_jammed_like_atom_tooling() {
+        let raw = format!(
+            r#"{{"kind":"p2pkh","address":"{}","amount":1,"blob_data":[{{"key":"nns/v1/name","utf8":"nns.nock"}}]}}"#,
+            SAMPLE_P2PKH
+        );
+        let token = RecipientSpecToken::from_cli_arg(&raw).expect("json with utf8 blob_data");
+        let spec = token.into_recipient_spec().expect("into spec");
+        match spec {
+            RecipientSpec::P2pkh {
+                blob_data, ..
+            } => {
+                assert_eq!(blob_data.len(), 1);
+                assert_eq!(blob_data[0].key, "nns/v1/name");
+                assert_eq!(
+                    hex::encode(blob_data[0].blob.as_ref()),
+                    "80dfcd6dcec5ed6d6c0d"
+                );
+            }
+            _ => panic!("expected p2pkh"),
+        }
+    }
+
+    #[test]
+    fn parse_blob_data_rejects_jam_hex_and_utf8_together() {
+        let err = parse_blob_data_json(vec![BlobDataJson {
+            key: "k".into(),
+            jam_hex: Some("00".into()),
+            utf8: Some("x".into()),
+        }])
+        .expect_err("both fields");
+        assert!(format!("{err}").contains("only one of jam_hex or utf8"));
     }
 
     #[test]
