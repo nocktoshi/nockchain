@@ -1,7 +1,6 @@
 use std::collections::BTreeSet;
 
 use bytes::Bytes;
-use hex::FromHex;
 use nockapp::noun::slab::{NockJammer, NounSlab};
 use nockchain_types::common::Hash;
 use nockvm::ext::AtomExt;
@@ -15,26 +14,17 @@ use wallet_tx_builder::types::{PlannedOutput, RawNoteDataEntry};
 
 use crate::{CrownError, NockAppError};
 
-/// JSON shape for per-output blob note-data entries (kernel `cue`s the stored blob into the map).
-#[derive(Debug, Clone, Deserialize)]
-pub struct BlobDataJson {
-    /// Note-data key (e.g. `nns/v1/claim-id`); must be a valid `@tas`-style path.
-    pub key: String,
-    /// Lowercase hex of **already jammed** bytes for this key. Omit if `utf8` is set.
-    #[serde(default)]
-    pub jam_hex: Option<String>,
-    /// UTF-8 text jammed here as an indirect atom (same packing as `Atom::from_bytes` / cord-style tooling); omit if `jam_hex` is set.
-    #[serde(default)]
-    pub utf8: Option<String>,
-}
+/// Note-data key for JSON `blob_utf8`: the wallet jams the UTF-8 string as an atom;
+/// consumers decide how to interpret the string (names, claims, opaque payloads, etc.).
+pub const BLOB_UTF8_NOTE_DATA_KEY: &str = "blob/v1";
 
-const MAX_BLOB_DATA_TOTAL_BYTES: usize = 256 * 1024;
+const MAX_BLOB_UTF8_JAM_BYTES: usize = 256 * 1024;
 
 fn jam_utf8_atom(text: &str) -> Result<Vec<u8>, NockAppError> {
     let bytes = text.as_bytes();
     if bytes.is_empty() {
         return Err(CrownError::Unknown(
-            "blob_data utf8 value cannot be empty".into(),
+            "blob_utf8 value cannot be empty".into(),
         )
         .into());
     }
@@ -44,82 +34,42 @@ fn jam_utf8_atom(text: &str) -> Result<Vec<u8>, NockAppError> {
     Ok(slab.jam().to_vec())
 }
 
-pub(crate) fn parse_blob_data_json(
-    entries: Vec<BlobDataJson>,
+/// Trims and checks jam size; `None` if absent or empty/whitespace-only.
+pub(crate) fn validate_blob_utf8_field(
+    blob_utf8: Option<String>,
+) -> Result<Option<String>, NockAppError> {
+    let Some(raw) = blob_utf8 else {
+        return Ok(None);
+    };
+    let text = raw.trim();
+    if text.is_empty() {
+        return Ok(None);
+    }
+    let jam = jam_utf8_atom(text)?;
+    if jam.len() > MAX_BLOB_UTF8_JAM_BYTES {
+        return Err(CrownError::Unknown(format!(
+            "blob_utf8 jam exceeds max size ({} bytes)",
+            MAX_BLOB_UTF8_JAM_BYTES
+        ))
+        .into());
+    }
+    Ok(Some(text.to_string()))
+}
+
+fn raw_note_data_from_blob_utf8(
+    blob_utf8: &Option<String>,
 ) -> Result<Vec<RawNoteDataEntry>, NockAppError> {
-    if entries.is_empty() {
+    let Some(text) = blob_utf8.as_deref() else {
+        return Ok(Vec::new());
+    };
+    if text.is_empty() {
         return Ok(Vec::new());
     }
-    let mut out = Vec::with_capacity(entries.len());
-    let mut total = 0usize;
-    for entry in entries {
-        let key = entry.key.trim().to_string();
-        if key.is_empty() {
-            return Err(CrownError::Unknown(
-                "blob_data entry key cannot be empty".into(),
-            )
-            .into());
-        }
-        let jam_hex_raw = entry
-            .jam_hex
-            .as_deref()
-            .map(str::trim)
-            .map(|s| s.replace(' ', ""))
-            .filter(|s| !s.is_empty());
-        let utf8_raw = entry
-            .utf8
-            .as_deref()
-            .map(str::trim)
-            .filter(|s| !s.is_empty());
-
-        let jam = match (&jam_hex_raw, &utf8_raw) {
-            (Some(_), Some(_)) => {
-                return Err(CrownError::Unknown(format!(
-                    "blob_data key '{key}': specify only one of jam_hex or utf8, not both"
-                ))
-                .into());
-            }
-            (Some(jam_hex), None) => {
-                if jam_hex.len() % 2 != 0 {
-                    return Err(CrownError::Unknown(format!(
-                        "blob_data key '{key}': jam_hex must have even length"
-                    ))
-                    .into());
-                }
-                Vec::from_hex(jam_hex).map_err(|err| {
-                    NockAppError::from(CrownError::Unknown(format!(
-                        "blob_data key '{key}': invalid hex: {err}"
-                    )))
-                })?
-            }
-            (None, Some(text)) => jam_utf8_atom(text)?,
-            (None, None) => {
-                return Err(CrownError::Unknown(format!(
-                    "blob_data key '{key}': set jam_hex (pre-jammed) or utf8 (wallet jams for you)"
-                ))
-                .into());
-            }
-        };
-        if jam.is_empty() {
-            return Err(CrownError::Unknown(format!(
-                "blob_data key '{key}': jam must not be empty"
-            ))
-            .into());
-        }
-        total = total.saturating_add(jam.len());
-        if total > MAX_BLOB_DATA_TOTAL_BYTES {
-            return Err(CrownError::Unknown(format!(
-                "blob_data exceeds max total jam size ({} bytes)",
-                MAX_BLOB_DATA_TOTAL_BYTES
-            ))
-            .into());
-        }
-        out.push(RawNoteDataEntry {
-            key,
-            blob: Bytes::from(jam),
-        });
-    }
-    Ok(out)
+    let jam = jam_utf8_atom(text)?;
+    Ok(vec![RawNoteDataEntry {
+        key: BLOB_UTF8_NOTE_DATA_KEY.into(),
+        blob: Bytes::from(jam),
+    }])
 }
 
 /// Validates optional UTF-8 memo text for per-recipient note-data (matches kernel limits).
@@ -157,8 +107,9 @@ pub enum RecipientSpecToken {
         amount: u64,
         #[serde(default)]
         memo: Option<String>,
+        /// Optional opaque UTF-8 payload (jammed as an atom under [`BLOB_UTF8_NOTE_DATA_KEY`]).
         #[serde(default)]
-        blob_data: Vec<BlobDataJson>,
+        blob_utf8: Option<String>,
     },
     Multisig {
         threshold: u64,
@@ -167,7 +118,7 @@ pub enum RecipientSpecToken {
         #[serde(default)]
         memo: Option<String>,
         #[serde(default)]
-        blob_data: Vec<BlobDataJson>,
+        blob_utf8: Option<String>,
     },
     #[serde(rename = "bridge-deposit")]
     BridgeDeposit {
@@ -177,7 +128,7 @@ pub enum RecipientSpecToken {
         #[serde(default)]
         memo: Option<String>,
         #[serde(default)]
-        blob_data: Vec<BlobDataJson>,
+        blob_utf8: Option<String>,
     },
 }
 
@@ -188,7 +139,7 @@ pub enum RecipientSpec {
         address: Hash,
         amount: u64,
         memo: Option<Vec<u8>>,
-        blob_data: Vec<RawNoteDataEntry>,
+        blob_utf8: Option<String>,
     },
     #[noun(tag = "multisig")]
     Multisig {
@@ -196,14 +147,14 @@ pub enum RecipientSpec {
         addresses: Vec<Hash>,
         amount: u64,
         memo: Option<Vec<u8>>,
-        blob_data: Vec<RawNoteDataEntry>,
+        blob_utf8: Option<String>,
     },
     #[noun(tag = "bridge-deposit")]
     BridgeDeposit {
         evm_address: EthAddress,
         amount: u64,
         memo: Option<Vec<u8>>,
-        blob_data: Vec<RawNoteDataEntry>,
+        blob_utf8: Option<String>,
     },
 }
 
@@ -253,7 +204,7 @@ impl RecipientSpecToken {
             address: p2pkh.to_string(),
             amount,
             memo: None,
-            blob_data: Vec::new(),
+            blob_utf8: None,
         })
     }
 
@@ -263,7 +214,7 @@ impl RecipientSpecToken {
                 address,
                 amount,
                 memo,
-                blob_data,
+                blob_utf8,
             } => {
                 if amount == 0 {
                     return Err(CrownError::Unknown(
@@ -277,12 +228,12 @@ impl RecipientSpecToken {
                     )))
                 })?;
                 let memo = validate_memo_utf8(memo.as_deref())?;
-                let blob_data = parse_blob_data_json(blob_data)?;
+                let blob_utf8 = validate_blob_utf8_field(blob_utf8)?;
                 Ok(RecipientSpec::P2pkh {
                     address: recipient,
                     amount,
                     memo,
-                    blob_data,
+                    blob_utf8,
                 })
             }
             RecipientSpecToken::Multisig {
@@ -290,7 +241,7 @@ impl RecipientSpecToken {
                 addresses,
                 amount,
                 memo,
-                blob_data,
+                blob_utf8,
             } => {
                 if amount == 0 {
                     return Err(CrownError::Unknown(
@@ -336,20 +287,20 @@ impl RecipientSpecToken {
                     );
                 }
                 let memo = validate_memo_utf8(memo.as_deref())?;
-                let blob_data = parse_blob_data_json(blob_data)?;
+                let blob_utf8 = validate_blob_utf8_field(blob_utf8)?;
                 Ok(RecipientSpec::Multisig {
                     threshold,
                     addresses: parsed,
                     amount,
                     memo,
-                    blob_data,
+                    blob_utf8,
                 })
             }
             RecipientSpecToken::BridgeDeposit {
                 evm_address,
                 amount,
                 memo,
-                blob_data,
+                blob_utf8,
             } => {
                 if amount == 0 {
                     return Err(CrownError::Unknown(
@@ -365,12 +316,12 @@ impl RecipientSpecToken {
                     )))
                 })?;
                 let memo = validate_memo_utf8(memo.as_deref())?;
-                let blob_data = parse_blob_data_json(blob_data)?;
+                let blob_utf8 = validate_blob_utf8_field(blob_utf8)?;
                 Ok(RecipientSpec::BridgeDeposit {
                     evm_address: parsed,
                     amount,
                     memo,
-                    blob_data,
+                    blob_utf8,
                 })
             }
         }
@@ -423,15 +374,6 @@ fn evm_address_to_based(evm_address: EthAddress) -> [u64; 3] {
     [limbs[0], limbs[1], limbs[2]]
 }
 
-fn push_blob_data(note_data: &mut Vec<RawNoteDataEntry>, blobs: &[RawNoteDataEntry]) {
-    for entry in blobs {
-        note_data.push(RawNoteDataEntry {
-            key: entry.key.clone(),
-            blob: entry.blob.clone(),
-        });
-    }
-}
-
 /// Converts CLI recipient specs into planner outputs with tx-builder-compatible note-data.
 pub fn planner_recipient_outputs(
     recipients: &[RecipientSpec],
@@ -453,7 +395,7 @@ pub fn planner_recipient_output(
             address,
             amount,
             memo,
-            blob_data,
+            blob_utf8,
         } => {
             let lock = pkh_lock(1, std::slice::from_ref(address));
             let mut note_data = if include_data {
@@ -461,7 +403,7 @@ pub fn planner_recipient_output(
             } else {
                 Vec::new()
             };
-            push_blob_data(&mut note_data, blob_data);
+            note_data.extend(raw_note_data_from_blob_utf8(blob_utf8)?);
             if let Some(bytes) = memo {
                 note_data.push(TypedNoteDataEntry::memo(bytes.clone()).to_raw_entry());
             }
@@ -476,11 +418,11 @@ pub fn planner_recipient_output(
             addresses,
             amount,
             memo,
-            blob_data,
+            blob_utf8,
         } => {
             let lock = pkh_lock(*threshold, addresses);
             let mut note_data = vec![RawNoteDataEntry::from_lock(lock.clone())];
-            push_blob_data(&mut note_data, blob_data);
+            note_data.extend(raw_note_data_from_blob_utf8(blob_utf8)?);
             if let Some(bytes) = memo {
                 note_data.push(TypedNoteDataEntry::memo(bytes.clone()).to_raw_entry());
             }
@@ -494,12 +436,12 @@ pub fn planner_recipient_output(
             evm_address,
             amount,
             memo,
-            blob_data,
+            blob_utf8,
         } => {
             let mut note_data = vec![RawNoteDataEntry::from_bridge_deposit(evm_address_to_based(
                 *evm_address,
             ))];
-            push_blob_data(&mut note_data, blob_data);
+            note_data.extend(raw_note_data_from_blob_utf8(blob_utf8)?);
             if let Some(bytes) = memo {
                 note_data.push(TypedNoteDataEntry::memo(bytes.clone()).to_raw_entry());
             }
@@ -537,7 +479,6 @@ pub fn planner_refund_output_template(
 
 #[cfg(test)]
 mod tests {
-    use bytes::Bytes;
     use nockapp::noun::slab::{NockJammer, NounSlab};
     use noun_serde::{NounDecode, NounEncode};
 
@@ -622,20 +563,20 @@ mod tests {
                 address: SAMPLE_P2PKH.to_string(),
                 amount: 1000,
                 memo: None,
-                blob_data: Vec::new(),
+                blob_utf8: None,
             },
             RecipientSpecToken::Multisig {
                 threshold: 1,
                 addresses: vec![SAMPLE_P2PKH_ALT.to_string(), SAMPLE_P2PKH.to_string()],
                 amount: 5,
                 memo: None,
-                blob_data: Vec::new(),
+                blob_utf8: None,
             },
             RecipientSpecToken::BridgeDeposit {
                 evm_address: SAMPLE_EVM_ADDRESS.to_string(),
                 amount: 9,
                 memo: None,
-                blob_data: Vec::new(),
+                blob_utf8: None,
             },
         ];
         let specs = recipient_tokens_to_specs(tokens).expect("tokens -> specs");
@@ -645,11 +586,11 @@ mod tests {
                 address,
                 amount,
                 memo,
-                blob_data,
+                blob_utf8,
             } => {
                 assert_eq!(*amount, 1000);
                 assert!(memo.is_none());
-                assert!(blob_data.is_empty());
+                assert!(blob_utf8.is_none());
                 assert_eq!(
                     address,
                     &Hash::from_base58(SAMPLE_P2PKH).expect("sample p2pkh hash")
@@ -663,7 +604,7 @@ mod tests {
                 addresses,
                 amount,
                 memo,
-                blob_data,
+                blob_utf8,
             } => {
                 assert_eq!(*threshold, 1);
                 assert_eq!(*amount, 5);
@@ -677,7 +618,7 @@ mod tests {
                     Hash::from_base58(SAMPLE_P2PKH).expect("sample alt hash")
                 );
                 assert!(memo.is_none());
-                assert!(blob_data.is_empty());
+                assert!(blob_utf8.is_none());
             }
             _ => panic!("second spec should be multisig"),
         }
@@ -686,7 +627,7 @@ mod tests {
                 evm_address,
                 amount,
                 memo,
-                blob_data,
+                blob_utf8,
             } => {
                 assert_eq!(*amount, 9);
                 assert_eq!(
@@ -694,7 +635,7 @@ mod tests {
                     &EthAddress::from_hex_str(SAMPLE_EVM_ADDRESS).expect("sample evm address")
                 );
                 assert!(memo.is_none());
-                assert!(blob_data.is_empty());
+                assert!(blob_utf8.is_none());
             }
             _ => panic!("third spec should be bridge deposit"),
         }
@@ -713,7 +654,7 @@ mod tests {
                 address: Hash::from_base58(SAMPLE_P2PKH).expect("p2pkh hash"),
                 amount: 10,
                 memo: None,
-                blob_data: Vec::new(),
+                blob_utf8: None,
             },
             RecipientSpec::Multisig {
                 threshold: 1,
@@ -723,14 +664,14 @@ mod tests {
                 ],
                 amount: 20,
                 memo: None,
-                blob_data: Vec::new(),
+                blob_utf8: None,
             },
             RecipientSpec::BridgeDeposit {
                 evm_address: EthAddress::from_hex_str(SAMPLE_EVM_ADDRESS)
                     .expect("sample evm address"),
                 amount: 30,
                 memo: None,
-                blob_data: Vec::new(),
+                blob_utf8: None,
             },
         ];
 
@@ -744,57 +685,22 @@ mod tests {
     }
 
     #[test]
-    fn parse_recipient_json_accepts_blob_data() {
+    fn parse_recipient_json_accepts_blob_utf8() {
         let raw = format!(
-            r#"{{"kind":"p2pkh","address":"{}","amount":1,"blob_data":[{{"key":"nns/v1/claim","jam_hex":"01"}}]}}"#,
+            r#"{{"kind":"p2pkh","address":"{}","amount":1,"blob_utf8":"nns.nock"}}"#,
             SAMPLE_P2PKH
         );
-        let token = RecipientSpecToken::from_cli_arg(&raw).expect("json with blob_data");
+        let token = RecipientSpecToken::from_cli_arg(&raw).expect("json with blob_utf8");
         let spec = token.into_recipient_spec().expect("into spec");
         match spec {
             RecipientSpec::P2pkh {
-                blob_data, ..
+                blob_utf8,
+                ..
             } => {
-                assert_eq!(blob_data.len(), 1);
-                assert_eq!(blob_data[0].key, "nns/v1/claim");
-                assert_eq!(blob_data[0].blob.as_ref(), &[1_u8]);
+                assert_eq!(blob_utf8.as_deref(), Some("nns.nock"));
             }
             _ => panic!("expected p2pkh"),
         }
-    }
-
-    #[test]
-    fn parse_recipient_json_blob_data_utf8_is_jammed_like_atom_tooling() {
-        let raw = format!(
-            r#"{{"kind":"p2pkh","address":"{}","amount":1,"blob_data":[{{"key":"nns/v1/name","utf8":"nns.nock"}}]}}"#,
-            SAMPLE_P2PKH
-        );
-        let token = RecipientSpecToken::from_cli_arg(&raw).expect("json with utf8 blob_data");
-        let spec = token.into_recipient_spec().expect("into spec");
-        match spec {
-            RecipientSpec::P2pkh {
-                blob_data, ..
-            } => {
-                assert_eq!(blob_data.len(), 1);
-                assert_eq!(blob_data[0].key, "nns/v1/name");
-                assert_eq!(
-                    hex::encode(blob_data[0].blob.as_ref()),
-                    "80dfcd6dcec5ed6d6c0d"
-                );
-            }
-            _ => panic!("expected p2pkh"),
-        }
-    }
-
-    #[test]
-    fn parse_blob_data_rejects_jam_hex_and_utf8_together() {
-        let err = parse_blob_data_json(vec![BlobDataJson {
-            key: "k".into(),
-            jam_hex: Some("00".into()),
-            utf8: Some("x".into()),
-        }])
-        .expect_err("both fields");
-        assert!(format!("{err}").contains("only one of jam_hex or utf8"));
     }
 
     #[test]
@@ -804,14 +710,14 @@ mod tests {
             address,
             amount: 5,
             memo: Some(b"hi".to_vec()),
-            blob_data: vec![RawNoteDataEntry {
-                key: "nns/v1/claim".into(),
-                blob: Bytes::from(vec![1_u8]),
-            }],
+            blob_utf8: Some("\u{1}".into()),
         }];
         let outputs = planner_recipient_outputs(&recipients, true).expect("planner outputs");
         assert_eq!(outputs.len(), 1);
         let keys: Vec<_> = outputs[0].note_data.iter().map(|e| e.key.as_str()).collect();
-        assert_eq!(keys, vec!["lock", "nns/v1/claim", "memo"]);
+        assert_eq!(
+            keys,
+            vec!["lock", BLOB_UTF8_NOTE_DATA_KEY, "memo"]
+        );
     }
 }
