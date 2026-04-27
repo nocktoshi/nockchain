@@ -817,7 +817,7 @@
       ++  blob-line
         |=  data=note-data:v1:transact
         ^-  @t
-        ?~  got=(~(get z-by:zo data) %blob)
+        ?~  got=(~(get z-by:zo data) %blob-data)
           ''
         =/  text=@t
           ?:  ?=(@ u.got)

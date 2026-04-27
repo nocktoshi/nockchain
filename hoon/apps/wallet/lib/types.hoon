@@ -277,7 +277,8 @@
     %-  hash-hashable:tip5
     (hashable form)
   --
-
+::  Blob payload: $(list @ux)$ with same shape as ++memo-data (tip5 +based / +hashable).
++$  blob-data  form:memo-data
 ::
 ::  $transaction-tree: tree of transactions
 ::
@@ -429,10 +430,10 @@
   =<  form
   |%
   +$  form
-    $%  [%pkh recipient=hash:transact gift=coins:transact memo=(unit memo-data) blob-data=(unit @t)]
-        [%multisig threshold=@ participants=(list hash:transact) gift=coins:transact memo=(unit memo-data) blob-data=(unit @t)]
-        [%lock-root root=hash:transact gift=coins:transact memo=(unit memo-data) blob-data=(unit @t)]
-        [%bridge-deposit address=evm-address:bridge gift=coins:transact memo=(unit memo-data) blob-data=(unit @t)]
+    $%  [%pkh recipient=hash:transact gift=coins:transact memo=(unit memo-data) blob-data=(unit blob-data)]
+        [%multisig threshold=@ participants=(list hash:transact) gift=coins:transact memo=(unit memo-data) blob-data=(unit blob-data)]
+        [%lock-root root=hash:transact gift=coins:transact memo=(unit memo-data) blob-data=(unit blob-data)]
+        [%bridge-deposit address=evm-address:bridge gift=coins:transact memo=(unit memo-data) blob-data=(unit blob-data)]
     ==
   ++  gift
     |=  =form

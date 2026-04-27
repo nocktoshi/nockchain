@@ -17,6 +17,8 @@ pub const NOTE_DATA_KEY_BRIDGE_DEPOSIT: &str = "bridge";
 pub const NOTE_DATA_KEY_BRIDGE_WITHDRAWAL: &str = "bridge-w";
 /// Canonical note-data key for UTF-8 memo bytes (`(list @ux)` in Hoon).
 pub const NOTE_DATA_KEY_MEMO: &str = "memo";
+/// Canonical note-data key for opaque UTF-8 blob bytes (`(list @ux)` / ++blob-data in wallet).
+pub const NOTE_DATA_KEY_BLOB: &str = "blob-data";
 
 #[derive(Debug, Clone, PartialEq, Eq, NounEncode, NounDecode)]
 /// Internal noun parser for `%lock` payload shape `[%0 lock]`.
@@ -56,6 +58,8 @@ pub enum TypedNoteDataEntry {
     },
     /// `%memo` => jam of `(list @ux)` (one atom per byte, matching wallet `++memo-data`).
     Memo { bytes: Vec<u8> },
+    /// `%blob-data` => jam of `(list @ux)` (wallet `++blob-data`, same encoding as memo).
+    Blob { bytes: Vec<u8> },
 }
 
 impl TypedNoteDataEntry {
@@ -91,6 +95,11 @@ impl TypedNoteDataEntry {
         Self::Memo { bytes }
     }
 
+    /// Blob bytes stored as `(list @ux)` (same jam shape as memo; key `%blob-data`).
+    pub fn blob(bytes: Vec<u8>) -> Self {
+        Self::Blob { bytes }
+    }
+
     /// Returns the canonical note-data key for this typed entry.
     pub fn key(&self) -> &'static str {
         match self {
@@ -98,6 +107,7 @@ impl TypedNoteDataEntry {
             Self::BridgeDeposit { .. } => NOTE_DATA_KEY_BRIDGE_DEPOSIT,
             Self::BridgeWithdrawal { .. } => NOTE_DATA_KEY_BRIDGE_WITHDRAWAL,
             Self::Memo { .. } => NOTE_DATA_KEY_MEMO,
+            Self::Blob { .. } => NOTE_DATA_KEY_BLOB,
         }
     }
 
@@ -119,7 +129,7 @@ impl TypedNoteDataEntry {
                 lock_root.clone(),
                 *base_batch_end,
             )),
-            Self::Memo { bytes } => jam_payload(bytes),
+            Self::Memo { bytes } | Self::Blob { bytes } => jam_payload(bytes),
         };
         RawNoteDataEntry {
             key: self.key().to_string(),
@@ -167,6 +177,8 @@ pub enum NormalizedNoteDataKey {
     BridgeWithdrawal,
     /// `%memo` payload (`(list @ux)`).
     Memo,
+    /// `%blob-data` payload (`(list @ux)`).
+    Blob,
     /// Any unrecognized key preserved verbatim.
     Other(String),
 }
@@ -180,6 +192,7 @@ impl NormalizedNoteDataKey {
             NOTE_DATA_KEY_BRIDGE_DEPOSIT => Self::Bridge,
             NOTE_DATA_KEY_BRIDGE_WITHDRAWAL => Self::BridgeWithdrawal,
             NOTE_DATA_KEY_MEMO => Self::Memo,
+            NOTE_DATA_KEY_BLOB => Self::Blob,
             other => Self::Other(other.to_string()),
         }
     }
@@ -362,6 +375,8 @@ pub enum DecodedNoteDataPayload {
     BridgeWithdrawal(BridgeWithdrawalDataPayload),
     /// Successfully decoded `%memo`.
     Memo(MemoDataPayload),
+    /// Successfully decoded `%blob-data` (`(list @ux)`).
+    Blob(MemoDataPayload),
     /// Raw or failed-to-decode payload.
     Raw,
 }
@@ -437,6 +452,8 @@ impl DecodedNoteDataEntry {
             NormalizedNoteDataKey::Memo => {
                 MemoDataPayload::from_blob(&entry.blob).map(DecodedNoteDataPayload::Memo)
             }
+            NormalizedNoteDataKey::Blob => MemoDataPayload::from_blob(&entry.blob)
+                .map(|m| DecodedNoteDataPayload::Blob(m)),
             NormalizedNoteDataKey::Other(_) => Ok(DecodedNoteDataPayload::Raw),
         };
 

@@ -198,7 +198,7 @@ impl<'a> WordCountEstimator<'a> {
                     Self::estimate_list_words_len(bridge_w.base_event_id.len() as u64, 1);
                 1 + beid_words + 5 + 5 + 1
             }
-            DecodedNoteDataPayload::Memo(memo) => {
+            DecodedNoteDataPayload::Memo(memo) | DecodedNoteDataPayload::Blob(memo) => {
                 // (list @ux): one leaf per byte plus list terminator.
                 Self::estimate_list_words_len(memo.bytes.len() as u64, 1)
             }
