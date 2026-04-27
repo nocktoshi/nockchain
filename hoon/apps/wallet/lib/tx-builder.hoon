@@ -398,8 +398,8 @@
       :~  [%bridge 0 [%0 %base (evm-address-to-based:bridge addr.metadata)]]
       ==
     ==
-  ::  optional opaque UTF-8 blob; wallet jams cord as atom under blob (consumer interprets text)
-  =/  maybe-blob-text=(unit @t)
+  ::  optional opaque UTF-8 blob as $(list @ux)$ (same encoding as ++memo-data / ++blob-data)
+  =/  maybe-blob=(unit blob-data:wt)
     ?-  -.spec
       %pkh              blob-data.spec
       %multisig         blob-data.spec
@@ -407,16 +407,10 @@
       %bridge-deposit   blob-data.spec
     ==
   =/  blob-entries=(list [key=@tas jam=@ val=*])
-    ?~  maybe-blob-text  ~
-    ?:  =(0 (met 3 u.maybe-blob-text))
-      ::
-      ::  treat empty cord like ~
+    ?~  maybe-blob  ~
+    ?:  =(0 (lent u.maybe-blob))
       ~
-    =/  jam=@  (jam u.maybe-blob-text)
-    =/  maybe=(unit *)  ((soft *) (cue jam))
-    ?~  maybe
-      ~|('wallet: blob jam did not cue to a valid noun' !!)
-    ~[[%blob jam u.maybe]]
+    ~[[%blob-data 0 u.maybe-blob]]
   =/  maybe-memo=(unit memo-data:wt)
     ?-  -.spec
       %pkh              memo.spec
@@ -444,10 +438,18 @@
       |=  [k=@tas v=*]
       !=(k key)
     (snoc without-old [key val])
+  ::  Build note-data by merging one-key maps with +uni:z-by. Repeated ++put into a
+  ::  growing treap has hit ?> ?=(^ d) failures in ++put ; uni merges valid maps.
   =/  nd=note-data:v1:transact
-    %+  roll  deduped-pairs
-    |=  [[key=@tas val=*] acc=note-data:v1:transact]
-    (~(put z-by:zo acc) key val)
+    ?~  deduped-pairs
+      ~
+    =/  [fk=@tas fv=*]  i.deduped-pairs
+    =/  empty=note-data:v1:transact  ~
+    =/  acc=note-data:v1:transact  (~(put z-by:zo empty) fk fv)
+    %+  roll  t.deduped-pairs
+    |=  [[k=@tas v=*] merged=note-data:v1:transact]
+    ^-  note-data:v1:transact
+    (~(uni z-by:zo merged) (~(put z-by:zo empty) k v))
   =/  seed=seed:v1:transact
     :*  output-source=~
         lock-root=lock-root
@@ -480,8 +482,8 @@
 ++  blob-order-valid
   |=  ord=order:wt
   ^-  ?
-  ::  blob is optional; if present, cord must be non-empty (same idea as memo)
-  =/  maybe-blob=(unit @t)
+  ::  blob is optional; if present, ++blob-data must be non-empty UTF-8 bytes as $(list @ux)$
+  =/  maybe-blob=(unit blob-data:wt)
     ?-  -.ord
       %pkh              blob-data.ord
       %multisig         blob-data.ord
@@ -489,7 +491,11 @@
       %bridge-deposit   blob-data.ord
     ==
   ?~  maybe-blob  %.y
-  (gth (met 3 u.maybe-blob) 0)
+  =/  b=blob-data:wt  u.maybe-blob
+  ?&  (gth (lent b) 0)
+      ::  matches Rust planner max UTF-8 payload (256 KiB)
+      (lte (lent b) 262.144)
+  ==
 ::
 ++  orders-valid
   |=  orders=(list order:wt)
@@ -506,7 +512,7 @@
   ?.  (memo-order-valid ord)
     [%.n %memo-invalid]
   ?.  (blob-order-valid ord)
-    [%.n %blob-invalid]
+    [%.n %blob-data-invalid]
   ?-    -.ord
       %pkh
     ?:  =(0 gift.ord)

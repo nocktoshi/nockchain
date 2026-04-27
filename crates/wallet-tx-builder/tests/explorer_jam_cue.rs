@@ -1,4 +1,4 @@
-//! Round-trip for canonical blob note-data (`%memo` and `%blob` keys): encode → jam → cue → same bytes.
+//! Round-trip for canonical blob note-data (`%memo` and `%blob-data` keys): encode → jam → cue → same bytes.
 
 use bytes::Bytes;
 use wallet_tx_builder::note_data::{MemoDataPayload, TypedNoteDataEntry};
