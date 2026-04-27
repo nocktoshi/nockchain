@@ -112,8 +112,6 @@ pub enum RecipientSpec {
     BridgeDeposit {
         evm_address: EthAddress,
         amount: u64,
-        memo: Option<Vec<u8>>,
-        blob_data: Option<Vec<u8>>,
     },
 }
 
@@ -274,13 +272,9 @@ impl RecipientSpecToken {
                         format_eth_addr_error(err)
                     )))
                 })?;
-                let memo = validate_memo_utf8(memo.as_deref())?;
-                let blob_data = validate_blob_data_field(blob_data)?;
                 Ok(RecipientSpec::BridgeDeposit {
                     evm_address: parsed,
                     amount,
-                    memo,
-                    blob_data,
                 })
             }
         }
@@ -397,23 +391,14 @@ pub fn planner_recipient_output(
             })
         }
         RecipientSpec::BridgeDeposit {
-            evm_address,
-            amount,
-        } => {
-            let note_data = vec![RawNoteDataEntry::from_bridge_deposit(evm_address_to_based(
-                *evm_address,
-            ))];
-            Ok(PlannedOutput {
-                lock_root: Hash::from_base58(BRIDGE_LOCK_ROOT_DEFAULT_B58).map_err(|err| {
-                    NockAppError::from(CrownError::Unknown(format!(
-                        "Invalid bridge lock root constant '{}': {}",
-                        BRIDGE_LOCK_ROOT_DEFAULT_B58, err
-                    )))
-                })?,
-                amount: *amount,
-                note_data,
-            })
-        }
+        } => Ok(PlannedOutput {
+            lock_root: Hash::from_base58(BRIDGE_LOCK_ROOT_DEFAULT_B58).map_err(|err| {
+                NockAppError::from(CrownError::Unknown(format!(
+                    "Invalid bridge lock root constant '{}': {}",
+                    BRIDGE_LOCK_ROOT_DEFAULT_B58, err
+                )))
+            })?,
+            amount: *amount,
     }
 }
 
