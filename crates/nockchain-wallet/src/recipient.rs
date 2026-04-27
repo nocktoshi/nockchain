@@ -88,10 +88,6 @@ pub enum RecipientSpecToken {
         #[serde(rename = "evm-address")]
         evm_address: String,
         amount: u64,
-        #[serde(default)]
-        memo: Option<String>,
-        #[serde(default, rename = "blob-data", alias = "blob_data")]
-        blob_data: Option<String>,
     },
 }
 
