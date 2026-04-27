@@ -398,15 +398,14 @@
       :~  [%bridge 0 [%0 %base (evm-address-to-based:bridge addr.metadata)]]
       ==
     ==
-  ::  optional opaque UTF-8 blob; wallet jams cord as atom under blob/v1 (consumer interprets text)
+  ::  optional opaque UTF-8 blob; wallet jams cord as atom under blob (consumer interprets text)
   =/  maybe-blob-text=(unit @t)
     ?-  -.spec
-      %pkh              blob-utf8.spec
-      %multisig         blob-utf8.spec
-      %lock-root        blob-utf8.spec
-      %bridge-deposit   blob-utf8.spec
+      %pkh              blob.spec
+      %multisig         blob.spec
+      %lock-root        blob.spec
+      %bridge-deposit   blob.spec
     ==
-  =/  blob-key=@tas  (crip "blob/v1")
   =/  blob-entries=(list [key=@tas jam=@ val=*])
     ?~  maybe-blob-text  ~
     ?:  =(0 (met 3 u.maybe-blob-text))
@@ -416,8 +415,8 @@
     =/  jam=@  (jam u.maybe-blob-text)
     =/  maybe=(unit *)  ((soft *) (cue jam))
     ?~  maybe
-      ~|('wallet: blob-utf8 jam did not cue to a valid noun' !!)
-    ~[[blob-key jam u.maybe]]
+      ~|('wallet: blob jam did not cue to a valid noun' !!)
+    ~[[%blob jam u.maybe]]
   =/  maybe-memo=(unit memo-data:wt)
     ?-  -.spec
       %pkh              memo.spec
@@ -481,13 +480,13 @@
 ++  blob-order-valid
   |=  ord=order:wt
   ^-  ?
-  ::  blob-utf8 is optional; if present, cord must be non-empty (same idea as memo)
+  ::  blob is optional; if present, cord must be non-empty (same idea as memo)
   =/  maybe-blob=(unit @t)
     ?-  -.ord
-      %pkh              blob-utf8.ord
-      %multisig         blob-utf8.ord
-      %lock-root        blob-utf8.ord
-      %bridge-deposit   blob-utf8.ord
+      %pkh              blob.ord
+      %multisig         blob.ord
+      %lock-root        blob.ord
+      %bridge-deposit   blob.ord
     ==
   ?~  maybe-blob  %.y
   (gth (met 3 u.maybe-blob) 0)
@@ -507,7 +506,7 @@
   ?.  (memo-order-valid ord)
     [%.n %memo-invalid]
   ?.  (blob-order-valid ord)
-    [%.n %blob-utf8-invalid]
+    [%.n %blob-invalid]
   ?-    -.ord
       %pkh
     ?:  =(0 gift.ord)
@@ -594,8 +593,8 @@
   ?~  participants
     ~|('Invalid lock, no participants specified.' !!)
     ?:  &(=(threshold 1) =(1 (lent participants)))
-    (some [%pkh recipient=i.participants gift=gift memo=~ blob-utf8=~])
-  (some [%multisig threshold=threshold participants=participants gift=gift memo=~ blob-utf8=~])
+    (some [%pkh recipient=i.participants gift=gift memo=~ blob=~])
+  (some [%multisig threshold=threshold participants=participants gift=gift memo=~ blob=~])
 ::
 ++  build-refund-order
   |=  [refund=@ refund-lock=lock:transact]
