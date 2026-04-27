@@ -400,7 +400,6 @@
       :-  root.metadata
       %-  ~(put z-by:zo nd)
       [%bridge [%0 %base (evm-address-to-based:bridge addr.metadata)]]
-      ==
     ==
   =/  maybe-blob=(unit blob-data:wt)
     ?-  -.spec
@@ -425,14 +424,17 @@
     ?~  maybe-memo  ~
     :~  [%memo 0 u.maybe-memo]
     ==
+  =/  base-entries=(list [key=@tas jam=@ val=*])
+    %+  turn  ~(tap z-by:zo nd)
+    |=  [k=@tas v=*]
+    [k 0 v]
   =/  all-entries=(list [key=@tas jam=@ val=*])
     ;:  weld
       base-entries
       blob-entries
       memo-entries
     ==
-  ::  One insert per %tas key (last wins): base then blobs then memo — same
-  ::  layering as planner output note-data rows before z-map encoding.
+  ::  One insert per %tas key (last wins): base then blobs then memo.
   =/  deduped-pairs=(list [key=@tas val=*])
     %+  roll  all-entries
     |=  [[key=@tas jam=@ val=*] acc=(list [key=@tas val=*])]
@@ -441,61 +443,28 @@
       |=  [k=@tas v=*]
       !=(k key)
     (snoc without-old [key val])
-  ::  Build note-data by merging one-key maps with +uni:z-by. Repeated ++put into a
-  ::  growing treap has hit ?> ?=(^ d) failures in ++put ; uni merges valid maps.
-  =/  nd=note-data:v1:transact
+  ::  Merge one-key maps via +uni:z-by (avoid repeated ++put into one treap).
+  =/  merged-nd=note-data:v1:transact
     ?~  deduped-pairs
       ~
     =/  [fk=@tas fv=*]  i.deduped-pairs
     =/  empty=note-data:v1:transact  ~
     =/  acc=note-data:v1:transact  (~(put z-by:zo empty) fk fv)
     %+  roll  t.deduped-pairs
-    |=  [[k=@tas v=*] merged=note-data:v1:transact]
+    |=  [[k=@tas v=*] m=note-data:v1:transact]
     ^-  note-data:v1:transact
-    (~(uni z-by:zo merged) (~(put z-by:zo empty) k v))
+    (~(uni z-by:zo m) (~(put z-by:zo empty) k v))
   =/  seed=seed:v1:transact
     :*  output-source=~
         lock-root=lock-root
-        note-data=nd
+        note-data=merged-nd
         gift=(order-gift spec)
         parent-hash=(hash:nnote:transact note)
     ==
   :*  [seed seeds]
       (add gifts (order-gift spec))
-      (~(put z-by:zo output-lock-map) (first:nname:transact lock-root.seed) metadata)
-  ==
-::
-++  memo-order-valid
-  |=  ord=order:wt
-  ^-  ?
-  =/  maybe-memo=(unit memo-data:wt)
-    ?-  -.ord
-      %pkh              memo.ord
-      %multisig         memo.ord
-      %lock-root        memo.ord
-      %bridge-deposit   memo.ord
-    ==
-  ?~  maybe-memo  %.y
-  =/  m=memo-data:wt  u.maybe-memo
-  ?&  (gth (lent m) 0)
-      (lte (lent m) 2.048)
-  ==
-::
-++  blob-order-valid
-  |=  ord=order:wt
-  ^-  ?
-  =/  maybe-blob=(unit blob-data:wt)
-    ?-  -.ord
-      %pkh              blob-data.ord
-      %multisig         blob-data.ord
-      %lock-root        blob-data.ord
-      %bridge-deposit   blob-data.ord
-    ==
-  ?~  maybe-blob  %.y
-  =/  b=blob-data:wt  u.maybe-blob
-  ?&  (gth (lent b) 0)
-      ::  matches Rust planner max UTF-8 payload (256 KiB)
-      (lte (lent b) 262.144)
+      %-  ~(put z-by:zo output-lock-map)
+      [(first:nname:transact lock-root.seed) metadata]
   ==
 ::
 ++  orders-valid
@@ -510,10 +479,6 @@
       [%.n %bridge-orders-exceeds-one]
     [%.y ~]
   =/  ord=order:wt  i.orders
-  ?.  (memo-order-valid ord)
-    [%.n %memo-invalid]
-  ?.  (blob-order-valid ord)
-    [%.n %blob-data-invalid]
   ?-    -.ord
       %pkh
     ?:  =(0 gift.ord)
@@ -600,8 +565,8 @@
   ?~  participants
     ~|('Invalid lock, no participants specified.' !!)
   ?:  &(=(threshold 1) =(1 (lent participants)))
-    (some [%pkh recipient=i.participants gift=gift memo=~ blob=~])
-  (some [%multisig threshold=threshold participants=participants gift=gift memo=~ blob=~])
+    (some [%pkh recipient=i.participants gift=gift memo=~ blob-data=~])
+  (some [%multisig threshold=threshold participants=participants gift=gift memo=~ blob-data=~])
 ::
 ++  build-refund-order
   |=  [refund=@ refund-lock=lock:transact]
