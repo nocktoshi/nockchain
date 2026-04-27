@@ -401,10 +401,10 @@
   ::  optional opaque UTF-8 blob; wallet jams cord as atom under blob (consumer interprets text)
   =/  maybe-blob-text=(unit @t)
     ?-  -.spec
-      %pkh              blob.spec
-      %multisig         blob.spec
-      %lock-root        blob.spec
-      %bridge-deposit   blob.spec
+      %pkh              blob-data.spec
+      %multisig         blob-data.spec
+      %lock-root        blob-data.spec
+      %bridge-deposit   blob-data.spec
     ==
   =/  blob-entries=(list [key=@tas jam=@ val=*])
     ?~  maybe-blob-text  ~
@@ -483,10 +483,10 @@
   ::  blob is optional; if present, cord must be non-empty (same idea as memo)
   =/  maybe-blob=(unit @t)
     ?-  -.ord
-      %pkh              blob.ord
-      %multisig         blob.ord
-      %lock-root        blob.ord
-      %bridge-deposit   blob.ord
+      %pkh              blob-data.ord
+      %multisig         blob-data.ord
+      %lock-root        blob-data.ord
+      %bridge-deposit   blob-data.ord
     ==
   ?~  maybe-blob  %.y
   (gth (met 3 u.maybe-blob) 0)

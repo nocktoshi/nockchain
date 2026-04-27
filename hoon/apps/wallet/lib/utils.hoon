@@ -827,7 +827,7 @@
             '[blob: cannot decode]'
         ;:  (cury cat 3)
             '\0a- Blob: '
-            (trip (crip text))
+            text
         ==
     ::
       ++  note-from-balance
