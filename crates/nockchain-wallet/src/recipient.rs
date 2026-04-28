@@ -256,8 +256,6 @@ impl RecipientSpecToken {
             RecipientSpecToken::BridgeDeposit {
                 evm_address,
                 amount,
-                memo,
-                blob_data,
             } => {
                 if amount == 0 {
                     return Err(CrownError::Unknown(
@@ -391,6 +389,8 @@ pub fn planner_recipient_output(
             })
         }
         RecipientSpec::BridgeDeposit {
+            evm_address,
+            amount,
         } => Ok(PlannedOutput {
             lock_root: Hash::from_base58(BRIDGE_LOCK_ROOT_DEFAULT_B58).map_err(|err| {
                 NockAppError::from(CrownError::Unknown(format!(
