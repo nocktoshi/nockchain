@@ -399,50 +399,23 @@
       :-  root.metadata
       %-  ~(put z-by:zo nd)
       [%bridge [%0 %base (evm-address-to-based:bridge addr.metadata)]]
-    ::
-        %memo
-      :-  root.metadata
-      %-  ~(put z-by:zo nd)
-      [%memo 0 memo.metadata]
-    ::
-        %blob-data
-      :-  root.metadata
-      %-  ~(put z-by:zo nd)
-      [%blob-data 0 blob-data.metadata]
     ==
-  =/  maybe-blob=(unit blob-data:wt)
-    ?-  -.spec
-      %pkh              blob-data.spec
-      %multisig         blob-data.spec
-      %lock-root        blob-data.spec
-      %bridge-deposit   blob-data.spec
+  =/  memo=(unit memo-data:wt)
+    ?-    -.spec
+      %pkh           memo.spec
+      %multisig      memo.spec
+      %lock-root     ~
+      %bridge-deposit  ~
     ==
-  =/  blob-entries=(list [key=@tas jam=@ val=*])
-    ?~  maybe-blob  ~
-    ?:  =(0 (lent u.maybe-blob))
-      ~
-    ~[[%blob-data 0 u.maybe-blob]]
-  =/  maybe-memo=(unit memo-data:wt)
-    ?-  -.spec
-      %pkh              memo.spec
-      %multisig         memo.spec
-      %lock-root        memo.spec
-      %bridge-deposit   memo.spec
+  =/  blob=(unit blob-data:wt)
+    ?-    -.spec
+      %pkh           blob.spec
+      %multisig      blob.spec
+      %lock-root     ~
+      %bridge-deposit  ~
     ==
-  =/  memo-entries=(list [key=@tas jam=@ val=*])
-    ?~  maybe-memo  ~
-    :~  [%memo 0 u.maybe-memo]
-    ==
-  =/  base-entries=(list [key=@tas jam=@ val=*])
-    %+  turn  ~(tap z-by:zo nd)
-    |=  [k=@tas v=*]
-    [k 0 v]
-  =/  all-entries=(list [key=@tas jam=@ val=*])
-    ;:  weld
-      base-entries
-      blob-entries
-      memo-entries
-    ==
+  =.  nd  ?~(memo nd (~(put z-by:zo nd) %memo u.memo))
+  =.  nd  ?~(blob nd (~(put z-by:zo nd) %blob u.blob))
   =/  seed=seed:v1:transact
     :*  output-source=~
         lock-root=lock-root
@@ -533,12 +506,12 @@
     [%lock-root root=root.ord]
   ::
       %pkh
-    [%lock [%pkh [m=1 (z-silt:zo ~[recipient.ord])]]~ include-data memo=memo.ord blob-data=blob-data.ord]
+    [%lock [%pkh [m=1 (z-silt:zo ~[recipient.ord])]]~ include-data]
   ::
       %multisig
     =/  participants=(list hash:transact)  participants.ord
     =/  allowed=(z-set:zo hash:transact)  (z-silt:zo participants)
-    [%lock [%pkh [m=threshold.ord allowed]]~ include-data=%.y memo=memo-data.ord blob-data=blob-data.ord]
+    [%lock [%pkh [m=threshold.ord allowed]]~ include-data=%.y]
   ==
 ::
 ++  order-from-lock
@@ -554,8 +527,8 @@
   ?~  participants
     ~|('Invalid lock, no participants specified.' !!)
   ?:  &(=(threshold 1) =(1 (lent participants)))
-    (some [%pkh recipient=i.participants gift=gift memo=~ blob-data=~])
-  (some [%multisig threshold=threshold participants=participants gift=gift memo=~ blob-data=~])
+    (some [%pkh recipient=i.participants gift=gift memo=~ blob=~])
+  (some [%multisig threshold=threshold participants=participants gift=gift memo=~ blob=~])
 ::
 ++  build-refund-order
   |=  [refund=@ refund-lock=lock:transact]

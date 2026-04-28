@@ -813,18 +813,18 @@
         =/  memo-text=@t  (crip (turn memo-bytes @tD))
         memo-text
     ::
-      ::  +blob-line: memo-style line for blob (UTF-8 cord jammed as atom in wallet / tx-builder)
       ++  blob-line
         |=  data=note-data:v1:transact
         ^-  @t
-        ?~  got=(~(get z-by:zo data) %blob-data)
+        ?~  got=(~(get z-by:zo data) %blob)
           ''
         =/  text=@t
-          ?:  ?=(@ u.got)
-            ^-  @t
-            u.got
-          ~>  %slog.[2 'wallet display: blob payload is not an atom']
+          ?~  soft-blob=((soft blob-data:wt) u.got)
+            ?:  ?=(@ u.got)
+              u.got
+            ~>  %slog.[2 'wallet display: blob payload malformed']
             '[blob: cannot decode]'
+          (crip (turn u.soft-blob @tD))
         ;:  (cury cat 3)
             '\0a- Blob: '
             text
