@@ -399,6 +399,16 @@
       :-  root.metadata
       %-  ~(put z-by:zo nd)
       [%bridge [%0 %base (evm-address-to-based:bridge addr.metadata)]]
+    ::
+        %memo
+      :-  root.metadata
+      %-  ~(put z-by:zo nd)
+      [%memo 0 memo.metadata]
+    ::
+        %blob-data
+      :-  root.metadata
+      %-  ~(put z-by:zo nd)
+      [%blob-data 0 blob-data.metadata]
     ==
   =/  maybe-blob=(unit blob-data:wt)
     ?-  -.spec
@@ -433,30 +443,10 @@
       blob-entries
       memo-entries
     ==
-  ::  One insert per %tas key (last wins): base then blobs then memo.
-  =/  deduped-pairs=(list [key=@tas val=*])
-    %+  roll  all-entries
-    |=  [[key=@tas jam=@ val=*] acc=(list [key=@tas val=*])]
-    =/  without-old=(list [key=@tas val=*])
-      %+  skim  acc
-      |=  [k=@tas v=*]
-      !=(k key)
-    (snoc without-old [key val])
-  ::  Merge one-key maps via +uni:z-by (avoid repeated ++put into one treap).
-  =/  merged-nd=note-data:v1:transact
-    ?~  deduped-pairs
-      ~
-    =/  [fk=@tas fv=*]  i.deduped-pairs
-    =/  empty=note-data:v1:transact  ~
-    =/  acc=note-data:v1:transact  (~(put z-by:zo empty) fk fv)
-    %+  roll  t.deduped-pairs
-    |=  [[k=@tas v=*] m=note-data:v1:transact]
-    ^-  note-data:v1:transact
-    (~(uni z-by:zo m) (~(put z-by:zo empty) k v))
   =/  seed=seed:v1:transact
     :*  output-source=~
         lock-root=lock-root
-        note-data=merged-nd
+        note-data=nd
         gift=(order-gift spec)
         parent-hash=(hash:nnote:transact note)
     ==
@@ -543,12 +533,12 @@
     [%lock-root root=root.ord]
   ::
       %pkh
-    [%lock [%pkh [m=1 (z-silt:zo ~[recipient.ord])]]~ include-data]
-    ::
+    [%lock [%pkh [m=1 (z-silt:zo ~[recipient.ord])]]~ include-data memo=memo.ord blob-data=blob-data.ord]
+  ::
       %multisig
     =/  participants=(list hash:transact)  participants.ord
     =/  allowed=(z-set:zo hash:transact)  (z-silt:zo participants)
-    [%lock [%pkh [m=threshold.ord allowed]]~ include-data=%.y]
+    [%lock [%pkh [m=threshold.ord allowed]]~ include-data=%.y memo=memo-data.ord blob-data=blob-data.ord]
   ==
 ::
 ++  order-from-lock
