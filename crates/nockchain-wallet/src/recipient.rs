@@ -10,13 +10,10 @@ use wallet_tx_builder::types::{PlannedOutput, RawNoteDataEntry};
 
 use crate::{CrownError, NockAppError};
 
-
 const MAX_BLOB_UTF8_BYTES: usize = 256 * 1024;
 
 /// Trims and checks size; `None` if absent or empty/whitespace-only.
-pub(crate) fn validate_blob_field(
-    blob: Option<String>,
-) -> Result<Option<Vec<u8>>, NockAppError> {
+pub(crate) fn validate_blob_field(blob: Option<String>) -> Result<Option<Vec<u8>>, NockAppError> {
     let Some(raw) = blob else {
         return Ok(None);
     };
@@ -639,10 +636,7 @@ mod tests {
         let token = RecipientSpecToken::from_cli_arg(&raw).expect("json with blob");
         let spec = token.into_recipient_spec().expect("into spec");
         match spec {
-            RecipientSpec::P2pkh {
-                blob,
-                ..
-            } => {
+            RecipientSpec::P2pkh { blob, .. } => {
                 assert_eq!(blob, Some(b"nns.nock".to_vec()));
             }
             _ => panic!("expected p2pkh"),
@@ -658,10 +652,7 @@ mod tests {
         let token = RecipientSpecToken::from_cli_arg(&raw).expect("json with blob data");
         let spec = token.into_recipient_spec().expect("into spec");
         match spec {
-            RecipientSpec::P2pkh {
-                blob,
-                ..
-            } => {
+            RecipientSpec::P2pkh { blob, .. } => {
                 assert_eq!(blob, Some(b"nns.nock".to_vec()));
             }
             _ => panic!("expected p2pkh"),
@@ -679,7 +670,11 @@ mod tests {
         }];
         let outputs = planner_recipient_outputs(&recipients, true).expect("planner outputs");
         assert_eq!(outputs.len(), 1);
-        let keys: Vec<_> = outputs[0].note_data.iter().map(|e| e.key.as_str()).collect();
+        let keys: Vec<_> = outputs[0]
+            .note_data
+            .iter()
+            .map(|e| e.key.as_str())
+            .collect();
         assert_eq!(
             keys,
             vec![NOTE_DATA_KEY_LOCK, NOTE_DATA_KEY_BLOB, NOTE_DATA_KEY_MEMO]

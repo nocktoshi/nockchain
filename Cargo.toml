@@ -41,6 +41,7 @@ crossterm = "0.29"
 curve25519-dalek = { version = "4.1.1", default-features = false }
 dashmap = "6.1.0"
 deadpool-diesel = { version = "0.6.1", features = ["rt_tokio_1", "sqlite"] }
+dialoguer = "0.12"
 diesel = { version = "2.1.4", features = ["sqlite"] }
 dirs = "6.0.0"
 divan = "0.1.21"
@@ -60,6 +61,7 @@ hex-literal = "1.0.0"
 hickory-proto = "0.25.0-alpha.4"
 hickory-resolver = { version = "0.25.0-alpha.4", features = ["system-config"] }
 image = "0.24.7"
+indicatif = "0.18"
 instant-acme = "0.7.2"
 intmap = "3.1.0"
 lazy_static = "1.4.0"

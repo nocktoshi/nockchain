@@ -185,6 +185,10 @@ pub struct WalletCli {
     #[command(flatten)]
     pub boot: BootCli,
 
+    /// More detailed logs (info/debug). When unset, `repl` uses a quiet default unless `RUST_LOG` is set.
+    #[arg(short, long, global = true)]
+    pub verbose: bool,
+
     #[arg(long, default_value = "false")]
     pub fakenet: bool,
 
@@ -208,10 +212,7 @@ pub enum WatchSubcommand {
     },
     /// Add a watch-only schnorr pubkey
     Pubkey {
-        #[arg(
-            value_name = "pubkey",
-            help = "Base58-encoded schnorr pubkey"
-        )]
+        #[arg(value_name = "pubkey", help = "Base58-encoded schnorr pubkey")]
         pubkey: String,
     },
     /// Import a multisig lock for watch-only tracking
@@ -388,10 +389,7 @@ pub enum Commands {
 
     /// Query whether a transaction was accepted by the node
     TxAccepted {
-        #[arg(
-            value_name = "TX_ID",
-            help = "Base58-encoded transaction ID"
-        )]
+        #[arg(value_name = "TX_ID", help = "Base58-encoded transaction ID")]
         tx_id: String,
     },
 
@@ -539,7 +537,6 @@ pub enum Commands {
     //     #[arg(value_name = "TX_ID")]
     //     tx_id: String,
     // },
-
     /// Sign an arbitrary message
     #[command(group = clap::ArgGroup::new("message_source").required(true).args(&["message", "message_file", "message_pos"]))]
     SignMessage {
@@ -606,11 +603,7 @@ pub enum Commands {
 
     /// Verify an arbitrary message signature
     VerifyMessage {
-        #[arg(
-            short = 'm',
-            long = "message",
-            help = "Message to verify (raw string)"
-        )]
+        #[arg(short = 'm', long = "message", help = "Message to verify (raw string)")]
         message: Option<String>,
 
         #[arg(
@@ -656,10 +649,7 @@ pub enum Commands {
 
     /// Verify a signature against an already-computed tip5 hash (base58)
     VerifyHash {
-        #[arg(
-            value_name = "HASH",
-            help = "Positional base58-encoded tip5 hash"
-        )]
+        #[arg(value_name = "HASH", help = "Positional base58-encoded tip5 hash")]
         hash_b58: String,
 
         #[arg(
@@ -668,10 +658,7 @@ pub enum Commands {
             help = "Path to jammed signature file produced by signing"
         )]
         signature_path: Option<String>,
-        #[arg(
-            value_name = "SIGNATURE_FILE",
-            help = "Positional signature path"
-        )]
+        #[arg(value_name = "SIGNATURE_FILE", help = "Positional signature path")]
         signature_pos: Option<String>,
 
         #[arg(
@@ -680,12 +667,12 @@ pub enum Commands {
             help = "Base58-encoded schnorr public key"
         )]
         pubkey: Option<String>,
-        #[arg(
-            value_name = "PUBKEY",
-            help = "Positional public key"
-        )]
+        #[arg(value_name = "PUBKEY", help = "Positional public key")]
         pubkey_pos: Option<String>,
     },
+
+    /// Interactive menu shell (REPL). Type `help` or `/help`, `exit` or `/exit`. Use `--verbose` for more logs.
+    Repl,
 }
 
 impl Commands {
@@ -718,6 +705,7 @@ impl Commands {
             Commands::SignHash { .. } => "sign-hash",
             Commands::VerifyHash { .. } => "verify-hash",
             Commands::TxAccepted { .. } => "tx-accepted",
+            Commands::Repl => "repl",
             Commands::Watch { subcommand } => match subcommand {
                 WatchSubcommand::Address { .. } => "watch-address",
                 WatchSubcommand::Pubkey { .. } => "watch-address",

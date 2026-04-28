@@ -10,10 +10,12 @@ bytes.workspace = true
 bs58 = { workspace = true }
 clap = { workspace = true, features = ["derive", "cargo"] }
 crossterm.workspace = true
+ratatui.workspace = true
 either.workspace = true
 getrandom.workspace = true
 hex.workspace = true
 http = "1"
+indicatif.workspace = true
 kernels-open-wallet = { workspace = true }
 nockapp = { workspace = true }
 nockapp-grpc = { workspace = true }
