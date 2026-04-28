@@ -399,6 +399,10 @@ pub fn planner_recipient_output(
                 )))
             })?,
             amount: *amount,
+            note_data: vec![RawNoteDataEntry::from_bridge_deposit(evm_address_to_based(
+                *evm_address,
+            ))],
+        }),
     }
 }
 
@@ -683,7 +687,7 @@ mod tests {
         let keys: Vec<_> = outputs[0].note_data.iter().map(|e| e.key.as_str()).collect();
         assert_eq!(
             keys,
-            vec!["lock", NOTE_DATA_KEY_BLOB, "memo"]
+            vec![NOTE_DATA_KEY_LOCK, NOTE_DATA_KEY_BLOB, NOTE_DATA_KEY_MEMO]
         );
     }
 }
