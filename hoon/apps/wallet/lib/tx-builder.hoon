@@ -394,7 +394,7 @@
       [(hash:lock:transact lock.metadata) nd]
     ::
         %lock-root
-       [root.metadata nd]
+      [root.metadata nd]
     ::
         %bridge-deposit
       :-  root.metadata
