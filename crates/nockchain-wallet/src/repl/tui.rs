@@ -195,45 +195,17 @@ fn estimate_wrapped_source_lines(text: &str, inner_w: u16) -> usize {
 }
 
 fn draw_ui(f: &mut Frame<'_>, app: &mut AppState, tick: u64) {
+    if matches!(app.screen, Screen::Splash) {
+        super::splash::draw_splash(f, tick);
+        return;
+    }
+
     let block = Block::default().borders(Borders::ALL).title(Span::styled(
         SPLASH_BRAND,
         Style::default().fg(Color::Green),
     ));
     let inner = block.inner(f.area());
     f.render_widget(block, f.area());
-
-    if matches!(app.screen, Screen::Splash) {
-        let vchunks = Layout::default()
-            .direction(Direction::Vertical)
-            .constraints([
-                Constraint::Percentage(35),
-                Constraint::Length(10),
-                Constraint::Percentage(40),
-            ])
-            .split(inner);
-        let splash = Paragraph::new(vec![
-            Line::from(Span::styled(
-                SPLASH_BRAND,
-                Style::default()
-                    .fg(Color::Yellow)
-                    .add_modifier(Modifier::BOLD),
-            )),
-            Line::from(""),
-            Line::from(Span::styled(
-                "|----- Programmable Gold -----|",
-                Style::default().fg(Color::Yellow),
-            )),
-            Line::from(""),
-            Line::from(Span::styled(
-                "press any key to start",
-                Style::default().fg(Color::Gray),
-            )),
-        ])
-        .alignment(Alignment::Center)
-        .wrap(Wrap { trim: true });
-        f.render_widget(splash, vchunks[1]);
-        return;
-    }
 
     let chunks = Layout::default()
         .direction(Direction::Vertical)

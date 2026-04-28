@@ -10,6 +10,7 @@ mod ct_dispatch;
 mod handlers;
 mod paste;
 mod screens;
+mod splash;
 mod tui;
 
 use std::sync::Arc;
