@@ -21,8 +21,8 @@ pub const NOTE_DATA_KEY_BRIDGE_DEPOSIT: &str = "bridge";
 pub const NOTE_DATA_KEY_BRIDGE_WITHDRAWAL: &str = "bridge-w";
 /// Canonical note-data key for UTF-8 transaction memo
 pub const NOTE_DATA_KEY_MEMO: &str = "memo";
-/// Canonical note-data key for optional opaque UTF-8 blob (`%blob-data` in wallet seeds).
-pub const NOTE_DATA_KEY_BLOB: &str = "blob-data";
+/// Canonical note-data key for optional opaque UTF-8 blob (`%blob` in note-data; `blob-data:wt` in Hoon).
+pub const NOTE_DATA_KEY_BLOB: &str = "blob";
 
 pub const MAX_MEMO_UTF8_BYTES: usize = 2048;
 
@@ -65,7 +65,7 @@ fn decode_len_prefixed_blob(belts: &[Belt]) -> Option<Vec<u8>> {
     Some(body)
 }
 
-/// Noun used for wallet `%memo` / `%blob-data` **orders** (kernel poke) and for `%memo` / `%blob-data`
+/// Noun used for wallet `%memo` / `%blob` **orders** (kernel poke) and for `%memo` / `%blob`
 /// note-data values in seeds: flat `(list belt)` as `[byte-len=@ …little-endian u32 limbs…]`,
 /// matching [`encode_blob_belts`].
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -126,9 +126,9 @@ pub enum TypedNoteDataEntry {
         lock_root: Hash,
         base_batch_end: u64,
     },
-    /// `%memo` => jam of blob (four-byte limbs; see `encode_blob_belts`).
+    /// `%memo` => jam of length-prefixed packed belts (see `encode_blob_belts`).
     Memo { bytes: Vec<u8> },
-    /// `%blob-data` => same packed jam as `%memo`; distinct note-data key.
+    /// `%blob` => same packed jam as `%memo`; distinct note-data key.
     Blob { bytes: Vec<u8> },
 }
 
@@ -165,7 +165,7 @@ impl TypedNoteDataEntry {
         Self::Memo { bytes }
     }
 
-    /// Opaque UTF-8 payload (packed belt encoding; key `%blob-data`).
+    /// Opaque UTF-8 payload (packed belt encoding; key `%blob`).
     pub fn blob(bytes: Vec<u8>) -> Self {
         Self::Blob { bytes }
     }
@@ -247,7 +247,7 @@ pub enum NormalizedNoteDataKey {
     BridgeWithdrawal,
     /// `%memo` payload (canonical blob).
     Memo,
-    /// `%blob-data` payload (same packed decode as `%memo`).
+    /// `%blob` payload (same packed decode as `%memo`).
     Blob,
     /// Any unrecognized key preserved verbatim.
     Other(String),
@@ -421,14 +421,14 @@ impl BridgeWithdrawalDataPayload {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-/// Decoded `%memo` / `%blob-data` UTF-8 or opaque bytes.
+/// Decoded `%memo` / `%blob` UTF-8 or opaque bytes.
 pub struct MemoDataPayload {
     /// Raw memo bytes (UTF-8 in typical wallet usage).
     pub bytes: Vec<u8>,
 }
 
 impl MemoDataPayload {
-    /// Parses a jammed blob (used for `%memo` and `%blob-data` note-data values).
+    /// Parses a jammed blob (used for `%memo` and `%blob` note-data values).
     ///
     /// Cues with [`Noun::cue_bytes_slice`] (same as chain/fixture jets) so indirect atoms match explorer output.
     pub fn from_blob(blob: &Bytes) -> Result<Self, NoteDataDecodeError> {
@@ -452,7 +452,7 @@ pub enum DecodedNoteDataPayload {
     BridgeWithdrawal(BridgeWithdrawalDataPayload),
     /// Successfully decoded `%memo`.
     Memo(MemoDataPayload),
-    /// Successfully decoded `%blob-data` (same representation as memo).
+    /// Successfully decoded `%blob` (same representation as memo).
     Blob(MemoDataPayload),
     /// Raw or failed-to-decode payload.
     Raw,

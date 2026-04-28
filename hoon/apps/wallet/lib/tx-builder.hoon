@@ -400,7 +400,7 @@
       %-  ~(put z-by:zo nd)
       [%bridge [%0 %base (evm-address-to-based:bridge addr.metadata)]]
     ==
-  =/  memo=(unit memo-data:wt)
+  =/  memo=(unit blob-data:wt)
     ?-    -.spec
       %pkh           memo.spec
       %multisig      memo.spec

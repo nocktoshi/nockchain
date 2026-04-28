@@ -236,34 +236,22 @@
 +$  lock-data
   $%  [%0 =lock:transact]
   ==
-::  Memos: Optional memo data stored in note-data
-::  this data is stored under the %memo key in $note-data.
-++  memo-data
+::  Blob Data: 
+::  - UTF-8 bytes as $(list @ux)$ with one atom per byte
+::  - Used by %blob and %memo keys in $note-data.
+++  blob-data
   =<  form
   |%
-  +$  form  (list @ux)
-  ++  chunk-63
-    |=  a=@ux
-    ^-  (list @ux)
-    =|  chunks=(list @ux)
-    |-
-    ?:  =(a 0)
-      chunks
-    =/  chunk  (dis a (dec (bex 63)))
-    %=  $
-      chunks  [chunk chunks]
-      a       (rsh [0 63] a)
-    ==
-  ::  +based: map each list atom through +chunk-63 and weld (used by +hashable).
+  +$  form
+    $+  blob-data
+    (list @ux)
   ++  based
     |=  =form
-    ^-  (list @ux)
-    =|  result=(list @ux)
+    ^-  ?
     |-
-    ?~  form  result
-    %=  $
-      result  (weld result (chunk-63 i.form))
-      form    t.form
+    ?~  form  %&
+    ?&  (^based i.form)
+        $(form t.form)
     ==
   ++  hashable
     |=  =form
@@ -276,8 +264,6 @@
     %-  hash-hashable:tip5
     (hashable form)
   --
-::  Blob payload: $(list @ux)$ with same shape as ++memo-data (tip5 +based / +hashable).
-+$  blob-data  form:memo-data
 ::
 ::  $transaction-tree: tree of transactions
 ::
@@ -475,8 +461,8 @@
   =<  form
   |%
   +$  form
-    $%  [%pkh recipient=hash:transact gift=coins:transact memo=(unit memo-data) blob=(unit blob-data)]
-        [%multisig threshold=@ participants=(list hash:transact) gift=coins:transact memo=(unit memo-data) blob=(unit blob-data)]
+    $%  [%pkh recipient=hash:transact gift=coins:transact memo=(unit blob-data) blob=(unit blob-data)]
+        [%multisig threshold=@ participants=(list hash:transact) gift=coins:transact memo=(unit blob-data) blob=(unit blob-data)]
         [%lock-root root=hash:transact gift=coins:transact]
         [%bridge-deposit address=evm-address:bridge gift=coins:transact]
     ==
