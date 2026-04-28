@@ -17,8 +17,8 @@ pub const NOTE_DATA_KEY_BRIDGE_DEPOSIT: &str = "bridge";
 pub const NOTE_DATA_KEY_BRIDGE_WITHDRAWAL: &str = "bridge-w";
 /// Canonical note-data key for UTF-8 memo bytes (`(list @ux)` in Hoon).
 pub const NOTE_DATA_KEY_MEMO: &str = "memo";
-/// Canonical note-data key for opaque UTF-8 blob bytes (`(list @ux)` / ++blob-data in wallet).
-pub const NOTE_DATA_KEY_BLOB: &str = "blob-data";
+/// Canonical note-data key for opaque UTF-8 blob bytes (`(list @ux)` in Hoon).
+pub const NOTE_DATA_KEY_BLOB: &str = "blob";
 
 #[derive(Debug, Clone, PartialEq, Eq, NounEncode, NounDecode)]
 /// Internal noun parser for `%lock` payload shape `[%0 lock]`.
@@ -56,9 +56,9 @@ pub enum TypedNoteDataEntry {
         lock_root: Hash,
         base_batch_end: u64,
     },
-    /// `%memo` => jam of `(list @ux)` (one atom per byte, matching wallet `++memo-data`).
+    /// `%memo` => jam of `(list @ux)`
     Memo { bytes: Vec<u8> },
-    /// `%blob-data` => jam of `(list @ux)` (wallet `++blob-data`, same encoding as memo).
+    /// `%blob` => jam of `(list @ux)`
     Blob { bytes: Vec<u8> },
 }
 
@@ -95,7 +95,7 @@ impl TypedNoteDataEntry {
         Self::Memo { bytes }
     }
 
-    /// Blob bytes stored as `(list @ux)` (same jam shape as memo; key `%blob-data`).
+    /// Blob bytes stored as `(list @ux)` (same jam shape as memo; key `%blob`).
     pub fn blob(bytes: Vec<u8>) -> Self {
         Self::Blob { bytes }
     }
@@ -177,7 +177,7 @@ pub enum NormalizedNoteDataKey {
     BridgeWithdrawal,
     /// `%memo` payload (`(list @ux)`).
     Memo,
-    /// `%blob-data` payload (`(list @ux)`).
+    /// `%blob` payload (`(list @ux)`).
     Blob,
     /// Any unrecognized key preserved verbatim.
     Other(String),
@@ -375,7 +375,7 @@ pub enum DecodedNoteDataPayload {
     BridgeWithdrawal(BridgeWithdrawalDataPayload),
     /// Successfully decoded `%memo`.
     Memo(MemoDataPayload),
-    /// Successfully decoded `%blob-data` (`(list @ux)`).
+    /// Successfully decoded `%blob` (`(list @ux)`).
     Blob(MemoDataPayload),
     /// Raw or failed-to-decode payload.
     Raw,

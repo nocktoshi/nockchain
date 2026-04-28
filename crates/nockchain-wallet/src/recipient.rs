@@ -14,10 +14,10 @@ use crate::{CrownError, NockAppError};
 const MAX_BLOB_UTF8_BYTES: usize = 256 * 1024;
 
 /// Trims and checks size; `None` if absent or empty/whitespace-only.
-pub(crate) fn validate_blob_data_field(
-    blob_data: Option<String>,
+pub(crate) fn validate_blob_field(
+    blob: Option<String>,
 ) -> Result<Option<Vec<u8>>, NockAppError> {
-    let Some(raw) = blob_data else {
+    let Some(raw) = blob else {
         return Ok(None);
     };
     let text = raw.trim();
@@ -27,7 +27,7 @@ pub(crate) fn validate_blob_data_field(
     let bytes = text.as_bytes();
     if bytes.len() > MAX_BLOB_UTF8_BYTES {
         return Err(CrownError::Unknown(format!(
-            "blob_data exceeds max size ({} UTF-8 bytes)",
+            "blob exceeds max size ({} UTF-8 bytes)",
             MAX_BLOB_UTF8_BYTES
         ))
         .into());
@@ -70,9 +70,8 @@ pub enum RecipientSpecToken {
         amount: u64,
         #[serde(default)]
         memo: Option<String>,
-        /// Optional opaque UTF-8 payload (jammed as an atom)
-        #[serde(default, rename = "blob-data", alias = "blob_data")]
-        blob_data: Option<String>,
+        #[serde(default)]
+        blob: Option<String>,
     },
     Multisig {
         threshold: u64,
@@ -80,8 +79,8 @@ pub enum RecipientSpecToken {
         amount: u64,
         #[serde(default)]
         memo: Option<String>,
-        #[serde(default, rename = "blob-data", alias = "blob_data")]
-        blob_data: Option<String>,
+        #[serde(default)]
+        blob: Option<String>,
     },
     #[serde(rename = "bridge-deposit")]
     BridgeDeposit {
@@ -98,7 +97,7 @@ pub enum RecipientSpec {
         address: Hash,
         amount: u64,
         memo: Option<Vec<u8>>,
-        blob_data: Option<Vec<u8>>,
+        blob: Option<Vec<u8>>,
     },
     #[noun(tag = "multisig")]
     Multisig {
@@ -106,7 +105,7 @@ pub enum RecipientSpec {
         addresses: Vec<Hash>,
         amount: u64,
         memo: Option<Vec<u8>>,
-        blob_data: Option<Vec<u8>>,
+        blob: Option<Vec<u8>>,
     },
     #[noun(tag = "bridge-deposit")]
     BridgeDeposit {
@@ -161,7 +160,7 @@ impl RecipientSpecToken {
             address: p2pkh.to_string(),
             amount,
             memo: None,
-            blob_data: None,
+            blob: None,
         })
     }
 
@@ -171,7 +170,7 @@ impl RecipientSpecToken {
                 address,
                 amount,
                 memo,
-                blob_data,
+                blob,
             } => {
                 if amount == 0 {
                     return Err(CrownError::Unknown(
@@ -185,12 +184,12 @@ impl RecipientSpecToken {
                     )))
                 })?;
                 let memo = validate_memo_utf8(memo.as_deref())?;
-                let blob_data = validate_blob_data_field(blob_data)?;
+                let blob = validate_blob_field(blob)?;
                 Ok(RecipientSpec::P2pkh {
                     address: recipient,
                     amount,
                     memo,
-                    blob_data,
+                    blob,
                 })
             }
             RecipientSpecToken::Multisig {
@@ -198,7 +197,7 @@ impl RecipientSpecToken {
                 addresses,
                 amount,
                 memo,
-                blob_data,
+                blob,
             } => {
                 if amount == 0 {
                     return Err(CrownError::Unknown(
@@ -244,13 +243,13 @@ impl RecipientSpecToken {
                     );
                 }
                 let memo = validate_memo_utf8(memo.as_deref())?;
-                let blob_data = validate_blob_data_field(blob_data)?;
+                let blob = validate_blob_field(blob)?;
                 Ok(RecipientSpec::Multisig {
                     threshold,
                     addresses: parsed,
                     amount,
                     memo,
-                    blob_data,
+                    blob,
                 })
             }
             RecipientSpecToken::BridgeDeposit {
@@ -346,7 +345,7 @@ pub fn planner_recipient_output(
             address,
             amount,
             memo,
-            blob_data,
+            blob,
         } => {
             let lock = pkh_lock(1, std::slice::from_ref(address));
             let mut note_data = if include_data {
@@ -357,7 +356,7 @@ pub fn planner_recipient_output(
             if let Some(bytes) = memo {
                 note_data.push(TypedNoteDataEntry::memo(bytes.clone()).to_raw_entry());
             }
-            if let Some(bytes) = blob_data {
+            if let Some(bytes) = blob {
                 note_data.push(TypedNoteDataEntry::blob(bytes.clone()).to_raw_entry());
             }
             Ok(PlannedOutput {
@@ -371,14 +370,14 @@ pub fn planner_recipient_output(
             addresses,
             amount,
             memo,
-            blob_data,
+            blob,
         } => {
             let lock = pkh_lock(*threshold, addresses);
             let mut note_data = vec![RawNoteDataEntry::from_lock(lock.clone())];
             if let Some(bytes) = memo {
                 note_data.push(TypedNoteDataEntry::memo(bytes.clone()).to_raw_entry());
             }
-            if let Some(bytes) = blob_data {
+            if let Some(bytes) = blob {
                 note_data.push(TypedNoteDataEntry::blob(bytes.clone()).to_raw_entry());
             }
             Ok(PlannedOutput {
@@ -510,20 +509,20 @@ mod tests {
                 address: SAMPLE_P2PKH.to_string(),
                 amount: 1000,
                 memo: None,
-                blob_data: None,
+                blob: None,
             },
             RecipientSpecToken::Multisig {
                 threshold: 1,
                 addresses: vec![SAMPLE_P2PKH_ALT.to_string(), SAMPLE_P2PKH.to_string()],
                 amount: 5,
                 memo: None,
-                blob_data: None,
+                blob: None,
             },
             RecipientSpecToken::BridgeDeposit {
                 evm_address: SAMPLE_EVM_ADDRESS.to_string(),
                 amount: 9,
                 memo: None,
-                blob_data: None,
+                blob: None,
             },
         ];
         let specs = recipient_tokens_to_specs(tokens).expect("tokens -> specs");
@@ -533,11 +532,11 @@ mod tests {
                 address,
                 amount,
                 memo,
-                blob_data,
+                blob,
             } => {
                 assert_eq!(*amount, 1000);
                 assert!(memo.is_none());
-                assert!(blob_data.is_none());
+                assert!(blob.is_none());
                 assert_eq!(
                     address,
                     &Hash::from_base58(SAMPLE_P2PKH).expect("sample p2pkh hash")
@@ -551,7 +550,7 @@ mod tests {
                 addresses,
                 amount,
                 memo,
-                blob_data,
+                blob,
             } => {
                 assert_eq!(*threshold, 1);
                 assert_eq!(*amount, 5);
@@ -565,7 +564,7 @@ mod tests {
                     Hash::from_base58(SAMPLE_P2PKH).expect("sample alt hash")
                 );
                 assert!(memo.is_none());
-                assert!(blob_data.is_none());
+                assert!(blob.is_none());
             }
             _ => panic!("second spec should be multisig"),
         }
@@ -574,7 +573,7 @@ mod tests {
                 evm_address,
                 amount,
                 memo,
-                blob_data,
+                blob,
             } => {
                 assert_eq!(*amount, 9);
                 assert_eq!(
@@ -582,7 +581,7 @@ mod tests {
                     &EthAddress::from_hex_str(SAMPLE_EVM_ADDRESS).expect("sample evm address")
                 );
                 assert!(memo.is_none());
-                assert!(blob_data.is_none());
+                assert!(blob.is_none());
             }
             _ => panic!("third spec should be bridge deposit"),
         }
@@ -601,7 +600,7 @@ mod tests {
                 address: Hash::from_base58(SAMPLE_P2PKH).expect("p2pkh hash"),
                 amount: 10,
                 memo: None,
-                blob_data: None,
+                blob: None,
             },
             RecipientSpec::Multisig {
                 threshold: 1,
@@ -611,14 +610,14 @@ mod tests {
                 ],
                 amount: 20,
                 memo: None,
-                blob_data: None,
+                blob: None,
             },
             RecipientSpec::BridgeDeposit {
                 evm_address: EthAddress::from_hex_str(SAMPLE_EVM_ADDRESS)
                     .expect("sample evm address"),
                 amount: 30,
                 memo: None,
-                blob_data: None,
+                blob: None,
             },
         ];
 
@@ -632,51 +631,51 @@ mod tests {
     }
 
     #[test]
-    fn parse_recipient_json_accepts_blob_data() {
+    fn parse_recipient_json_accepts_blob() {
         let raw = format!(
-            r#"{{"kind":"p2pkh","address":"{}","amount":1,"blob_data":"nns.nock"}}"#,
+            r#"{{"kind":"p2pkh","address":"{}","amount":1,"blob":"nns.nock"}}"#,
             SAMPLE_P2PKH
         );
-        let token = RecipientSpecToken::from_cli_arg(&raw).expect("json with blob_data");
+        let token = RecipientSpecToken::from_cli_arg(&raw).expect("json with blob");
         let spec = token.into_recipient_spec().expect("into spec");
         match spec {
             RecipientSpec::P2pkh {
-                blob_data,
+                blob,
                 ..
             } => {
-                assert_eq!(blob_data, Some(b"nns.nock".to_vec()));
+                assert_eq!(blob, Some(b"nns.nock".to_vec()));
             }
             _ => panic!("expected p2pkh"),
         }
     }
 
     #[test]
-    fn parse_recipient_json_accepts_blob_data_kebab_case() {
+    fn parse_recipient_json_accepts_blob_kebab_case() {
         let raw = format!(
-            r#"{{"kind":"p2pkh","address":"{}","amount":1,"blob-data":"nns.nock"}}"#,
+            r#"{{"kind":"p2pkh","address":"{}","amount":1,"blob":"nns.nock"}}"#,
             SAMPLE_P2PKH
         );
-        let token = RecipientSpecToken::from_cli_arg(&raw).expect("json with blob-data");
+        let token = RecipientSpecToken::from_cli_arg(&raw).expect("json with blob data");
         let spec = token.into_recipient_spec().expect("into spec");
         match spec {
             RecipientSpec::P2pkh {
-                blob_data,
+                blob,
                 ..
             } => {
-                assert_eq!(blob_data, Some(b"nns.nock".to_vec()));
+                assert_eq!(blob, Some(b"nns.nock".to_vec()));
             }
             _ => panic!("expected p2pkh"),
         }
     }
 
     #[test]
-    fn planner_p2pkh_inserts_blob_data_before_memo() {
+    fn planner_p2pkh_inserts_blob_before_memo() {
         let address = Hash::from_base58(SAMPLE_P2PKH).expect("p2pkh hash");
         let recipients = vec![RecipientSpec::P2pkh {
             address,
             amount: 5,
             memo: Some(b"hi".to_vec()),
-            blob_data: Some(vec![1]),
+            blob: Some(vec![1]),
         }];
         let outputs = planner_recipient_outputs(&recipients, true).expect("planner outputs");
         assert_eq!(outputs.len(), 1);

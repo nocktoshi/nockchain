@@ -802,18 +802,18 @@
           ==
         ==
     ::
-      ++  memo-data
+      ++  memo-display
         |=  data=note-data:v1:transact
         ^-  @t
         ?~  memo-val=(~(get z-by:zo data) %memo)
           'N/A'
-        ?~  soft-memo=((soft memo-data:wt) u.memo-val)
+        ?~  soft-memo=((soft blob-data:wt) u.memo-val)
           ~>  %slog.[2 'memo data in note is malformed']  'N/A'
-        =/  memo-bytes=memo-data:wt  u.soft-memo
+        =/  memo-bytes=blob-data:wt  u.soft-memo
         =/  memo-text=@t  (crip (turn memo-bytes @tD))
         memo-text
     ::
-      ++  blob-line
+      ++  blob-display
         |=  data=note-data:v1:transact
         ^-  @t
         ?~  got=(~(get z-by:zo data) %blob)
@@ -861,7 +861,7 @@
                 output=?
             ==
         ^-  @t
-        =/  blob-line=@t  (blob-line note-data.note)
+        =/  blob-display=@t  (blob-display note-data.note)
         ;:  (cury cat 3)
            '''
 
@@ -882,9 +882,9 @@
               ''
             ;:  (cury cat 3)
                 '\0a- Memo: '
-                (memo-data note-data.note)
+                (memo-display note-data.note)
             ==
-            blob-line
+            blob-display
            '\0a- Lock Information: '
            lock-info
          ==
