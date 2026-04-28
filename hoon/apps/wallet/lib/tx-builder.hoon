@@ -88,7 +88,6 @@
 ::
 ~>  %slog.[0 'Notes must all be the same version!!!']  !!
 ::
-
 =+  min-fee=(spends:estimate-fee:utils raw-spends inputs.display height)
 :: uncomment to debug out of band fee estimation
 :: =+  min-fee-ref=(calculate-min-fee:spends:transact (apply:witness-data:wt witness-data raw-spends))
