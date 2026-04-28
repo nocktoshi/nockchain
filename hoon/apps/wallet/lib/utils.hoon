@@ -853,7 +853,7 @@
       ++  blob-display
         |=  data=note-data:v1:transact
         ^-  @t
-        ?~  got=(~(get z-by:zo data) %blob-data)
+        ?~  got=(~(get z-by:zo data) %blob)
           ''
         =/  text=@t
           ?~  soft-blob=((soft blob-data:wt) u.got)
