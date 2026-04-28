@@ -1,0 +1,9 @@
+Optional timelock constraints are specified with a single flag: `--timelock <SPEC>`, where `SPEC` is a comma-separated list of `absolute=<range>` and/or `relative=<range>`.
+
+  - Ranges use the `min..max` syntax. (`10..`, `..500`, `0..1`).
+  - Providing only a range (without `absolute=`) is shorthand for `absolute=<range>`.
+  - Supplying both components gives a combined intent.
+
+For now, all the seeds in a transaction constructed by the wallet will share the same
+intent. So for all "intents" and purposes, the timelock intent is functionally the same
+as a timelock.

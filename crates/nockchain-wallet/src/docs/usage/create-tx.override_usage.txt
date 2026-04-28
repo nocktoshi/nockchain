@@ -1,0 +1,23 @@
+nockchain-wallet create-tx [--names <NAMES>] --recipient <RECIPIENT>... [--fee <FEE>] [--refund-pkh <REFUND_PKH>] [--include-data <BOOL>]
+
+# NOTE: --refund-pkh is required when spending from legacy v0 notes. For v1 notes, the refund defaults to the note owner. --include-data defaults to true (pass 'false' to exclude note data).
+# NOTE: if --names is omitted, the planner auto-selects spendable v1 notes. If provided, names are treated as a manual selection set.
+# NOTE: manual selection may spend either an all-v1 set or an all-v0 set; mixed-version manual sets are rejected.
+# NOTE: --fee is optional. If omitted, the planner computes a fee. If provided, it overrides the planner fee (subject to --allow-low-fee).
+# RECIPIENT accepts either legacy '<p2pkh>:<amount>' strings or JSON objects. Optional per-recipient UTF-8 memos use a JSON `memo` field (max ~2048 bytes). Optional opaque per-output UTF-8 payload in `blob` (wallet jams as an atom under note-data key `blob`; apps interpret the string).
+# Example JSON: '{"kind":"p2pkh","address":"<p2pkh-b58>","amount":10000,"memo":"hello"}'.
+
+Examples:
+  # Auto-select spendable v1 notes and compute fee
+  nockchain-wallet create-tx \
+    --recipient '{"kind":"p2pkh","address":"<p2pkh-b58>","amount":10000}'
+
+  # Manually pin notes and optionally override fee
+  nockchain-wallet create-tx \
+    --names "[first1 last1],[first2 last2]" \
+    --recipient '{"kind":"p2pkh","address":"<p2pkh-b58>","amount":10000}' \
+    --fee 10
+
+  # Optional UTF-8 memo and opaque blob on the output note (omit either field if unused)
+  nockchain-wallet create-tx \
+    --recipient '{"kind":"p2pkh","address":"<p2pkh-b58>","amount":10000,"memo":"hello","blob":"nns/v1/claim/example"}'

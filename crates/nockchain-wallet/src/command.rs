@@ -66,15 +66,7 @@ impl TimelockRangeCli {
     }
 }
 
-/// Optional timelock constraints are specified with a single flag: `--timelock <SPEC>`, where `SPEC` is a comma-separated list of `absolute=<range>` and/or `relative=<range>`.
-///   - Ranges use the `min..max` syntax. (`10..`, `..500`, `0..1`).
-///   - Providing only a range (without `absolute=`) is shorthand for `absolute=<range>`.
-///   - Supplying both components gives a combined intent.
-///
-/// For now, all the seeds in a transaction constructed by the wallet will share the same
-/// intent. So for all "intents" and purposes, the timelock intent is functionally the same
-/// as a timelock.
-
+#[doc = include_str!("docs/usage/timelock-intent.doc.txt")]
 #[allow(dead_code)]
 #[derive(Debug, Clone, Default)]
 pub struct TimelockIntentCli {
@@ -164,7 +156,6 @@ impl FromStr for TimelockRangeCli {
             let max = Self::parse_bound(max_str)?;
             TimelockRangeCli::from_bounds(min, max)
         } else {
-            // Single value -> lower bound only
             let min = Self::parse_bound(trimmed)?;
             TimelockRangeCli::from_bounds(min, None)
         }
@@ -209,31 +200,38 @@ pub struct WalletCli {
 pub enum WatchSubcommand {
     /// Add a watch-only address (base58 pkh or schnorr pubkey)
     Address {
-        /// Base58-encoded address or schnorr pubkey
-        #[arg(value_name = "address")]
+        #[arg(
+            value_name = "address",
+            help = "Base58-encoded address or schnorr pubkey"
+        )]
         address: String,
     },
     /// Add a watch-only schnorr pubkey
     Pubkey {
-        /// Base58-encoded schnorr pubkey
-        #[arg(value_name = "pubkey")]
+        #[arg(
+            value_name = "pubkey",
+            help = "Base58-encoded schnorr pubkey"
+        )]
         pubkey: String,
     },
-    /// Add a watch-only first name (base58 hash)
+    /// Import a multisig lock for watch-only tracking
+    Multisig {
+        #[arg(
+            short = 't',
+            long = "threshold",
+            help = "Threshold (m) value for the m-of-n multisig"
+        )]
+        threshold: u64,
+        #[arg(
+            long,
+            help = "Comma-separated list of base58 pubkey hashes for the multisig"
+        )]
+        participants: String,
+    },
     //FirstName {
-    //    /// Base58-encoded first name hash
     //    #[arg(value_name = "first-name")]
     //    first_name: String,
     //},
-    /// Import a multisig lock for watch-only tracking
-    Multisig {
-        /// Threshold (m) value for the m-of-n multisig
-        #[arg(short = 't', long = "threshold")]
-        threshold: u64,
-        /// Comma-separated list of base58 pubkey hashes for the multisig
-        #[arg(long)]
-        participants: String,
-    },
 }
 
 /// gRPC client mode used for wallet network operations.
@@ -243,9 +241,9 @@ pub enum ClientType {
     Private,
 }
 
+/// Internal wallet event wires used for nockapp routing.
 #[derive(Debug)]
 #[allow(dead_code)]
-/// Internal wallet event wires used for nockapp routing.
 pub enum WalletWire {
     ListNotes,
     UpdateBalance,
@@ -286,46 +284,66 @@ fn validate_label(s: &str) -> Result<String, String> {
     }
 }
 
-#[derive(Subcommand, Debug, Clone)]
 /// Wallet command surface for key, note, and transaction operations.
+#[derive(Subcommand, Debug, Clone)]
 pub enum Commands {
     /// Generates a new version 1 key pair
     Keygen,
 
     /// Derive child key (pub, private or both) from the current master key
     DeriveChild {
-        /// Index of the child key to derive, should be in range [0, 2^31)
-        #[arg(value_parser = clap::value_parser!(u64).range(0..2 << 31))]
+        #[arg(
+            value_parser = clap::value_parser!(u64).range(0..2 << 31),
+            help = "Index of the child key to derive, should be in range [0, 2^31)"
+        )]
         index: u64,
 
-        /// Hardened or unhardened child key
-        #[arg(long)]
+        #[arg(long, help = "Hardened or unhardened child key")]
         hardened: bool,
 
-        /// Label for the child key
-        #[arg(short, long, value_parser = validate_label, default_value = None)]
+        #[arg(
+            short,
+            long,
+            value_parser = validate_label,
+            default_value = None,
+            help = "Label for the child key"
+        )]
         label: Option<String>,
     },
 
     /// Import keys from a file, extended key, seed phrase, or master private key
     #[command(group = clap::ArgGroup::new("import_source").required(true).args(&["file", "key", "seedphrase"]))]
     ImportKeys {
-        /// Path to the jammed keys file
-        #[arg(short = 'f', long = "file", value_name = "FILE")]
+        #[arg(
+            short = 'f',
+            long = "file",
+            value_name = "FILE",
+            help = "Path to the jammed keys file"
+        )]
         file: Option<String>,
 
-        /// Extended key string (e.g., "zprv..." or "zpub...")
-        #[arg(short = 'k', long = "key", value_name = "EXTENDED_KEY")]
+        #[arg(
+            short = 'k',
+            long = "key",
+            value_name = "EXTENDED_KEY",
+            help = "Extended key string (e.g., \"zprv...\" or \"zpub...\")"
+        )]
         key: Option<String>,
 
-        /// Seed phrase to generate master private key, requires version. If your key was generated prior to
-        /// the release of the v1 protocol upgrade on October 15, 2025, it is mostly likely version 0.
-        /// If it was generated after that date, it is likely version 1.
-        #[arg(short = 's', long = "seedphrase", value_name = "SEEDPHRASE")]
+        #[arg(
+            short = 's',
+            long = "seedphrase",
+            value_name = "SEEDPHRASE",
+            help = include_str!("docs/usage/import-keys.arg.seedphrase.txt")
+        )]
         seedphrase: Option<String>,
 
-        /// Master key version to use when generating from seed phrase
-        #[arg(long = "version", value_name = "VERSION", requires = "seedphrase")]
+        #[arg(
+            long = "version",
+            value_name = "VERSION",
+            requires = "seedphrase",
+            help = "Master key version to use when generating from seed phrase"
+        )]
         version: Option<u64>,
     },
 
@@ -343,25 +361,25 @@ pub enum Commands {
 
     /// List notes by public key
     ListNotesByAddress {
-        /// Optional public key to filter notes
+        #[arg(help = "Optional public key to filter notes")]
         address: Option<String>,
     },
 
     /// List notes by public key in CSV format
     ListNotesByAddressCsv {
-        /// Public key to filter notes
+        #[arg(help = "Public key to filter notes")]
         address: String,
     },
 
     /// Create a transaction from a transaction file
     SendTx {
-        /// Transaction file to create transaction from
+        #[arg(help = "Transaction file to create transaction from")]
         transaction: String,
     },
 
     /// Display a transaction file contents
     ShowTx {
-        /// Transaction file to display
+        #[arg(help = "Transaction file to display")]
         transaction: String,
     },
 
@@ -370,77 +388,108 @@ pub enum Commands {
 
     /// Query whether a transaction was accepted by the node
     TxAccepted {
-        /// Base58-encoded transaction ID
-        #[arg(value_name = "TX_ID")]
+        #[arg(
+            value_name = "TX_ID",
+            help = "Base58-encoded transaction ID"
+        )]
         tx_id: String,
     },
 
     /// Create a transaction (use --refund-pkh when spending legacy v0 notes)
     #[command(
         name = "create-tx",
-        override_usage = "nockchain-wallet create-tx [--names <NAMES>] --recipient <RECIPIENT>... [--fee <FEE>] [--refund-pkh <REFUND_PKH>] [--include-data <BOOL>]\n\n# NOTE: --refund-pkh is required when spending from legacy v0 notes. For v1 notes, the refund defaults to the note owner. --include-data defaults to true (pass 'false' to exclude note data).\n# NOTE: if --names is omitted, the planner auto-selects spendable v1 notes. If provided, names are treated as a manual selection set.\n# NOTE: manual selection may spend either an all-v1 set or an all-v0 set; mixed-version manual sets are rejected.\n# NOTE: --fee is optional. If omitted, the planner computes a fee. If provided, it overrides the planner fee (subject to --allow-low-fee).\n# RECIPIENT accepts either legacy '<p2pkh>:<amount>' strings or JSON objects. Optional per-recipient UTF-8 memos use a JSON `memo` field (max ~2048 bytes). Optional opaque per-output UTF-8 payload in `blob` (wallet jams as an atom under note-data key `blob`; apps interpret the string).\n# Example JSON: '{\"kind\":\"p2pkh\",\"address\":\"<p2pkh-b58>\",\"amount\":10000,\"memo\":\"hello\"}'.\n\nExamples:\n  # Auto-select spendable v1 notes and compute fee\n  nockchain-wallet create-tx \\\n    --recipient '{\"kind\":\"p2pkh\",\"address\":\"<p2pkh-b58>\",\"amount\":10000}'\n\n  # Manually pin notes and optionally override fee\n  nockchain-wallet create-tx \\\n    --names \"[first1 last1],[first2 last2]\" \\\n    --recipient '{\"kind\":\"p2pkh\",\"address\":\"<p2pkh-b58>\",\"amount\":10000}' \\\n    --fee 10\n\n  # Optional UTF-8 memo and opaque blob on the output note (omit either field if unused)\n  nockchain-wallet create-tx \\\n    --recipient '{\"kind\":\"p2pkh\",\"address\":\"<p2pkh-b58>\",\"amount\":10000,\"memo\":\"hello\",\"blob\":\"nns/v1/claim/example\"}'"
+        override_usage = include_str!("docs/usage/create-tx.override_usage.txt")
     )]
     CreateTx {
-        /// Optional names of notes to spend (comma-separated) for manual selection.
-        #[arg(long)]
+        #[arg(
+            long,
+            help = "Optional names of notes to spend (comma-separated) for manual selection."
+        )]
         names: Option<String>,
-        /// Recipient specifications (repeat --recipient for each output)
         #[arg(
             long = "recipient",
             value_name = "RECIPIENT",
             value_parser = parse_recipient_arg,
-            action = ArgAction::Append
+            action = ArgAction::Append,
+            help = "Recipient specifications (repeat --recipient for each output)"
         )]
         recipients: Vec<RecipientSpecToken>,
-        /// Optional transaction fee override.
-        #[arg(long)]
+        #[arg(long, help = "Optional transaction fee override.")]
         fee: Option<u64>,
-        /// Allow fees below the estimated minimum (unsafe, testing only)
-        #[arg(long, default_value = "false")]
+        #[arg(
+            long,
+            default_value = "false",
+            help = "Allow fees below the estimated minimum (unsafe, testing only)"
+        )]
         allow_low_fee: bool,
-        /// Optional refund recipient pubkey hash (base58). Required for legacy v0 notes; v1 notes default to the note owner.
-        #[arg(long = "refund-pkh", value_name = "REFUND_PKH")]
+        #[arg(
+            long = "refund-pkh",
+            value_name = "REFUND_PKH",
+            help = "Optional refund recipient pubkey hash (base58). Required for legacy v0 notes; v1 notes default to the note owner."
+        )]
         refund_pkh: Option<String>,
-        /// Optional key index to use for signing [0, 2^31), if not provided, we use the master key
-        #[arg(short, long, value_parser = clap::value_parser!(u64).range(0..2 << 31))]
+        #[arg(
+            short,
+            long,
+            value_parser = clap::value_parser!(u64).range(0..2 << 31),
+            help = "Optional key index to use for signing [0, 2^31), if not provided, we use the master key"
+        )]
         index: Option<u64>,
-        /// Hardened or unhardened child key
-        #[arg(long, default_value = "false")]
+        #[arg(
+            long,
+            default_value = "false",
+            help = "Hardened or unhardened child key"
+        )]
         hardened: bool,
-        /// Include note data in output note
         #[arg(
             long,
             action = ArgAction::Set,
             value_parser = BoolishValueParser::new(),
-            default_value_t = true
+            default_value_t = true,
+            help = "Include note data in output note"
         )]
         include_data: bool,
-        /// Additional signing keys. Accepts `index` or `index:hardened`.
-        #[arg(long = "sign-key", value_name = "INDEX[:HARDENED]", action = ArgAction::Append)]
+        #[arg(
+            long = "sign-key",
+            value_name = "INDEX[:HARDENED]",
+            action = ArgAction::Append,
+            help = "Additional signing keys. Accepts `index` or `index:hardened`."
+        )]
         sign_keys: Vec<String>,
-        /// For debugging purposes. If true, the raw-tx jam will be saved in the
-        /// txs-debug folder in the current working directory.
-        #[arg(long, default_value = "false")]
+        #[arg(
+            long,
+            default_value = "false",
+            help = "For debugging purposes. If true, the raw-tx jam will be saved in the txs-debug folder in the current working directory."
+        )]
         save_raw_tx: bool,
-        /// Note selection strategy (ascending selects smallest notes first)
-        #[arg(long = "note-selection", value_enum, default_value = "ascending")]
+        #[arg(
+            long = "note-selection",
+            value_enum,
+            default_value = "ascending",
+            help = "Note selection strategy (ascending selects smallest notes first)"
+        )]
         note_selection_strategy: NoteSelectionStrategyCli,
     },
 
     /// Sweep all spendable legacy v0 notes into one v1 destination address.
     #[command(name = "migrate-v0-notes")]
     MigrateV0Notes {
-        /// Base58-encoded v1 pay-to-pubkey-hash address that receives the migrated funds.
-        #[arg(long = "destination", value_name = "DESTINATION")]
+        #[arg(
+            long = "destination",
+            value_name = "DESTINATION",
+            help = "Base58-encoded v1 pay-to-pubkey-hash address that receives the migrated funds."
+        )]
         destination: String,
     },
 
     /// Sign a multisig transaction
     SignMultisigTx {
-        /// Path to transaction file
+        #[arg(help = "Path to transaction file")]
         transaction: String,
-        /// Comma-separated list of key indices to sign with (format: index:hardened). If not provided, uses master key.
-        #[arg(long)]
+        #[arg(
+            long,
+            help = "Comma-separated list of key indices to sign with (format: index:hardened). If not provided, uses master key."
+        )]
         sign_keys: Option<String>,
     },
 
@@ -449,14 +498,16 @@ pub enum Commands {
 
     /// Import a master public key
     ImportMasterPubkey {
-        // Path to keys file generated from export-master-pubkey
+        #[arg(help = "Path to keys file generated from export-master-pubkey")]
         key_path: String,
     },
 
     /// Set the active master address. Any child keys derived from that address will also become active.
     SetActiveMasterAddress {
-        /// Base58-encoded address to promote to master
-        #[arg(value_name = "ADDRESS_B58")]
+        #[arg(
+            value_name = "ADDRESS_B58",
+            help = "Base58-encoded address to promote to master"
+        )]
         address_b58: String,
     },
 
@@ -480,14 +531,11 @@ pub enum Commands {
     /// Show the key tree structure
     #[command(name = "show-key-tree")]
     ShowKeyTree {
-        /// Include values at each path
-        #[arg(long)]
+        #[arg(long, help = "Include values at each path")]
         include_values: bool,
     },
 
-    /// Fetch confirmation depth for a transaction ID
     // Confirmations {
-    //     /// Base58-encoded transaction ID
     //     #[arg(value_name = "TX_ID")]
     //     tx_id: String,
     // },
@@ -495,89 +543,147 @@ pub enum Commands {
     /// Sign an arbitrary message
     #[command(group = clap::ArgGroup::new("message_source").required(true).args(&["message", "message_file", "message_pos"]))]
     SignMessage {
-        /// Message to sign (raw string)
-        #[arg(short = 'm', long = "message", group = "message_source")]
+        #[arg(
+            short = 'm',
+            long = "message",
+            group = "message_source",
+            help = "Message to sign (raw string)"
+        )]
         message: Option<String>,
 
-        /// Path to file containing raw bytes to sign
-        #[arg(short = 'f', long = "message-file", group = "message_source")]
+        #[arg(
+            short = 'f',
+            long = "message-file",
+            group = "message_source",
+            help = "Path to file containing raw bytes to sign"
+        )]
         message_file: Option<String>,
 
-        /// Positional message to sign (equivalent to --message)
-        #[arg(value_name = "MESSAGE", group = "message_source")]
+        #[arg(
+            value_name = "MESSAGE",
+            group = "message_source",
+            help = "Positional message to sign (equivalent to --message)"
+        )]
         message_pos: Option<String>,
 
-        /// Optional key index to use for signing [0, 2^31)
-        #[arg(short, long, value_parser = clap::value_parser!(u64).range(0..2 << 31))]
+        #[arg(
+            short,
+            long,
+            value_parser = clap::value_parser!(u64).range(0..2 << 31),
+            help = "Optional key index to use for signing [0, 2^31)"
+        )]
         index: Option<u64>,
-        /// Hardened or unhardened child key
-        #[arg(long, default_value = "false")]
+        #[arg(
+            long,
+            default_value = "false",
+            help = "Hardened or unhardened child key"
+        )]
         hardened: bool,
     },
 
     /// Sign an already-computed tip5 hash (base58)
     SignHash {
-        /// Positional base58-encoded tip5 hash to sign
-        #[arg(value_name = "HASH")]
+        #[arg(
+            value_name = "HASH",
+            help = "Positional base58-encoded tip5 hash to sign"
+        )]
         hash_b58: String,
 
-        /// Optional key index to use for signing [0, 2^31)
-        #[arg(short, long, value_parser = clap::value_parser!(u64).range(0..2 << 31))]
+        #[arg(
+            short,
+            long,
+            value_parser = clap::value_parser!(u64).range(0..2 << 31),
+            help = "Optional key index to use for signing [0, 2^31)"
+        )]
         index: Option<u64>,
-        /// Hardened or unhardened child key
-        #[arg(long, default_value = "false")]
+        #[arg(
+            long,
+            default_value = "false",
+            help = "Hardened or unhardened child key"
+        )]
         hardened: bool,
     },
 
     /// Verify an arbitrary message signature
     VerifyMessage {
-        /// Message to verify (raw string)
-        #[arg(short = 'm', long = "message")]
+        #[arg(
+            short = 'm',
+            long = "message",
+            help = "Message to verify (raw string)"
+        )]
         message: Option<String>,
 
-        /// Path to file containing raw bytes of message to verify
-        #[arg(short = 'f', long = "message-file")]
+        #[arg(
+            short = 'f',
+            long = "message-file",
+            help = "Path to file containing raw bytes of message to verify"
+        )]
         message_file: Option<String>,
 
-        /// Positional message to verify (equivalent to --message)
-        #[arg(value_name = "MESSAGE", conflicts_with_all = ["message", "message_file"])]
+        #[arg(
+            value_name = "MESSAGE",
+            conflicts_with_all = ["message", "message_file"],
+            help = "Positional message to verify (equivalent to --message)"
+        )]
         message_pos: Option<String>,
 
-        /// Path to jammed signature file produced by sign-message
-        #[arg(short = 's', long = "signature")]
+        #[arg(
+            short = 's',
+            long = "signature",
+            help = "Path to jammed signature file produced by sign-message"
+        )]
         signature_path: Option<String>,
 
-        /// Positional signature path (equivalent to --signature)
-        #[arg(value_name = "SIGNATURE_FILE")]
+        #[arg(
+            value_name = "SIGNATURE_FILE",
+            help = "Positional signature path (equivalent to --signature)"
+        )]
         signature_pos: Option<String>,
 
-        /// Base58-encoded schnorr public key
-        #[arg(short = 'p', long = "pubkey")]
+        #[arg(
+            short = 'p',
+            long = "pubkey",
+            help = "Base58-encoded schnorr public key"
+        )]
         pubkey: Option<String>,
 
-        /// Positional public key (equivalent to --pubkey)
-        #[arg(value_name = "PUBKEY")]
+        #[arg(
+            value_name = "PUBKEY",
+            help = "Positional public key (equivalent to --pubkey)"
+        )]
         pubkey_pos: Option<String>,
     },
 
     /// Verify a signature against an already-computed tip5 hash (base58)
     VerifyHash {
-        /// Positional base58-encoded tip5 hash
-        #[arg(value_name = "HASH")]
+        #[arg(
+            value_name = "HASH",
+            help = "Positional base58-encoded tip5 hash"
+        )]
         hash_b58: String,
 
-        /// Path to jammed signature file produced by signing
-        #[arg(short = 's', long = "signature")]
+        #[arg(
+            short = 's',
+            long = "signature",
+            help = "Path to jammed signature file produced by signing"
+        )]
         signature_path: Option<String>,
-        /// Positional signature path
-        #[arg(value_name = "SIGNATURE_FILE")]
+        #[arg(
+            value_name = "SIGNATURE_FILE",
+            help = "Positional signature path"
+        )]
         signature_pos: Option<String>,
 
-        /// Base58-encoded schnorr public key
-        #[arg(short = 'p', long = "pubkey")]
+        #[arg(
+            short = 'p',
+            long = "pubkey",
+            help = "Base58-encoded schnorr public key"
+        )]
         pubkey: Option<String>,
-        /// Positional public key
-        #[arg(value_name = "PUBKEY")]
+        #[arg(
+            value_name = "PUBKEY",
+            help = "Positional public key"
+        )]
         pubkey_pos: Option<String>,
     },
 }
