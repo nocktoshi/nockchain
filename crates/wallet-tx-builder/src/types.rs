@@ -3,9 +3,6 @@ use nockchain_types::tx_engine::common::{BlockHeight, Hash, Name, Nicks, Schnorr
 use nockchain_types::tx_engine::v0::{Lock as V0Lock, TimelockIntent as V0TimelockIntent};
 use nockchain_types::tx_engine::v1::note::Note;
 use nockchain_types::tx_engine::v1::tx::SpendCondition;
-use nockvm::ext::{make_tas, AtomExt};
-use nockvm::noun::{Atom, Noun, NounAllocator, T};
-use noun_serde::{NounDecode, NounDecodeError, NounEncode};
 
 use crate::note_data::DecodedNoteData;
 
