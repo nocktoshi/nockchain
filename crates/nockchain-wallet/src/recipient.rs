@@ -566,7 +566,10 @@ mod tests {
             _ => panic!("second spec should be multisig"),
         }
         match &specs[2] {
-            RecipientSpec::BridgeDeposit { evm_address, amount } => {
+            RecipientSpec::BridgeDeposit {
+                evm_address,
+                amount,
+            } => {
                 assert_eq!(*amount, 9);
                 assert_eq!(
                     evm_address,
