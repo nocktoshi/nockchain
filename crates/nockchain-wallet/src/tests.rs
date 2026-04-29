@@ -21,6 +21,7 @@ use tempfile::TempDir;
 use tokio::sync::mpsc;
 use wallet_tx_builder::adapter::normalize_balance_pages;
 use wallet_tx_builder::fee::{compute_minimum_fee, FeeInputs};
+use wallet_tx_builder::note_data::PackedBlob;
 use wallet_tx_builder::planner::plan_create_tx;
 use wallet_tx_builder::types::{
     CandidateVersionPolicy, ChainContext, PlanRequest, PlanningMode, RawNoteDataEntry,
@@ -877,8 +878,6 @@ fn planner_recipient_outputs_match_hoon_lock_root_vectors() {
         RecipientSpec::BridgeDeposit {
             evm_address: bridge_address,
             amount: 9,
-            memo: None,
-            blob: None,
         },
     ];
 
@@ -928,8 +927,6 @@ fn planner_recipient_outputs_respect_include_data_for_p2pkh_but_not_multisig_or_
         RecipientSpec::BridgeDeposit {
             evm_address: bridge_address,
             amount: 9,
-            memo: None,
-            blob: None,
         },
     ];
 
@@ -948,7 +945,7 @@ fn planner_recipient_outputs_attach_memo_even_when_p2pkh_lock_data_disabled() {
     let recipients = vec![RecipientSpec::P2pkh {
         address: address_a,
         amount: 5,
-        memo: Some(b"hello".to_vec()),
+        memo: Some(PackedBlob(b"hello".to_vec())),
         blob: None,
     }];
     let outputs = planner_recipient_outputs(&recipients, false).expect("recipient outputs");
