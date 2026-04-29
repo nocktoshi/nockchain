@@ -19,6 +19,8 @@ indicatif.workspace = true
 kernels-open-wallet = { workspace = true }
 nockapp = { workspace = true }
 nockapp-grpc = { workspace = true }
+regex = "1"
+reqwest = { workspace = true }
 nockchain-math = { workspace = true }
 nockchain-types = { workspace = true }
 nockvm = { workspace = true }

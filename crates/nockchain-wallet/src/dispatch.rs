@@ -37,6 +37,7 @@ use wallet_tx_builder::adapter::NormalizedSnapshot;
 
 use crate::command::{CommandNoun, Commands, WalletCli, WatchSubcommand};
 use crate::recipient::recipient_tokens_to_specs;
+use crate::wallet_outcome::{WalletCommandOutcome, WalletEvent, WalletSuccess};
 use crate::{connection, normalize_watch_address, Wallet};
 
 /// Optional progress hooks for callers (REPL/TUI). CLI uses [`DispatchHooks::default`].
@@ -44,16 +45,44 @@ use crate::{connection, normalize_watch_address, Wallet};
 pub(crate) struct DispatchHooks {
     /// Notified with `(attempt, max_attempts)` before each balance-sync RPC attempt.
     pub sync_attempt: Option<tokio::sync::watch::Sender<(usize, usize)>>,
-    /// When set, markdown effects are appended here instead of `println!` (REPL TUI output panel).
+    /// When set, **raw** markdown cords from `%markdown` effects are appended here (no [`termimad`]).
+    /// Presentation applies later in CLI (`markdown_driver`) or REPL ([`crate::repl::markdown_display`]).
     pub markdown_capture: Option<Arc<Mutex<String>>>,
+    /// When set, each `%markdown` effect also pushes [`WalletEvent::KernelMarkdown`].
+    pub wallet_events: Option<Arc<Mutex<Vec<WalletEvent>>>>,
 }
 
-/// Append markdown kernel effects to `sink` instead of printing (same rendering as CLI markdown driver).
-pub(crate) fn markdown_capture_driver(sink: Arc<Mutex<String>>) -> IODriverFn {
+fn wallet_success_from_hooks(hooks: &DispatchHooks) -> WalletSuccess {
+    let raw_markdown = hooks
+        .markdown_capture
+        .as_ref()
+        .map(|m| m.lock().unwrap().clone())
+        .unwrap_or_default();
+    let mut events = hooks
+        .wallet_events
+        .as_ref()
+        .map(|e| e.lock().unwrap().clone())
+        .unwrap_or_default();
+    if events.is_empty() && !raw_markdown.is_empty() {
+        events.push(WalletEvent::KernelMarkdown {
+            raw: raw_markdown.clone(),
+        });
+    }
+    WalletSuccess {
+        events,
+        raw_markdown,
+    }
+}
+
+/// Append **raw** markdown kernel cords to `sink` (REPL); optionally record structured [`WalletEvent`]s.
+pub(crate) fn markdown_capture_driver(
+    sink: Arc<Mutex<String>>,
+    wallet_events: Option<Arc<Mutex<Vec<WalletEvent>>>>,
+) -> IODriverFn {
     make_driver(move |handle| {
         let sink = Arc::clone(&sink);
+        let wallet_events = wallet_events.clone();
         async move {
-            let skin = termimad::MadSkin::default_dark();
             loop {
                 match handle.next_effect().await {
                     Ok(effect) => {
@@ -68,13 +97,17 @@ pub(crate) fn markdown_capture_driver(sink: Arc<Mutex<String>>) -> IODriverFn {
                                 tracing::error!("Failed to convert markdown text to string");
                                 continue;
                             };
-                            tracing::debug!("Markdown text (captured): {}", text);
-                            let rendered = format!("{}", skin.term_text(&text));
+                            tracing::debug!("Markdown text (captured raw): {}", text);
+                            if let Some(ref ev) = wallet_events {
+                                ev.lock().unwrap().push(WalletEvent::KernelMarkdown {
+                                    raw: text.clone(),
+                                });
+                            }
                             let mut g = sink.lock().unwrap();
-                            if !g.is_empty() && !rendered.is_empty() {
+                            if !g.is_empty() && !text.is_empty() {
                                 g.push_str("\n\n");
                             }
-                            g.push_str(&rendered);
+                            g.push_str(&text);
                         }
                     }
                     Err(e) => {
@@ -91,7 +124,7 @@ async fn add_markdown_io_driver(wallet: &mut Wallet, hooks: &DispatchHooks) {
     if let Some(sink) = hooks.markdown_capture.clone() {
         wallet
             .app
-            .add_io_driver(markdown_capture_driver(sink))
+            .add_io_driver(markdown_capture_driver(sink, hooks.wallet_events.clone()))
             .await;
     } else {
         wallet.app.add_io_driver(markdown_driver()).await;
@@ -339,7 +372,7 @@ pub(crate) async fn execute_wallet_command(
     synced_snapshot_for_planner: &mut Option<NormalizedSnapshot>,
     use_spinner: bool,
     hooks: DispatchHooks,
-) -> Result<(), NockAppError> {
+) -> WalletCommandOutcome {
     let mut poke = build_initial_poke(command)?;
 
     if command_requires_sync(command) {
@@ -492,7 +525,7 @@ pub(crate) async fn execute_wallet_command(
                 let skin = MadSkin::default_dark();
                 println!("{}", skin.term_text(&markdown));
                 info!("Command executed successfully");
-                Ok(())
+                Ok(wallet_success_from_hooks(&hooks))
             }
             Err(e) => {
                 error!("Command failed: {}", e);
@@ -564,7 +597,7 @@ pub(crate) async fn execute_wallet_command(
             Ok(_) => {
                 *synced_snapshot_for_planner = None;
                 info!("Command executed successfully");
-                Ok(())
+                Ok(wallet_success_from_hooks(&hooks))
             }
             Err(e) => {
                 error!("Command failed: {}", e);
@@ -593,7 +626,7 @@ pub(crate) async fn execute_wallet_command(
         match run_result {
             Ok(_) => {
                 info!("Command executed successfully");
-                Ok(())
+                Ok(wallet_success_from_hooks(&hooks))
             }
             Err(e) => {
                 error!("Command failed: {}", e);

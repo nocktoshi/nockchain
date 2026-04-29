@@ -16,6 +16,7 @@ mod connection;
 mod create_tx;
 mod dispatch;
 mod error;
+mod wallet_outcome;
 mod recipient;
 mod repl;
 #[cfg(test)]
@@ -137,6 +138,7 @@ async fn main() -> Result<(), NockAppError> {
         crate::dispatch::DispatchHooks::default(),
     )
     .await
+    .map(|_| ())
 }
 
 /// Wallet runtime wrapper around the underlying nockapp kernel.

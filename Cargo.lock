@@ -5832,6 +5832,8 @@ dependencies = [
  "nockvm_macros",
  "noun-serde",
  "ratatui 0.29.0",
+ "regex",
+ "reqwest 0.12.28",
  "rustls",
  "serde",
  "serde_json",

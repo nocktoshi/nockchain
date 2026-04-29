@@ -10,6 +10,7 @@ mod create_tx;
 mod ct_dispatch;
 mod handlers;
 mod hooks;
+mod markdown_display;
 mod paste;
 mod screens;
 mod store;
@@ -44,6 +45,7 @@ pub async fn run(
         snapshot: Arc::clone(&snapshot),
         cli: cli.clone(),
         markdown_sink: Arc::new(std::sync::Mutex::new(String::new())),
+        wallet_event_sink: Arc::new(std::sync::Mutex::new(Vec::new())),
     };
     tui::run_tui(cli.clone(), rt).await
 }
