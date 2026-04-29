@@ -10,7 +10,7 @@ use wallet_tx_builder::adapter::NormalizedSnapshot;
 
 use super::app_state::PanelFocus;
 use super::screens::{ErrorCtx, Screen};
-use super::tui::{CT_ERR_ACTIONS, GENERIC_ERR};
+use super::components::menus::{CT_ERR_ACTIONS, GENERIC_ERR};
 use crate::command::Commands;
 use crate::dispatch::{execute_wallet_command, DispatchHooks};
 use crate::Wallet;

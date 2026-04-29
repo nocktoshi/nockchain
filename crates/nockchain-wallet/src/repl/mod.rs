@@ -5,12 +5,13 @@
 
 mod app_state;
 mod command_runner;
+mod components;
 mod create_tx;
 mod ct_dispatch;
 mod handlers;
+mod hooks;
 mod paste;
 mod screens;
-mod splash;
 mod tui;
 
 use std::sync::Arc;
