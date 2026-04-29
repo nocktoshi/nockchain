@@ -237,13 +237,13 @@
   $%  [%0 =lock:transact]
   ==
 ::  Blob Data (packed blob):
-::    Flat $(list @)$ as `[byte-len=@ belt=little-endian-u32 …]`
+::    Flat $(list belt)$ as `[byte-len=@ belt=little-endian-u32]`
 ++  blob-data
   =<  form
   |%
   +$  form
     $+  blob-data
-    (list @)
+    (list belt)
   ++  based
     |=  =form
     ^-  ?
