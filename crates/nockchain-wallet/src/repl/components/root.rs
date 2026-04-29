@@ -22,7 +22,8 @@ use super::scroll::estimate_wrapped_source_lines;
 use super::splash::draw_splash;
 use super::theme::SPLASH_BRAND;
 
-pub(crate) fn draw_ui(f: &mut Frame<'_>, app: &mut AppState, tick: u64) {
+pub(crate) fn draw_ui(f: &mut Frame<'_>, app: &mut AppState) {
+    let tick = app.ui_fx.frame_clock;
     if matches!(app.screen, Screen::Splash) {
         draw_splash(f, tick);
         return;

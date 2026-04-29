@@ -2,50 +2,63 @@
 
 use crossterm::event::{KeyCode, KeyEvent};
 
-use crate::repl::app_state::{AppState, PanelFocus};
+use crate::repl::app_state::PanelFocus;
 use crate::repl::screens::Screen;
+use crate::repl::store::{UIStore, UiAction};
 
 /// ↑/↓ when the balance sidebar is focused (scroll clamp in `draw_ui`).
-pub(super) fn try_balance_scroll_keys(app: &mut AppState, key: KeyEvent) -> bool {
-    if app.panel_focus != PanelFocus::Balance {
+pub(super) fn try_balance_scroll_keys(store: &mut UIStore, key: KeyEvent) -> bool {
+    if store.state.panel_focus != PanelFocus::Balance {
         return false;
     }
-    if !matches!(app.screen, Screen::Main { .. }) {
+    if !matches!(store.state.screen, Screen::Main { .. }) {
         return false;
     }
-    const LINE_STEP: u16 = 3;
-    const PAGE_STEP: u16 = 6;
+    const LINE_STEP: i32 = 3;
+    const PAGE_STEP: i32 = 6;
     match key.code {
         KeyCode::Up => {
-            app.balance_panel.scroll = app.balance_panel.scroll.saturating_sub(LINE_STEP);
+            store.dispatch(UiAction::NudgeBalanceScroll {
+                delta: -LINE_STEP,
+            });
             true
         }
         KeyCode::Down => {
-            app.balance_panel.scroll = app.balance_panel.scroll.saturating_add(LINE_STEP);
+            store.dispatch(UiAction::NudgeBalanceScroll {
+                delta: LINE_STEP,
+            });
             true
         }
         KeyCode::PageUp => {
-            app.balance_panel.scroll = app.balance_panel.scroll.saturating_sub(PAGE_STEP);
+            store.dispatch(UiAction::NudgeBalanceScroll {
+                delta: -PAGE_STEP,
+            });
             true
         }
         KeyCode::PageDown => {
-            app.balance_panel.scroll = app.balance_panel.scroll.saturating_add(PAGE_STEP);
+            store.dispatch(UiAction::NudgeBalanceScroll {
+                delta: PAGE_STEP,
+            });
             true
         }
         KeyCode::Home => {
-            app.balance_panel.scroll = 0;
+            store.dispatch(UiAction::SetBalanceScroll(0));
             true
         }
         KeyCode::End => {
-            app.balance_panel.scroll = u16::MAX;
+            store.dispatch(UiAction::SetBalanceScroll(u16::MAX));
             true
         }
         KeyCode::Char('k') => {
-            app.balance_panel.scroll = app.balance_panel.scroll.saturating_sub(LINE_STEP);
+            store.dispatch(UiAction::NudgeBalanceScroll {
+                delta: -LINE_STEP,
+            });
             true
         }
         KeyCode::Char('j') => {
-            app.balance_panel.scroll = app.balance_panel.scroll.saturating_add(LINE_STEP);
+            store.dispatch(UiAction::NudgeBalanceScroll {
+                delta: LINE_STEP,
+            });
             true
         }
         _ => false,
@@ -53,46 +66,58 @@ pub(super) fn try_balance_scroll_keys(app: &mut AppState, key: KeyEvent) -> bool
 }
 
 /// ↑/↓ and page keys when the output panel is focused (scroll clamp in `draw_ui`).
-pub(super) fn try_output_scroll_keys(app: &mut AppState, key: KeyEvent) -> bool {
-    if app.panel_focus != PanelFocus::Output {
+pub(super) fn try_output_scroll_keys(store: &mut UIStore, key: KeyEvent) -> bool {
+    if store.state.panel_focus != PanelFocus::Output {
         return false;
     }
-    if matches!(app.screen, Screen::Running { .. }) {
+    if matches!(store.state.screen, Screen::Running { .. }) {
         return false;
     }
-    const LINE_STEP: u16 = 3;
-    const PAGE_STEP: u16 = 6;
+    const LINE_STEP: i32 = 3;
+    const PAGE_STEP: i32 = 6;
     match key.code {
         KeyCode::Up => {
-            app.output_scroll = app.output_scroll.saturating_sub(LINE_STEP);
+            store.dispatch(UiAction::NudgeOutputScroll {
+                delta: -LINE_STEP,
+            });
             true
         }
         KeyCode::Down => {
-            app.output_scroll = app.output_scroll.saturating_add(LINE_STEP);
+            store.dispatch(UiAction::NudgeOutputScroll {
+                delta: LINE_STEP,
+            });
             true
         }
         KeyCode::PageUp => {
-            app.output_scroll = app.output_scroll.saturating_sub(PAGE_STEP);
+            store.dispatch(UiAction::NudgeOutputScroll {
+                delta: -PAGE_STEP,
+            });
             true
         }
         KeyCode::PageDown => {
-            app.output_scroll = app.output_scroll.saturating_add(PAGE_STEP);
+            store.dispatch(UiAction::NudgeOutputScroll {
+                delta: PAGE_STEP,
+            });
             true
         }
         KeyCode::Home => {
-            app.output_scroll = 0;
+            store.dispatch(UiAction::SetOutputScroll(0));
             true
         }
         KeyCode::End => {
-            app.output_scroll = u16::MAX;
+            store.dispatch(UiAction::SetOutputScroll(u16::MAX));
             true
         }
         KeyCode::Char('k') => {
-            app.output_scroll = app.output_scroll.saturating_sub(LINE_STEP);
+            store.dispatch(UiAction::NudgeOutputScroll {
+                delta: -LINE_STEP,
+            });
             true
         }
         KeyCode::Char('j') => {
-            app.output_scroll = app.output_scroll.saturating_add(LINE_STEP);
+            store.dispatch(UiAction::NudgeOutputScroll {
+                delta: LINE_STEP,
+            });
             true
         }
         _ => false,

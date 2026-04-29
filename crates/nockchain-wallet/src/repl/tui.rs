@@ -15,8 +15,8 @@ use nockapp::NockAppError;
 use tokio::sync::mpsc;
 use tokio::task::LocalSet;
 
-use super::app_state::AppState;
 use super::command_runner::{self, BalanceRefreshCompletion, JobCompletion, ReplRuntime};
+use super::store::{UIStore, UiAction};
 use super::components::root::draw_ui;
 use super::handlers;
 use super::hooks::events::spawn_crossterm_channel;
@@ -48,15 +48,14 @@ async fn run_tui_inner(cli: WalletCli, rt: ReplRuntime) -> Result<(), NockAppErr
     let (balance_done_tx, mut balance_done_rx) =
         mpsc::unbounded_channel::<BalanceRefreshCompletion>();
 
-    let mut app = AppState::new(Screen::Splash);
-    let mut tick: u64 = 0;
+    let mut store = UIStore::new(Screen::Splash);
     let mut interval = tokio::time::interval(Duration::from_millis(120));
 
     let result = loop {
         {
             let mut term_guard = terminal.lock().await;
             term_guard
-                .draw(|f| draw_ui(f, &mut app, tick))
+                .draw(|f| draw_ui(f, &mut store.state))
                 .map_err(io_err)?;
         }
 
@@ -64,16 +63,16 @@ async fn run_tui_inner(cli: WalletCli, rt: ReplRuntime) -> Result<(), NockAppErr
             biased;
             maybe_job = job_done_rx.recv() => {
                 if let Some((res, captured)) = maybe_job {
-                    command_runner::apply_job_result(&mut app, res, captured);
+                    command_runner::apply_job_result(&mut store, res, captured);
                 }
             }
             maybe_bal = balance_done_rx.recv() => {
                 if let Some((nonce, res, captured)) = maybe_bal {
-                    command_runner::apply_balance_sidebar_result(&mut app, nonce, res, captured);
+                    command_runner::apply_balance_sidebar_result(&mut store, nonce, res, captured);
                 }
             }
             _ = interval.tick() => {
-                tick = tick.wrapping_add(1);
+                store.dispatch(UiAction::Tick);
             }
             Some(ev) = ev_rx.recv() => {
                 match ev {
@@ -84,7 +83,7 @@ async fn run_tui_inner(cli: WalletCli, rt: ReplRuntime) -> Result<(), NockAppErr
                         match handlers::dispatch_key(
                             &cli,
                             &rt,
-                            &mut app,
+                            &mut store,
                             key,
                             &terminal,
                             &job_done_tx,
@@ -102,7 +101,7 @@ async fn run_tui_inner(cli: WalletCli, rt: ReplRuntime) -> Result<(), NockAppErr
                         }
                     }
                     Event::Paste(text) => {
-                        match handlers::dispatch_paste(&cli, &mut app, text, &rt, &balance_done_tx)
+                        match handlers::dispatch_paste(&cli, &mut store, text, &rt, &balance_done_tx)
                             .await
                         {
                             Ok(super::screens::ReplControl::Continue) => {}

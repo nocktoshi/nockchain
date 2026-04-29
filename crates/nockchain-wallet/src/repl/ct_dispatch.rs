@@ -5,7 +5,7 @@ use nockapp::NockAppError;
 use nockchain_types::common::Hash;
 use tokio::sync::mpsc;
 
-use super::app_state::AppState;
+use super::store::{UIStore, UiAction};
 use super::command_runner::{schedule_wallet_command, JobCompletion, ReplRuntime};
 use super::create_tx::{CreateTxWizard, OptSub, Phase, RecSub};
 use super::screens::{ReplControl, Screen};
@@ -14,12 +14,12 @@ use crate::recipient::{validate_blob_field, validate_memo_utf8, RecipientSpecTok
 
 pub(super) async fn handle_create_tx(
     _cli: &WalletCli,
-    app: &mut AppState,
+    store: &mut UIStore,
     key: KeyEvent,
     rt: &ReplRuntime,
     done_tx: &mpsc::UnboundedSender<JobCompletion>,
 ) -> Result<ReplControl, NockAppError> {
-    let screen = &mut app.screen;
+    let screen = &mut store.state.screen;
     let Screen::CreateTx { w } = screen else {
         return Ok(ReplControl::Continue);
     };
@@ -30,7 +30,7 @@ pub(super) async fn handle_create_tx(
         key.code,
         KeyCode::Esc | KeyCode::Char('q') | KeyCode::Char('Q')
     ) {
-        *screen = Screen::Transactions { sel: 0 };
+        store.dispatch(UiAction::ReplaceScreen(Screen::Transactions { sel: 0 }));
         return Ok(ReplControl::Continue);
     }
 
@@ -207,7 +207,7 @@ pub(super) async fn handle_create_tx(
                     };
                     if let Some(cmd) = w.build_command() {
                         schedule_wallet_command(
-                            app,
+                            store,
                             rt,
                             done_tx.clone(),
                             cmd,

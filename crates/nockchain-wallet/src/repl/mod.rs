@@ -12,6 +12,7 @@ mod handlers;
 mod hooks;
 mod paste;
 mod screens;
+mod store;
 mod tui;
 
 use std::sync::Arc;
