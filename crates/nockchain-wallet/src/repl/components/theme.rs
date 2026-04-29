@@ -17,6 +17,25 @@ pub(crate) const THEME_SHADOW: Color = Color::Rgb(36, 36, 40);
 /// Unicode mathematical sans-serif bold — reuse for boot splash and loading state.
 pub(crate) const SPLASH_BRAND: &str = " 𝐍 𝐎 𝐂 𝐊 𝐂 𝐇 𝐀 𝐈𝐍 ";
 
+/// Ramp through forest greens into a bright peak and back — drives the loading brand “chase” so the
+/// highlight reads as a pulse as it moves across the wordmark.
+pub(crate) const LOADING_BRAND_PALETTE: &[Color] = &[
+    Color::Rgb(28, 105, 26),
+    Color::Rgb(38, 135, 36),
+    THEME_ACCENT_GREEN,
+    Color::Rgb(52, 185, 48),
+    Color::Rgb(78, 235, 74),
+    Color::Rgb(140, 220, 136),
+    Color::Rgb(210, 245, 208),
+    Color::Rgb(240, 252, 240),
+    Color::Rgb(210, 245, 208),
+    Color::Rgb(140, 220, 136),
+    Color::Rgb(78, 235, 74),
+    Color::Rgb(52, 185, 48),
+    THEME_ACCENT_GREEN,
+    Color::Rgb(38, 135, 36),
+];
+
 /// Subtle breathing grayscale around white — shared phase so the splash wordmark moves together.
 pub(crate) fn pulse_color(frame_counter: usize) -> Color {
     const W: i32 = 255;

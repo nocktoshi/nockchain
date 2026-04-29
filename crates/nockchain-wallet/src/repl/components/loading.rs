@@ -7,12 +7,42 @@ use ratatui::widgets::{Block, Paragraph, Wrap};
 
 use crate::repl::app_state::AppState;
 
-use super::theme::SPLASH_BRAND;
+use super::theme::{LOADING_BRAND_PALETTE, SPLASH_BRAND, THEME_SHADOW};
 
 pub(crate) fn braille_spinner_char(tick: u64) -> &'static str {
     const SPIN: &[&str] =
         &["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
     SPIN[tick as usize % SPIN.len()]
+}
+
+/// One animated line: each non-space character cycles through [`super::theme::LOADING_BRAND_PALETTE`]
+/// with a traveling phase plus slow drift so the bright band pulses across “NOCKCHAIN”.
+pub(crate) fn splash_brand_loading_line(tick: u64) -> Line<'static> {
+    let palette = LOADING_BRAND_PALETTE;
+    let n = palette.len().max(1);
+    let travel = tick as usize;
+    // Slow phase drift so the wave doesn’t repeat identically frame-to-frame (overall breathing).
+    let breathe = (tick / 8) as usize % n;
+    let mut letter_i = 0usize;
+    let mut spans = Vec::new();
+    for ch in SPLASH_BRAND.chars() {
+        if ch.is_whitespace() {
+            spans.push(Span::styled(
+                ch.to_string(),
+                Style::default().fg(THEME_SHADOW),
+            ));
+            continue;
+        }
+        let idx = (letter_i + travel + breathe) % n;
+        spans.push(Span::styled(
+            ch.to_string(),
+            Style::default()
+                .fg(palette[idx])
+                .add_modifier(Modifier::BOLD),
+        ));
+        letter_i += 1;
+    }
+    Line::from(spans)
 }
 
 pub(crate) fn sync_attempt_message(app: &AppState) -> Option<String> {
@@ -43,12 +73,7 @@ pub(crate) fn loading_indicator_paragraph<'a>(
         ),
     };
     Paragraph::new(vec![
-        Line::from(Span::styled(
-            SPLASH_BRAND,
-            Style::default()
-                .fg(Color::Yellow)
-                .add_modifier(Modifier::BOLD),
-        )),
+        splash_brand_loading_line(tick),
         Line::from(""),
         Line::from(vec![
             Span::styled(spin, Style::default().fg(Color::Green)),
