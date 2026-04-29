@@ -7,7 +7,8 @@ use ratatui::widgets::{Block, BorderType, Borders, Padding, Paragraph, Wrap};
 use ratatui::Frame;
 
 use super::theme::{
-    THEME_ACCENT_GREEN as ACCENT, THEME_BG_DEEP, THEME_BG_PANEL, THEME_SHADOW,
+    pulse_color, THEME_ACCENT_GREEN as ACCENT, THEME_BG_DEEP, THEME_BG_PANEL,
+    THEME_SHADOW,
 };
 
 const LOGO_W: u16 = 53;
@@ -88,7 +89,7 @@ pub(crate) fn draw_splash(f: &mut Frame<'_>, _tick: u64) {
     let card_inner = card.inner(card_rect);
     f.render_widget(card, card_rect);
 
-    let logo_fg = accent_logo_pulse(fc);
+    let logo_fg = pulse_color(fc);
     let mut card_lines: Vec<Line> = NOCKCHAIN
         .iter()
         .map(|row| {
@@ -223,22 +224,6 @@ fn render_card_shadow(f: &mut Frame<'_>, card: Rect) {
 fn blink_glyph(fc: usize, salt: usize) -> &'static str {
     const GLYPHS: &[&str] = &["·", "✧", "·", "⋆"];
     GLYPHS[(fc / 2 + salt) % GLYPHS.len()]
-}
-
-/// Subtle breathing on white — shared phase so the whole wordmark moves together.
-fn accent_logo_pulse(fc: usize) -> Color {
-    const W: i32 = 255;
-    let period = 56usize;
-    let t = fc % period;
-    let h = period / 2;
-    let wave = if t < h { t } else { period - t };
-    // ±7 around white; clamp so it stays bright / slightly cool gray at trough.
-    let d = (wave as i32 * 14 / h as i32) - 7;
-    Color::Rgb(
-        (W + d).clamp(232, 255) as u8,
-        (W + d).clamp(232, 255) as u8,
-        (W + d).clamp(232, 255) as u8,
-    )
 }
 
 /// Paint CRT scanlines for every row in `zone` (uses global x/y so beams stay continuous).
