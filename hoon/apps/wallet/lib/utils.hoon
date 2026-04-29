@@ -802,6 +802,41 @@
           ==
         ==
     ::
+      ::  `%memo` / `%blob` packed belt payloads (display)
+      ::  matches Rust decode_len_prefixed_blob
+      ++  le-u32-to-4-ux
+        |=  w=@
+        ^-  (list @ux)
+        =/  b0=@  (mod w (bex 8))
+        =/  w1=@  (div w (bex 8))
+        =/  b1=@  (mod w1 (bex 8))
+        =/  w2=@  (div w1 (bex 8))
+        =/  b2=@  (mod w2 (bex 8))
+        =/  w3=@  (div w2 (bex 8))
+        =/  b3=@  (mod w3 (bex 8))
+        ~[b0 b1 b2 b3]
+      ::
+      ++  packed-blob-to-bytes
+        |=  form=blob-data:wt
+        ^-  (unit (list @ux))
+        ?~  form  ~
+        =/  len=@  i.form
+        =/  need=@  (add 1 (div (add len 3) 4))
+        ?.  =(need (lent form))  ~
+        =/  belts=(list @)  t.form
+        =/  raw=(list @ux)
+          %+  roll  belts
+          |=  [w=@ acc=(list @ux)]
+          (weld acc (le-u32-to-4-ux w))
+        ?.  (gte (lent raw) len)  ~
+        `(scag len raw)
+      ::
+      ++  packed-blob-to-utf8-tape
+        |=  form=blob-data:wt
+        ^-  (unit @t)
+        ?~  b=(packed-blob-to-bytes form)  ~
+        `(crip (turn u.b @tD))
+    ::
       ++  memo-display
         |=  data=note-data:v1:transact
         ^-  @t
@@ -809,9 +844,9 @@
           'N/A'
         ?~  soft-memo=((soft blob-data:wt) u.memo-val)
           ~>  %slog.[2 'memo data in note is malformed']  'N/A'
-        =/  memo-bytes=blob-data:wt  u.soft-memo
-        =/  memo-text=@t  (crip (turn memo-bytes @tD))
-        memo-text
+        ?~  txt=(packed-blob-to-utf8-tape u.soft-memo)
+          ~>  %slog.[2 'memo data in note is malformed']  'N/A'
+        u.txt
     ::
       ++  blob-display
         |=  data=note-data:v1:transact
@@ -824,7 +859,10 @@
               u.got
             ~>  %slog.[2 'wallet display: blob payload malformed']
             '[blob: cannot decode]'
-          (crip (turn u.soft-blob @tD))
+          ?~  txt=(packed-blob-to-utf8-tape u.soft-blob)
+            ~>  %slog.[2 'wallet display: blob payload malformed']
+            '[blob: cannot decode]'
+          u.txt
         ;:  (cury cat 3)
             '\0a- Blob: '
             text

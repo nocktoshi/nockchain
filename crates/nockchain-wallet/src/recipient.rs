@@ -5,7 +5,7 @@ use nockchain_types::tx_engine::v1::tx::{Lock, LockPrimitive, Pkh, SpendConditio
 use nockchain_types::{EthAddress, EthAddressParseError};
 use noun_serde::{NounDecode, NounEncode};
 use serde::Deserialize;
-use wallet_tx_builder::note_data::TypedNoteDataEntry;
+use wallet_tx_builder::note_data::{PackedBlob, TypedNoteDataEntry};
 use wallet_tx_builder::types::{PlannedOutput, RawNoteDataEntry};
 
 use crate::{CrownError, NockAppError};
@@ -13,6 +13,7 @@ use crate::{CrownError, NockAppError};
 const MAX_BLOB_UTF8_BYTES: usize = 256 * 1024;
 
 /// Trims and checks size; `None` if absent or empty/whitespace-only.
+pub(crate) fn validate_blob_field(blob: Option<String>) -> Result<Option<Vec<u8>>, NockAppError> {
 pub(crate) fn validate_blob_field(blob: Option<String>) -> Result<Option<Vec<u8>>, NockAppError> {
     let Some(raw) = blob else {
         return Ok(None);
@@ -38,12 +39,11 @@ pub(crate) fn validate_memo_utf8(memo: Option<&str>) -> Result<Option<Vec<u8>>, 
         return Ok(None);
     };
     let memo_bytes = memo.as_bytes();
-    let estimated_leaves = memo_bytes.len() + 128;
-    if estimated_leaves > 2048 {
+    if memo_bytes.len() > wallet_tx_builder::note_data::MAX_MEMO_UTF8_BYTES {
         return Err(CrownError::Unknown(format!(
-            "Memo too large: {} bytes would use ~{} leaves (max 2,048 bytes)",
+            "Memo too large: {} UTF-8 bytes (max {})",
             memo_bytes.len(),
-            estimated_leaves
+            wallet_tx_builder::note_data::MAX_MEMO_UTF8_BYTES
         ))
         .into());
     }
@@ -93,16 +93,16 @@ pub enum RecipientSpec {
     P2pkh {
         address: Hash,
         amount: u64,
-        memo: Option<Vec<u8>>,
-        blob: Option<Vec<u8>>,
+        memo: Option<PackedBlob>,
+        blob: Option<PackedBlob>,
     },
     #[noun(tag = "multisig")]
     Multisig {
         threshold: u64,
         addresses: Vec<Hash>,
         amount: u64,
-        memo: Option<Vec<u8>>,
-        blob: Option<Vec<u8>>,
+        memo: Option<PackedBlob>,
+        blob: Option<PackedBlob>,
     },
     #[noun(tag = "bridge-deposit")]
     BridgeDeposit {
@@ -185,8 +185,8 @@ impl RecipientSpecToken {
                 Ok(RecipientSpec::P2pkh {
                     address: recipient,
                     amount,
-                    memo,
-                    blob,
+                    memo: memo.map(PackedBlob),
+                    blob: blob.map(PackedBlob),
                 })
             }
             RecipientSpecToken::Multisig {
@@ -245,8 +245,8 @@ impl RecipientSpecToken {
                     threshold,
                     addresses: parsed,
                     amount,
-                    memo,
-                    blob,
+                    memo: memo.map(PackedBlob),
+                    blob: blob.map(PackedBlob),
                 })
             }
             RecipientSpecToken::BridgeDeposit {
@@ -350,11 +350,11 @@ pub fn planner_recipient_output(
             } else {
                 Vec::new()
             };
-            if let Some(bytes) = memo {
-                note_data.push(TypedNoteDataEntry::memo(bytes.clone()).to_raw_entry());
+            if let Some(packed) = memo {
+                note_data.push(TypedNoteDataEntry::memo(packed.0.clone()).to_raw_entry());
             }
-            if let Some(bytes) = blob {
-                note_data.push(TypedNoteDataEntry::blob(bytes.clone()).to_raw_entry());
+            if let Some(packed) = blob {
+                note_data.push(TypedNoteDataEntry::blob(packed.0.clone()).to_raw_entry());
             }
             Ok(PlannedOutput {
                 lock_root: lock_root(&lock)?,
@@ -371,17 +371,16 @@ pub fn planner_recipient_output(
         } => {
             let lock = pkh_lock(*threshold, addresses);
             let mut note_data = vec![RawNoteDataEntry::from_lock(lock.clone())];
-            if let Some(bytes) = memo {
-                note_data.push(TypedNoteDataEntry::memo(bytes.clone()).to_raw_entry());
+            if let Some(packed) = memo {
+                note_data.push(TypedNoteDataEntry::memo(packed.0.clone()).to_raw_entry());
             }
-            if let Some(bytes) = blob {
-                note_data.push(TypedNoteDataEntry::blob(bytes.clone()).to_raw_entry());
+            if let Some(packed) = blob {
+                note_data.push(TypedNoteDataEntry::blob(packed.0.clone()).to_raw_entry());
             }
             Ok(PlannedOutput {
                 lock_root: lock_root(&lock)?,
                 amount: *amount,
-                // Hoon always includes lock note-data for multisig outputs.
-                note_data: vec![RawNoteDataEntry::from_lock(lock.clone())],
+                note_data,
             })
         }
         RecipientSpec::BridgeDeposit {
@@ -424,6 +423,9 @@ pub fn planner_refund_output_template(
 mod tests {
     use nockapp::noun::slab::{NockJammer, NounSlab};
     use noun_serde::{NounDecode, NounEncode};
+    use wallet_tx_builder::note_data::{
+        PackedBlob, NOTE_DATA_KEY_BLOB, NOTE_DATA_KEY_LOCK, NOTE_DATA_KEY_MEMO,
+    };
 
     use super::*;
 
@@ -518,8 +520,6 @@ mod tests {
             RecipientSpecToken::BridgeDeposit {
                 evm_address: SAMPLE_EVM_ADDRESS.to_string(),
                 amount: 9,
-                memo: None,
-                blob: None,
             },
         ];
         let specs = recipient_tokens_to_specs(tokens).expect("tokens -> specs");
@@ -566,19 +566,12 @@ mod tests {
             _ => panic!("second spec should be multisig"),
         }
         match &specs[2] {
-            RecipientSpec::BridgeDeposit {
-                evm_address,
-                amount,
-                memo,
-                blob,
-            } => {
+            RecipientSpec::BridgeDeposit { evm_address, amount } => {
                 assert_eq!(*amount, 9);
                 assert_eq!(
                     evm_address,
                     &EthAddress::from_hex_str(SAMPLE_EVM_ADDRESS).expect("sample evm address")
                 );
-                assert!(memo.is_none());
-                assert!(blob.is_none());
             }
             _ => panic!("third spec should be bridge deposit"),
         }
@@ -596,8 +589,8 @@ mod tests {
             RecipientSpec::P2pkh {
                 address: Hash::from_base58(SAMPLE_P2PKH).expect("p2pkh hash"),
                 amount: 10,
-                memo: None,
-                blob: None,
+                memo: Some(PackedBlob(b"memo utf8".to_vec())),
+                blob: Some(PackedBlob(vec![0, 1, 2])),
             },
             RecipientSpec::Multisig {
                 threshold: 1,
@@ -613,8 +606,6 @@ mod tests {
                 evm_address: EthAddress::from_hex_str(SAMPLE_EVM_ADDRESS)
                     .expect("sample evm address"),
                 amount: 30,
-                memo: None,
-                blob: None,
             },
         ];
 
@@ -637,7 +628,7 @@ mod tests {
         let spec = token.into_recipient_spec().expect("into spec");
         match spec {
             RecipientSpec::P2pkh { blob, .. } => {
-                assert_eq!(blob, Some(b"nns.nock".to_vec()));
+                assert_eq!(blob.map(|b| b.0), Some(b"nns.nock".to_vec()));
             }
             _ => panic!("expected p2pkh"),
         }
@@ -653,7 +644,7 @@ mod tests {
         let spec = token.into_recipient_spec().expect("into spec");
         match spec {
             RecipientSpec::P2pkh { blob, .. } => {
-                assert_eq!(blob, Some(b"nns.nock".to_vec()));
+                assert_eq!(blob.map(|b| b.0), Some(b"nns.nock".to_vec()));
             }
             _ => panic!("expected p2pkh"),
         }
@@ -665,8 +656,8 @@ mod tests {
         let recipients = vec![RecipientSpec::P2pkh {
             address,
             amount: 5,
-            memo: Some(b"hi".to_vec()),
-            blob: Some(vec![1]),
+            memo: Some(PackedBlob(b"hi".to_vec())),
+            blob: Some(PackedBlob(vec![1])),
         }];
         let outputs = planner_recipient_outputs(&recipients, true).expect("planner outputs");
         assert_eq!(outputs.len(), 1);
