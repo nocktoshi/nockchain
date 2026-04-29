@@ -27,17 +27,16 @@ use nockapp::{
     complete_run_on_exit_driver, exit_driver, file_driver, markdown_driver, one_punch_driver,
     AtomExt, CrownError, NockAppError,
 };
-use nockvm::noun::{D, SIG, T};
+use nockvm::noun::{D, Noun, SIG, T};
 use nockvm_macros::tas;
-use noun_serde::prelude::*;
-use noun_serde::NounDecodeError;
+use noun_serde::{NounDecode, NounDecodeError};
 use termimad::MadSkin;
 use tracing::{error, info};
 use wallet_tx_builder::adapter::NormalizedSnapshot;
 
 use crate::command::{CommandNoun, Commands, WalletCli, WatchSubcommand};
 use crate::recipient::recipient_tokens_to_specs;
-use crate::wallet_outcome::{WalletCommandOutcome, WalletEvent, WalletSuccess};
+use crate::wallet_outcome::{WalletCommandOutcome, WalletEvent, WalletNoteRowV1, WalletSuccess};
 use crate::{connection, normalize_watch_address, Wallet};
 
 /// Optional progress hooks for callers (REPL/TUI). CLI uses [`DispatchHooks::default`].
@@ -50,6 +49,53 @@ pub(crate) struct DispatchHooks {
     pub markdown_capture: Option<Arc<Mutex<String>>>,
     /// When set, each `%markdown` effect also pushes [`WalletEvent::KernelMarkdown`].
     pub wallet_events: Option<Arc<Mutex<Vec<WalletEvent>>>>,
+}
+
+/// Decode additive `[%raw [%wbal-v1 …]]` / `[%raw [%wnote-v1 …]]` without touching `%markdown`.
+fn try_wallet_structured_event(noun: Noun) -> Option<WalletEvent> {
+    let cell = noun.as_cell().ok()?;
+    let head = cell.head();
+    let tail = cell.tail();
+    if !unsafe { head.raw_equals(&D(tas!(b"raw"))) } {
+        return None;
+    }
+    let inner = tail.as_cell().ok()?;
+    let inner_head = inner.head();
+    let inner_tail = inner.tail();
+    if unsafe { inner_head.raw_equals(&D(tas!(b"wbal-v1"))) } {
+        let (wallet_version, block_id_b58, height, note_count, total_assets) =
+            <(u64, String, u64, u64, u64)>::from_noun(&inner_tail).ok()?;
+        return Some(WalletEvent::BalanceSnapshotV1 {
+            wallet_version,
+            block_id_b58,
+            height,
+            note_count,
+            total_assets,
+        });
+    }
+    if unsafe { inner_head.raw_equals(&D(tas!(b"wnote-v1"))) } {
+        let (height, block_id_b58, rows) = <(u64, String, Vec<(String, String, u64, u64)>)>::from_noun(
+            &inner_tail,
+        )
+        .ok()?;
+        let rows: Vec<WalletNoteRowV1> = rows
+            .into_iter()
+            .map(
+                |(name_first_b58, name_last_b58, version, assets)| WalletNoteRowV1 {
+                    name_first_b58,
+                    name_last_b58,
+                    version,
+                    assets,
+                },
+            )
+            .collect();
+        return Some(WalletEvent::NotesListV1 {
+            height,
+            block_id_b58,
+            rows,
+        });
+    }
+    None
 }
 
 fn wallet_success_from_hooks(hooks: &DispatchHooks) -> WalletSuccess {
@@ -86,7 +132,14 @@ pub(crate) fn markdown_capture_driver(
             loop {
                 match handle.next_effect().await {
                     Ok(effect) => {
-                        let Ok(effect_cell) = unsafe { effect.root() }.as_cell() else {
+                        let root = unsafe { effect.root() };
+                        if let Some(structured) = try_wallet_structured_event(*root) {
+                            if let Some(ref ev) = wallet_events {
+                                ev.lock().unwrap().push(structured);
+                            }
+                            continue;
+                        }
+                        let Ok(effect_cell) = root.as_cell() else {
                             continue;
                         };
                         if unsafe { effect_cell.head().raw_equals(&D(tas!(b"markdown"))) } {
