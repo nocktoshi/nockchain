@@ -6,14 +6,9 @@ use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, BorderType, Borders, Padding, Paragraph, Wrap};
 use ratatui::Frame;
 
-/// #228B20 — border / accents
-const ACCENT: Color = Color::Rgb(34, 139, 32);
-/// #0B0B0B — deep fill
-const BG_DEEP: Color = Color::Rgb(11, 11, 11);
-/// #3C3C3C — panel / card
-const BG_PANEL: Color = Color::Rgb(60, 60, 60);
-/// Drop shadow — must be visibly distinct from [`BG_DEEP`] (not the same as the page background).
-const SHADOW: Color = Color::Rgb(36, 36, 40);
+use super::theme::{
+    THEME_ACCENT_GREEN as ACCENT, THEME_BG_DEEP, THEME_BG_PANEL, THEME_SHADOW,
+};
 
 const LOGO_W: u16 = 53;
 
@@ -47,7 +42,7 @@ pub(crate) fn draw_splash(f: &mut Frame<'_>, _tick: u64) {
                 .fg(ACCENT)
                 .add_modifier(Modifier::BOLD),
         )]))
-        .style(Style::new().bg(BG_DEEP));
+        .style(Style::new().bg(THEME_BG_DEEP));
     let inner = outer.inner(area);
     f.render_widget(outer, area);
 
@@ -88,7 +83,7 @@ pub(crate) fn draw_splash(f: &mut Frame<'_>, _tick: u64) {
         .borders(Borders::ALL)
         .border_type(BorderType::Thick)
         .border_style(Style::new().fg(Color::Rgb(255, 255, 255)))
-        .style(Style::new().bg(BG_PANEL))
+        .style(Style::new().bg(THEME_BG_PANEL))
         .padding(Padding::symmetric(2, 1));
     let card_inner = card.inner(card_rect);
     f.render_widget(card, card_rect);
@@ -100,12 +95,12 @@ pub(crate) fn draw_splash(f: &mut Frame<'_>, _tick: u64) {
             let spans: Vec<Span> = row
                 .chars()
                 .map(|ch| {
-                    let fg = if ch == '█' { logo_fg } else { BG_PANEL };
+                    let fg = if ch == '█' { logo_fg } else { THEME_BG_PANEL };
                     Span::styled(
                         ch.to_string(),
                         Style::new()
                             .fg(fg)
-                            .bg(BG_PANEL)
+                            .bg(THEME_BG_PANEL)
                             .add_modifier(Modifier::BOLD),
                     )
                 })
@@ -126,21 +121,21 @@ pub(crate) fn draw_splash(f: &mut Frame<'_>, _tick: u64) {
             "│",
             Style::new()
                 .fg(Color::Rgb(26, 95, 24))
-                .bg(BG_PANEL)
+                .bg(THEME_BG_PANEL)
                 .add_modifier(Modifier::BOLD),
         ),
         Span::styled(
             tag,
             Style::new()
                 .fg(ACCENT)
-                .bg(BG_PANEL)
+                .bg(THEME_BG_PANEL)
                 .add_modifier(Modifier::BOLD),
         ),
         Span::styled(
             "│",
             Style::new()
                 .fg(Color::Rgb(26, 95, 24))
-                .bg(BG_PANEL)
+                .bg(THEME_BG_PANEL)
                 .add_modifier(Modifier::BOLD),
         ),
     ]));
@@ -208,7 +203,7 @@ fn render_card_shadow(f: &mut Frame<'_>, card: Rect) {
     };
     let top = Rect::new(top_x, card.y.saturating_sub(TL), top_w, TL);
 
-    let shadow_fill = Style::new().fg(SHADOW).bg(SHADOW);
+    let shadow_fill = Style::new().fg(THEME_SHADOW).bg(THEME_SHADOW);
     let patch = Block::default()
         .borders(Borders::NONE)
         .style(shadow_fill);
@@ -263,11 +258,11 @@ fn render_scan_zone(f: &mut Frame<'_>, zone: Rect, fc: usize) {
 
 fn scan_style_for_global_row(global_y: usize) -> Style {
     let (fg, bg) = match global_y % 5 {
-        0 => (Color::Rgb(78, 235, 74), BG_DEEP),
-        1 => (ACCENT, BG_DEEP),
-        2 => (Color::Rgb(52, 185, 48), BG_DEEP),
-        3 => (Color::Rgb(38, 135, 36), BG_DEEP),
-        _ => (Color::Rgb(28, 105, 26), BG_DEEP),
+        0 => (Color::Rgb(78, 235, 74), THEME_BG_DEEP),
+        1 => (ACCENT, THEME_BG_DEEP),
+        2 => (Color::Rgb(52, 185, 48), THEME_BG_DEEP),
+        3 => (Color::Rgb(38, 135, 36), THEME_BG_DEEP),
+        _ => (Color::Rgb(28, 105, 26), THEME_BG_DEEP),
     };
     Style::new().fg(fg).bg(bg).add_modifier(Modifier::BOLD)
 }

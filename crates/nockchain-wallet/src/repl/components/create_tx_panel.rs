@@ -2,12 +2,13 @@
 
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
-use ratatui::widgets::{Paragraph, Wrap};
+use ratatui::widgets::{Block, BorderType, Borders, Paragraph, Wrap};
 use ratatui::Frame;
 
 use crate::repl::create_tx::{OptSub, Phase, RecSub};
 
 use super::menus::{BOOL, NOTE_ORDER};
+use super::theme::THEME_ACCENT_GREEN;
 
 fn list_inline(lines: &mut Vec<Line>, items: &[&str], sel: usize) {
     for (i, s) in items.iter().enumerate() {
@@ -27,6 +28,7 @@ pub(crate) fn draw_create_tx(
     area: ratatui::layout::Rect,
     w: &crate::repl::create_tx::CreateTxWizard,
     tick: u64,
+    menu_focused: bool,
 ) {
     let spin = ["|", "/", "-", "\\"][tick as usize % 4];
     let mut lines: Vec<Line> = vec![
@@ -126,6 +128,16 @@ pub(crate) fn draw_create_tx(
             }
         },
     }
-    let p = Paragraph::new(lines).wrap(Wrap { trim: true });
+    let mut block = Block::default()
+        .borders(Borders::ALL)
+        .title("Create transaction");
+    if menu_focused {
+        block = block
+            .border_type(BorderType::Thick)
+            .border_style(Style::default().fg(THEME_ACCENT_GREEN));
+    }
+    let p = Paragraph::new(lines)
+        .wrap(Wrap { trim: true })
+        .block(block);
     f.render_widget(p, area);
 }

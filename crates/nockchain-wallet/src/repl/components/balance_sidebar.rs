@@ -2,13 +2,14 @@
 
 use ratatui::style::{Color, Style};
 use ratatui::text::{Line, Span};
-use ratatui::widgets::{Block, Borders, Paragraph, Wrap};
+use ratatui::widgets::{Block, BorderType, Borders, Paragraph, Wrap};
 use ratatui::Frame;
 
 use crate::repl::app_state::{AppState, PanelFocus};
 
 use super::loading::loading_indicator_paragraph;
 use super::scroll::estimate_wrapped_source_lines;
+use super::theme::THEME_ACCENT_GREEN;
 
 pub(crate) fn draw_balance_sidebar(
     f: &mut Frame<'_>,
@@ -17,14 +18,13 @@ pub(crate) fn draw_balance_sidebar(
     tick: u64,
 ) {
     let focused = matches!(app.panel_focus, PanelFocus::Balance);
-    let border_style = if focused {
-        Style::default().fg(Color::Yellow)
-    } else {
-        Style::default()
-    };
-    let balance_block = Block::default()
-        .borders(Borders::ALL)
-        .border_style(border_style)
+    let mut balance_block = Block::default().borders(Borders::ALL);
+    if focused {
+        balance_block = balance_block
+            .border_type(BorderType::Thick)
+            .border_style(Style::default().fg(THEME_ACCENT_GREEN));
+    }
+    let balance_block = balance_block
         .title(Line::from(vec![Span::styled(
             if focused { " Balance ◆ " } else { " Balance " },
             Style::default().fg(Color::Cyan),

@@ -4,7 +4,7 @@ use ratatui::layout::{Constraint, Direction, Layout};
 use ratatui::style::{Color, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{
-    Block, Borders, HighlightSpacing, List, ListItem, Paragraph, Wrap,
+    Block, BorderType, Borders, HighlightSpacing, List, ListItem, Paragraph, Wrap,
 };
 use ratatui::Frame;
 
@@ -20,7 +20,7 @@ use super::menus::{
 };
 use super::scroll::estimate_wrapped_source_lines;
 use super::splash::draw_splash;
-use super::theme::SPLASH_BRAND;
+use super::theme::{SPLASH_BRAND, THEME_ACCENT_GREEN};
 
 pub(crate) fn draw_ui(f: &mut Frame<'_>, app: &mut AppState) {
     let tick = app.ui_fx.frame_clock;
@@ -31,7 +31,7 @@ pub(crate) fn draw_ui(f: &mut Frame<'_>, app: &mut AppState) {
 
     let block = Block::default().borders(Borders::ALL).title(Span::styled(
         SPLASH_BRAND,
-        Style::default().fg(Color::Green),
+        Style::default().fg(THEME_ACCENT_GREEN),
     ));
     let inner = block.inner(f.area());
     f.render_widget(block, f.area());
@@ -86,12 +86,16 @@ pub(crate) fn draw_ui(f: &mut Frame<'_>, app: &mut AppState) {
         }
         Screen::Quick { line } => {
             let t = format!("Quick command (help, exit, …)\n\n> {line}");
-            let p = Paragraph::new(t).wrap(Wrap { trim: true });
+            let p = Paragraph::new(t)
+                .wrap(Wrap { trim: true })
+                .block(menu_panel_block("Quick", app.panel_focus == PanelFocus::Menu));
             f.render_widget(p, menu_area);
         }
         Screen::TextPrompt { title, value, .. } => {
             let t = format!("{title}\n\n> {value}");
-            let p = Paragraph::new(t).wrap(Wrap { trim: true });
+            let p = Paragraph::new(t)
+                .wrap(Wrap { trim: true })
+                .block(menu_panel_block(title.as_str(), app.panel_focus == PanelFocus::Menu));
             f.render_widget(p, menu_area);
         }
         Screen::Confirm {
@@ -100,7 +104,7 @@ pub(crate) fn draw_ui(f: &mut Frame<'_>, app: &mut AppState) {
             list_draw(f, app, menu_area, title.as_str(), labels, *sel);
         }
         Screen::CreateTx { w } => {
-            draw_create_tx(f, menu_area, w, tick);
+            draw_create_tx(f, menu_area, w, tick, app.panel_focus == PanelFocus::Menu);
         }
         Screen::ExitConfirm { sel } => {
             list_draw(f, app, menu_area, "Exit REPL?", BOOL, *sel);
@@ -132,9 +136,10 @@ pub(crate) fn draw_ui(f: &mut Frame<'_>, app: &mut AppState) {
         } else {
             ""
         };
-        let running_block = Block::default()
-            .borders(Borders::ALL)
-            .title(Span::styled("Output", Style::default().fg(Color::Cyan)));
+        let running_block = output_panel_block(
+            app.panel_focus == PanelFocus::Output,
+            Span::styled("Output", Style::default().fg(Color::Cyan)),
+        );
         let body = loading_indicator_paragraph(app, tick, running_block, label);
         f.render_widget(body, chunks[1]);
     } else {
@@ -143,9 +148,10 @@ pub(crate) fn draw_ui(f: &mut Frame<'_>, app: &mut AppState) {
         } else {
             app.last_command_output.clone()
         };
-        let output_block = Block::default()
-            .borders(Borders::ALL)
-            .title(Span::styled("Output", Style::default().fg(Color::Cyan)));
+        let output_block = output_panel_block(
+            app.panel_focus == PanelFocus::Output,
+            Span::styled("Output", Style::default().fg(Color::Cyan)),
+        );
         let inner = output_block.inner(chunks[1]);
         if app.last_command_output.is_empty() {
             app.output_scroll = 0;
@@ -226,6 +232,28 @@ pub(crate) fn draw_ui(f: &mut Frame<'_>, app: &mut AppState) {
     f.render_widget(hint, chunks[2]);
 }
 
+fn menu_panel_block<'a>(title: &'a str, focused: bool) -> Block<'a> {
+    let mut b = Block::default().borders(Borders::ALL).title(title);
+    if focused {
+        b = b
+            .border_type(BorderType::Thick)
+            .border_style(Style::default().fg(THEME_ACCENT_GREEN));
+    }
+    b
+}
+
+fn output_panel_block(focused: bool, title: Span<'static>) -> Block<'static> {
+    let mut b = Block::default()
+        .borders(Borders::ALL)
+        .title(title);
+    if focused {
+        b = b
+            .border_type(BorderType::Thick)
+            .border_style(Style::default().fg(THEME_ACCENT_GREEN));
+    }
+    b
+}
+
 fn list_draw(
     f: &mut Frame<'_>,
     app: &mut AppState,
@@ -240,7 +268,7 @@ fn list_draw(
         .collect();
     app.list_state.select(Some(sel));
     let list = List::new(list_items)
-        .block(Block::default().borders(Borders::ALL).title(title))
+        .block(menu_panel_block(title, app.panel_focus == PanelFocus::Menu))
         .highlight_style(Style::default().bg(Color::DarkGray))
         .highlight_spacing(HighlightSpacing::Never)
         .highlight_symbol("");
