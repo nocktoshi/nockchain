@@ -22,8 +22,7 @@ use tokio::sync::{RwLock, Semaphore};
 use tracing::{debug, error, info, warn};
 
 use crate::error::{NockAppGrpcError, Result as GrpcResult};
-use crate::pb::common::v1 as pb_common;
-use crate::pb::common::v2 as pb_common_v2;
+use crate::pb::common::{v1 as pb_common, v2 as pb_common_v2};
 use crate::public_nockchain::v2::metrics::NockchainGrpcApiMetrics;
 use crate::public_nockchain::v2::server::BalanceHandle;
 

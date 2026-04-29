@@ -236,15 +236,14 @@
 +$  lock-data
   $%  [%0 =lock:transact]
   ==
-::  Blob Data: 
-::  - UTF-8 bytes as $(list @ux)$ with one atom per byte
-::  - Used by %blob and %memo keys in $note-data.
+::  Blob Data (packed blob):
+::    Flat $(list @)$ as `[byte-len=@ belt=little-endian-u32 …]`
 ++  blob-data
   =<  form
   |%
   +$  form
     $+  blob-data
-    (list @ux)
+    (list @)
   ++  based
     |=  =form
     ^-  ?

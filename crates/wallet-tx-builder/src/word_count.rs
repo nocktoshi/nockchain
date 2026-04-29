@@ -199,8 +199,10 @@ impl<'a> WordCountEstimator<'a> {
                 1 + beid_words + 5 + 5 + 1
             }
             DecodedNoteDataPayload::Memo(memo) | DecodedNoteDataPayload::Blob(memo) => {
-                // (list @ux): one leaf per byte plus list terminator.
-                Self::estimate_list_words_len(memo.bytes.len() as u64, 1)
+                // blob (`Vec<Belt>`): 1 + ceil(n/4) list elements, one leaf per belt.
+                let n = memo.bytes.len() as u64;
+                let belt_count = 1 + n.saturating_add(3) / 4;
+                Self::estimate_list_words_len(belt_count, 1)
             }
             DecodedNoteDataPayload::Raw => Self::estimate_raw_blob_words(&entry.blob),
         }
