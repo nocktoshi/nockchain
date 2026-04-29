@@ -24,7 +24,7 @@ use tokio::task::LocalSet;
 use tracing::info;
 
 use super::app_state::{AppState, PanelFocus};
-use super::command_runner::{self, JobCompletion, ReplRuntime};
+use super::command_runner::{self, BalanceRefreshCompletion, JobCompletion, ReplRuntime};
 use super::create_tx::{OptSub, Phase, RecSub};
 use super::handlers;
 use super::screens::Screen;
@@ -97,6 +97,8 @@ async fn run_tui_inner(cli: WalletCli, rt: ReplRuntime) -> Result<(), NockAppErr
     });
 
     let (job_done_tx, mut job_done_rx) = mpsc::unbounded_channel::<JobCompletion>();
+    let (balance_done_tx, mut balance_done_rx) =
+        mpsc::unbounded_channel::<BalanceRefreshCompletion>();
 
     let mut app = AppState::new(Screen::Splash);
     let mut tick: u64 = 0;
@@ -117,6 +119,11 @@ async fn run_tui_inner(cli: WalletCli, rt: ReplRuntime) -> Result<(), NockAppErr
                     command_runner::apply_job_result(&mut app, res, captured);
                 }
             }
+            maybe_bal = balance_done_rx.recv() => {
+                if let Some((nonce, res, captured)) = maybe_bal {
+                    command_runner::apply_balance_sidebar_result(&mut app, nonce, res, captured);
+                }
+            }
             _ = interval.tick() => {
                 tick = tick.wrapping_add(1);
             }
@@ -133,6 +140,7 @@ async fn run_tui_inner(cli: WalletCli, rt: ReplRuntime) -> Result<(), NockAppErr
                             key,
                             &terminal,
                             &job_done_tx,
+                            &balance_done_tx,
                         )
                         .await
                         {
@@ -146,7 +154,9 @@ async fn run_tui_inner(cli: WalletCli, rt: ReplRuntime) -> Result<(), NockAppErr
                         }
                     }
                     Event::Paste(text) => {
-                        match handlers::dispatch_paste(&cli, &mut app, text).await {
+                        match handlers::dispatch_paste(&cli, &mut app, text, &rt, &balance_done_tx)
+                            .await
+                        {
                             Ok(super::screens::ReplControl::Continue) => {}
                             Ok(super::screens::ReplControl::Quit) => break Ok(()),
                             Err(e) => {
@@ -194,6 +204,115 @@ fn estimate_wrapped_source_lines(text: &str, inner_w: u16) -> usize {
         .max(1)
 }
 
+fn braille_spinner_char(tick: u64) -> &'static str {
+    const SPIN: &[&str] =
+        &["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
+    SPIN[tick as usize % SPIN.len()]
+}
+
+fn sync_attempt_message(app: &AppState) -> Option<String> {
+    app.sync_progress.as_ref().and_then(|rx| {
+        let (a, m) = *rx.borrow();
+        if a > 0 {
+            Some(format!("Sync attempt {a}/{m}"))
+        } else {
+            None
+        }
+    })
+}
+
+/// Single loading UI: brand line, braille spinner + white status label, then sync attempt or kernel hint.
+fn loading_indicator_paragraph<'a>(
+    app: &AppState,
+    tick: u64,
+    outer_block: Block<'a>,
+    status_label: &'a str,
+) -> Paragraph<'a> {
+    let spin = braille_spinner_char(tick);
+    let sync_line = sync_attempt_message(app);
+    let sync_span = match sync_line {
+        Some(s) => Span::styled(s, Style::default().fg(Color::Yellow)),
+        None => Span::styled(
+            "Running wallet kernel…",
+            Style::default().fg(Color::DarkGray),
+        ),
+    };
+    Paragraph::new(vec![
+        Line::from(Span::styled(
+            SPLASH_BRAND,
+            Style::default()
+                .fg(Color::Yellow)
+                .add_modifier(Modifier::BOLD),
+        )),
+        Line::from(""),
+        Line::from(vec![
+            Span::styled(spin, Style::default().fg(Color::Green)),
+            Span::raw("  "),
+            Span::styled(status_label, Style::default().fg(Color::White)),
+        ]),
+        Line::from(""),
+        Line::from(sync_span),
+    ])
+    .alignment(Alignment::Center)
+    .wrap(Wrap { trim: true })
+    .block(outer_block)
+}
+
+fn draw_balance_sidebar(f: &mut Frame<'_>, app: &mut AppState, area: ratatui::layout::Rect, tick: u64) {
+    let focused = matches!(app.panel_focus, PanelFocus::Balance);
+    let border_style = if focused {
+        Style::default().fg(Color::Yellow)
+    } else {
+        Style::default()
+    };
+    let balance_block = Block::default()
+        .borders(Borders::ALL)
+        .border_style(border_style)
+        .title(Line::from(vec![Span::styled(
+            if focused { " Balance ◆ " } else { " Balance " },
+            Style::default().fg(Color::Cyan),
+        )]));
+
+    if app.balance_panel.loading {
+        let body = loading_indicator_paragraph(
+            app,
+            tick,
+            balance_block,
+            "Refreshing balance…",
+        );
+        f.render_widget(body, area);
+        return;
+    }
+
+    let inner = balance_block.inner(area);
+    let display = if let Some(ref e) = app.balance_panel.error {
+        if app.balance_panel.text.trim().is_empty() {
+            format!("Error\n\n{e}")
+        } else {
+            format!("{}\n\n--- error ---\n{e}", app.balance_panel.text)
+        }
+    } else if app.balance_panel.text.is_empty() {
+        "<<< balance not loaded >>>".to_string()
+    } else {
+        app.balance_panel.text.clone()
+    };
+
+    let inner_w = inner.width.max(1);
+    let base = estimate_wrapped_source_lines(&display, inner_w);
+    let measure = base.saturating_add(base / 4).saturating_add(12);
+    let visible = inner.height as usize;
+    let max_scroll = measure.saturating_sub(visible);
+    let max_u16 = u16::try_from(max_scroll).unwrap_or(u16::MAX);
+    app.balance_panel.scroll = app.balance_panel.scroll.min(max_u16);
+    let scroll_y = app.balance_panel.scroll;
+
+    let para = Paragraph::new(display)
+        .wrap(Wrap { trim: true })
+        .block(balance_block)
+        .scroll((scroll_y, 0));
+    f.render_widget(para, area);
+}
+
 fn draw_ui(f: &mut Frame<'_>, app: &mut AppState, tick: u64) {
     if matches!(app.screen, Screen::Splash) {
         super::splash::draw_splash(f, tick);
@@ -217,52 +336,64 @@ fn draw_ui(f: &mut Frame<'_>, app: &mut AppState, tick: u64) {
         s => s.clone(),
     };
     let is_running = matches!(app.screen, Screen::Running { .. });
+
+    let (menu_area, balance_area) =
+        if matches!(panel, Screen::Main { .. }) && !is_running {
+            let h = Layout::default()
+                .direction(Direction::Horizontal)
+                .constraints([Constraint::Fill(1), Constraint::Fill(1)])
+                .split(chunks[0]);
+            (h[0], Some(h[1]))
+        } else {
+            (chunks[0], None)
+        };
+
     match &panel {
         Screen::Splash => {}
         Screen::Notes { sel } => {
-            list_draw(f, app, chunks[0], "Balances", NOTES_MENU, *sel);
+            list_draw(f, app, menu_area, "Balances", NOTES_MENU, *sel);
         }
         Screen::Main { sel } => {
-            list_draw(f, app, chunks[0], "Wallet", MAIN_MENU, *sel);
+            list_draw(f, app, menu_area, "Wallet", MAIN_MENU, *sel);
         }
         Screen::Keys { sel } => {
-            list_draw(f, app, chunks[0], "Keys", KEYS_MENU, *sel);
+            list_draw(f, app, menu_area, "Keys", KEYS_MENU, *sel);
         }
         Screen::KeysImport { sel } => {
-            list_draw(f, app, chunks[0], "Import from", IMPORT_SRC, *sel);
+            list_draw(f, app, menu_area, "Import from", IMPORT_SRC, *sel);
         }
         Screen::Transactions { sel } => {
-            list_draw(f, app, chunks[0], "Transactions", TX_MENU, *sel);
+            list_draw(f, app, menu_area, "Transactions", TX_MENU, *sel);
         }
         Screen::Watch { sel } => {
-            list_draw(f, app, chunks[0], "Watch-only", WATCH_MENU, *sel);
+            list_draw(f, app, menu_area, "Watch-only", WATCH_MENU, *sel);
         }
         Screen::SignVerify { sel } => {
-            list_draw(f, app, chunks[0], "Sign / verify", SIGN_MENU, *sel);
+            list_draw(f, app, menu_area, "Sign / verify", SIGN_MENU, *sel);
         }
         Screen::Settings { sel } => {
-            list_draw(f, app, chunks[0], "Settings & help", SETTINGS_MENU, *sel);
+            list_draw(f, app, menu_area, "Settings & help", SETTINGS_MENU, *sel);
         }
         Screen::Quick { line } => {
             let t = format!("Quick command (help, exit, …)\n\n> {line}");
             let p = Paragraph::new(t).wrap(Wrap { trim: true });
-            f.render_widget(p, chunks[0]);
+            f.render_widget(p, menu_area);
         }
         Screen::TextPrompt { title, value, .. } => {
             let t = format!("{title}\n\n> {value}");
             let p = Paragraph::new(t).wrap(Wrap { trim: true });
-            f.render_widget(p, chunks[0]);
+            f.render_widget(p, menu_area);
         }
         Screen::Confirm {
             title, sel, labels, ..
         } => {
-            list_draw(f, app, chunks[0], title.as_str(), labels, *sel);
+            list_draw(f, app, menu_area, title.as_str(), labels, *sel);
         }
         Screen::CreateTx { w } => {
-            draw_create_tx(f, chunks[0], w, tick);
+            draw_create_tx(f, menu_area, w, tick);
         }
         Screen::ExitConfirm { sel } => {
-            list_draw(f, app, chunks[0], "Exit REPL?", BOOL, *sel);
+            list_draw(f, app, menu_area, "Exit REPL?", BOOL, *sel);
         }
         Screen::ErrorScreen {
             msg, sel, actions, ..
@@ -270,7 +401,7 @@ fn draw_ui(f: &mut Frame<'_>, app: &mut AppState, tick: u64) {
             let header = Paragraph::new(format!("Error\n\n{msg}\n"))
                 .wrap(Wrap { trim: true })
                 .block(Block::default().borders(Borders::BOTTOM));
-            let area = chunks[0];
+            let area = menu_area;
             let split = Layout::default()
                 .direction(Direction::Vertical)
                 .constraints([Constraint::Percentage(80), Constraint::Percentage(20)])
@@ -281,50 +412,20 @@ fn draw_ui(f: &mut Frame<'_>, app: &mut AppState, tick: u64) {
         Screen::Running { .. } => {}
     }
 
+    if let Some(bal) = balance_area {
+        draw_balance_sidebar(f, app, bal, tick);
+    }
+
     if is_running {
         let label = if let Screen::Running { label, .. } = &app.screen {
             label.as_str()
         } else {
             ""
         };
-        let spin_chars = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
-        let spin = spin_chars[tick as usize % spin_chars.len()];
-        let sync_line = app.sync_progress.as_ref().and_then(|rx| {
-            let (a, m) = *rx.borrow();
-            if a > 0 {
-                Some(format!("Sync attempt {a}/{m}"))
-            } else {
-                None
-            }
-        });
         let running_block = Block::default()
             .borders(Borders::ALL)
             .title(Span::styled("Output", Style::default().fg(Color::Cyan)));
-        let body = Paragraph::new(vec![
-            Line::from(Span::styled(
-                SPLASH_BRAND,
-                Style::default()
-                    .fg(Color::Yellow)
-                    .add_modifier(Modifier::BOLD),
-            )),
-            Line::from(""),
-            Line::from(vec![
-                Span::styled(spin, Style::default().fg(Color::Green)),
-                Span::raw("  "),
-                Span::styled(label, Style::default().fg(Color::White)),
-            ]),
-            Line::from(""),
-            Line::from(match &sync_line {
-                Some(s) => Span::styled(s.as_str(), Style::default().fg(Color::Yellow)),
-                None => Span::styled(
-                    "Running wallet kernel…",
-                    Style::default().fg(Color::DarkGray),
-                ),
-            }),
-        ])
-        .alignment(Alignment::Center)
-        .wrap(Wrap { trim: true })
-        .block(running_block);
+        let body = loading_indicator_paragraph(app, tick, running_block, label);
         f.render_widget(body, chunks[1]);
     } else {
         let output_text = if app.last_command_output.is_empty() {
@@ -374,6 +475,17 @@ fn draw_ui(f: &mut Frame<'_>, app: &mut AppState, tick: u64) {
             Span::styled("any key", Style::default().fg(Color::DarkGray)),
             Span::raw(" dismiss"),
         ])
+    } else if app.panel_focus == PanelFocus::Balance {
+        Line::from(vec![
+            Span::styled("↑/↓ j/k ", Style::default().fg(Color::Yellow)),
+            Span::raw("scroll balance  "),
+            Span::styled("PgUp/PgDn ", Style::default().fg(Color::DarkGray)),
+            Span::raw("page  "),
+            Span::styled("Enter ", Style::default().fg(Color::Yellow)),
+            Span::raw("menu  "),
+            Span::styled("Tab ", Style::default().fg(Color::DarkGray)),
+            Span::raw("panels"),
+        ])
     } else if app.panel_focus == PanelFocus::Output {
         Line::from(vec![
             Span::styled("↑/↓ j/k ", Style::default().fg(Color::Yellow)),
@@ -383,7 +495,7 @@ fn draw_ui(f: &mut Frame<'_>, app: &mut AppState, tick: u64) {
             Span::styled("Enter ", Style::default().fg(Color::Yellow)),
             Span::raw("menu  "),
             Span::styled("Tab ", Style::default().fg(Color::DarkGray)),
-            Span::raw("menu"),
+            Span::raw("panels"),
         ])
     } else {
         let parts = vec![
@@ -392,7 +504,7 @@ fn draw_ui(f: &mut Frame<'_>, app: &mut AppState, tick: u64) {
             Span::styled("Enter ", Style::default().fg(Color::DarkGray)),
             Span::raw("select  "),
             Span::styled("Tab ", Style::default().fg(Color::Yellow)),
-            Span::raw("output  "),
+            Span::raw("balance · output · menu  "),
             Span::styled("paste ", Style::default().fg(Color::DarkGray)),
             Span::raw("Cmd/Ctrl+V  "),
             Span::styled("q/Esc ", Style::default().fg(Color::DarkGray)),

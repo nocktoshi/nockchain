@@ -10,13 +10,15 @@ use super::screens::Screen;
 pub(crate) enum PanelFocus {
     #[default]
     Menu,
+    Balance,
     Output,
 }
 
 impl PanelFocus {
     pub(crate) fn toggle(self) -> Self {
         match self {
-            PanelFocus::Menu => PanelFocus::Output,
+            PanelFocus::Menu => PanelFocus::Balance,
+            PanelFocus::Balance => PanelFocus::Output,
             PanelFocus::Output => PanelFocus::Menu,
         }
     }
@@ -24,6 +26,26 @@ impl PanelFocus {
 
 /// Full REPL UI state: primary screen, optional toast after success, optional sync progress reader,
 /// and the last captured markdown/kernel output from a wallet command.
+/// Cached balance markdown for the main-menu sidebar (from `ShowBalance` / sidebar refresh).
+#[derive(Debug, Clone)]
+pub(crate) struct BalancePanelState {
+    pub text: String,
+    pub scroll: u16,
+    pub loading: bool,
+    pub error: Option<String>,
+}
+
+impl Default for BalancePanelState {
+    fn default() -> Self {
+        Self {
+            text: String::new(),
+            scroll: 0,
+            loading: false,
+            error: None,
+        }
+    }
+}
+
 pub(crate) struct AppState {
     pub screen: Screen,
     pub toast: Option<String>,
@@ -34,8 +56,11 @@ pub(crate) struct AppState {
     pub output_scroll: u16,
     /// Scroll position for menu [`List`](ratatui::widgets::List) widgets (long menus).
     pub list_state: ListState,
-    /// Whether ↑/↓ scroll the main menu or the output panel.
+    /// Whether ↑/↓ scroll the main menu, balance sidebar, or the output panel.
     pub panel_focus: PanelFocus,
+    pub balance_panel: BalancePanelState,
+    /// Bumped when starting a sidebar balance fetch or any queued wallet command — stale sidebar completions compare against this.
+    pub balance_job_nonce: u64,
 }
 
 impl AppState {
@@ -48,6 +73,8 @@ impl AppState {
             output_scroll: 0,
             list_state: ListState::default(),
             panel_focus: PanelFocus::Menu,
+            balance_panel: BalancePanelState::default(),
+            balance_job_nonce: 0,
         }
     }
 }

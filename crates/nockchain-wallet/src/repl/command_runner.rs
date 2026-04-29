@@ -36,6 +36,10 @@ async fn snapshot_repl_markdown_sink(sink: &Arc<std::sync::Mutex<String>>) -> St
 /// Job completion: command result plus captured markdown output for the TUI panel.
 pub(crate) type JobCompletion = (Result<(), NockAppError>, String);
 
+/// Background balance sidebar refresh (same `ShowBalance` path as the menu; does not use [`Screen::Running`]).
+pub(crate) type BalanceRefreshCompletion =
+    (u64, Result<(), NockAppError>, String);
+
 /// Shared wallet + snapshot for spawned REPL jobs (`repl::run` wraps with [`Arc`]).
 #[derive(Clone)]
 pub(crate) struct ReplRuntime {
@@ -57,6 +61,8 @@ pub(crate) fn schedule_wallet_command(
     if matches!(app.screen, Screen::Running { .. }) {
         return;
     }
+    app.balance_job_nonce = app.balance_job_nonce.wrapping_add(1);
+    app.balance_panel.loading = false;
     let (progress_tx, progress_rx) = tokio::sync::watch::channel((0usize, 5usize));
     {
         let mut g = rt.markdown_sink.lock().unwrap();
@@ -89,6 +95,85 @@ pub(crate) fn schedule_wallet_command(
     });
 }
 
+/// Refresh balance text for the main-menu sidebar (does not swap to [`Screen::Running`]).
+pub(crate) fn schedule_balance_sidebar_refresh(
+    app: &mut super::app_state::AppState,
+    rt: &ReplRuntime,
+    done_tx: &mpsc::UnboundedSender<BalanceRefreshCompletion>,
+) {
+    if !matches!(app.screen, Screen::Main { .. }) {
+        return;
+    }
+    if app.balance_panel.loading {
+        return;
+    }
+    app.balance_panel.loading = true;
+    app.balance_panel.error = None;
+    app.balance_job_nonce = app.balance_job_nonce.wrapping_add(1);
+    let nonce = app.balance_job_nonce;
+
+    {
+        let mut g = rt.markdown_sink.lock().unwrap();
+        g.clear();
+    }
+    let (progress_tx, progress_rx) = tokio::sync::watch::channel((0usize, 5usize));
+    app.sync_progress = Some(progress_rx);
+
+    let hooks = DispatchHooks {
+        sync_attempt: Some(progress_tx),
+        markdown_capture: Some(Arc::clone(&rt.markdown_sink)),
+    };
+
+    let rt = rt.clone();
+    let tx = done_tx.clone();
+    tokio::task::spawn_local(async move {
+        let exec_result = {
+            let mut w = rt.wallet.lock().await;
+            let mut s = rt.snapshot.lock().await;
+            execute_wallet_command(
+                &rt.cli,
+                &mut *w,
+                &Commands::ShowBalance,
+                &mut *s,
+                false,
+                hooks,
+            )
+            .await
+        };
+        let captured = snapshot_repl_markdown_sink(&rt.markdown_sink).await;
+        let _ = tx.send((nonce, exec_result, captured));
+    });
+}
+
+pub(crate) fn apply_balance_sidebar_result(
+    app: &mut super::app_state::AppState,
+    nonce: u64,
+    result: Result<(), NockAppError>,
+    captured_markdown: String,
+) {
+    app.sync_progress = None;
+    app.balance_panel.loading = false;
+    if nonce != app.balance_job_nonce {
+        return;
+    }
+    if matches!(app.screen, Screen::Running { .. }) {
+        return;
+    }
+    match result {
+        Ok(()) => {
+            app.balance_panel.text = captured_markdown;
+            app.balance_panel.error = None;
+            app.balance_panel.scroll = 0;
+        }
+        Err(e) => {
+            app.balance_panel.error = Some(e.to_string());
+            if !captured_markdown.is_empty() {
+                app.balance_panel.text = format!("{captured_markdown}\n\n--- error ---\n{e}");
+            }
+        }
+    }
+}
+
 pub(crate) fn apply_job_result(
     app: &mut super::app_state::AppState,
     result: Result<(), NockAppError>,
@@ -100,13 +185,18 @@ pub(crate) fn apply_job_result(
     match taken {
         Screen::Running { restore, cmd, .. } => match result {
             Ok(()) => {
-                app.last_command_output = captured_markdown;
+                app.last_command_output = captured_markdown.clone();
                 app.output_scroll = 0;
                 app.panel_focus = PanelFocus::Output;
                 if matches!(&cmd, Commands::CreateTx { .. }) {
                     app.screen = Screen::Transactions { sel: 0 };
                 } else {
                     app.screen = *restore;
+                }
+                if matches!(&cmd, Commands::ShowBalance) {
+                    app.balance_panel.text = captured_markdown;
+                    app.balance_panel.error = None;
+                    app.balance_panel.scroll = 0;
                 }
                 app.toast = Some(success_line(&cmd));
             }
@@ -119,6 +209,13 @@ pub(crate) fn apply_job_result(
                 }
                 app.output_scroll = 0;
                 app.panel_focus = PanelFocus::Output;
+                if matches!(&cmd, Commands::ShowBalance) {
+                    app.balance_panel.error = Some(e.to_string());
+                    if !captured_markdown.is_empty() {
+                        app.balance_panel.text =
+                            format!("{captured_markdown}\n\n--- error ---\n{e}");
+                    }
+                }
                 app.screen = Screen::ErrorScreen {
                     msg: e.to_string(),
                     sel: 0,

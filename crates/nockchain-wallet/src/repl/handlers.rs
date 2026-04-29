@@ -8,7 +8,7 @@ use tokio::sync::{mpsc, Mutex};
 use tracing::warn;
 
 use super::app_state::{AppState, PanelFocus};
-use super::command_runner::{JobCompletion, ReplRuntime};
+use super::command_runner::{BalanceRefreshCompletion, JobCompletion, ReplRuntime};
 use super::create_tx::CreateTxWizard;
 use super::screens::{ConfirmThen, ErrorCtx, ReplControl, Screen, TextThen};
 use super::tui::{
@@ -35,6 +35,7 @@ pub(super) async fn dispatch_key(
     key: KeyEvent,
     terminal: &Arc<Mutex<Term>>,
     done_tx: &mpsc::UnboundedSender<JobCompletion>,
+    balance_done_tx: &mpsc::UnboundedSender<BalanceRefreshCompletion>,
 ) -> Result<ReplControl, NockAppError> {
     if key.kind == KeyEventKind::Release {
         return Ok(ReplControl::Continue);
@@ -48,11 +49,27 @@ pub(super) async fn dispatch_key(
     if matches!(app.screen, Screen::Splash) {
         app.screen = Screen::Main { sel: 0 };
         app.panel_focus = PanelFocus::Menu;
+        super::command_runner::schedule_balance_sidebar_refresh(app, rt, balance_done_tx);
         return Ok(ReplControl::Continue);
     }
     if key.code == KeyCode::Tab {
         app.panel_focus = app.panel_focus.toggle();
         return Ok(ReplControl::Continue);
+    }
+    if app.panel_focus == PanelFocus::Balance {
+        if key.code == KeyCode::Enter {
+            app.panel_focus = PanelFocus::Menu;
+            return Ok(ReplControl::Continue);
+        }
+        if try_balance_scroll_keys(app, key) {
+            return Ok(ReplControl::Continue);
+        }
+        if !matches!(
+            key.code,
+            KeyCode::Esc | KeyCode::Char('q') | KeyCode::Char('Q')
+        ) {
+            return Ok(ReplControl::Continue);
+        }
     }
     if app.panel_focus == PanelFocus::Output {
         if key.code == KeyCode::Enter {
@@ -95,11 +112,15 @@ pub(super) async fn dispatch_paste(
     _cli: &WalletCli,
     app: &mut AppState,
     pasted: String,
+    rt: &ReplRuntime,
+    balance_done_tx: &mpsc::UnboundedSender<BalanceRefreshCompletion>,
 ) -> Result<ReplControl, NockAppError> {
     let screen = &mut app.screen;
     match screen {
         Screen::Splash => {
             app.screen = Screen::Main { sel: 0 };
+            app.panel_focus = PanelFocus::Menu;
+            super::command_runner::schedule_balance_sidebar_refresh(app, rt, balance_done_tx);
             Ok(ReplControl::Continue)
         }
         Screen::TextPrompt { value, then, .. } => {
@@ -119,6 +140,53 @@ pub(super) async fn dispatch_paste(
             Ok(ReplControl::Continue)
         }
         _ => Ok(ReplControl::Continue),
+    }
+}
+
+/// ↑/↓ when the balance sidebar is focused (scroll clamp in `draw_ui`).
+fn try_balance_scroll_keys(app: &mut AppState, key: KeyEvent) -> bool {
+    if app.panel_focus != PanelFocus::Balance {
+        return false;
+    }
+    if !matches!(app.screen, Screen::Main { .. }) {
+        return false;
+    }
+    const LINE_STEP: u16 = 3;
+    const PAGE_STEP: u16 = 6;
+    match key.code {
+        KeyCode::Up => {
+            app.balance_panel.scroll = app.balance_panel.scroll.saturating_sub(LINE_STEP);
+            true
+        }
+        KeyCode::Down => {
+            app.balance_panel.scroll = app.balance_panel.scroll.saturating_add(LINE_STEP);
+            true
+        }
+        KeyCode::PageUp => {
+            app.balance_panel.scroll = app.balance_panel.scroll.saturating_sub(PAGE_STEP);
+            true
+        }
+        KeyCode::PageDown => {
+            app.balance_panel.scroll = app.balance_panel.scroll.saturating_add(PAGE_STEP);
+            true
+        }
+        KeyCode::Home => {
+            app.balance_panel.scroll = 0;
+            true
+        }
+        KeyCode::End => {
+            app.balance_panel.scroll = u16::MAX;
+            true
+        }
+        KeyCode::Char('k') => {
+            app.balance_panel.scroll = app.balance_panel.scroll.saturating_sub(LINE_STEP);
+            true
+        }
+        KeyCode::Char('j') => {
+            app.balance_panel.scroll = app.balance_panel.scroll.saturating_add(LINE_STEP);
+            true
+        }
+        _ => false,
     }
 }
 
