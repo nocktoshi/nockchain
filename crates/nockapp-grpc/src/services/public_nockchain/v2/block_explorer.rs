@@ -15,6 +15,7 @@ use nockchain_math::noun_ext::NounMathExt;
 use nockchain_math::structs::HoonMapIter;
 use nockchain_types::tx_engine::common::{BlockHeight, Hash, Name, Page};
 use nockchain_types::tx_engine::v0::{Lock, NoteV0, RawTx};
+use nockchain_types::tx_engine::v1::tx::{Spend, Spends};
 use nockchain_types::tx_engine::v1::NoteData;
 use nockvm::noun::{Noun, SIG};
 use noun_serde::{NounDecode, NounDecodeError, NounEncode};
@@ -1538,6 +1539,8 @@ struct TxV1Input {
     name_first: Hash,
     // We don't have access to input amounts in v1 spends directly
     // The amount comes from the note being spent, which we don't have here
+    /// Schnorr pubkey base58 strings extracted from this spend's signatures.
+    signer_pubkey_b58: Vec<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -1646,47 +1649,40 @@ fn decode_v1_spends(noun: &Noun) -> Result<(Vec<TxV1Input>, u64), NounDecodeErro
         }
     }
 
+    let spends = Spends::from_noun(noun)?;
     let mut inputs = Vec::new();
     let mut total_fee = 0u64;
-    for (idx, entry) in HoonMapIter::from(*noun).enumerate() {
-        if !entry.is_cell() {
-            return Err(NounDecodeError::Custom(format!(
-                "decode_v1_spends: entry {} is not a cell (expected z-map [nname spend] pair)",
-                idx
-            )));
-        }
-        let [key, value] = entry.uncell().map_err(|_| NounDecodeError::ExpectedCell)?;
-        // key is nname (Name type)
-        let name = Name::from_noun(&key).map_err(|e| {
-            NounDecodeError::Custom(format!(
-                "decode_v1_spends: failed to decode name at entry {}: {}",
-                idx, e
-            ))
-        })?;
+    for (name, spend) in spends.0 {
+        total_fee += match &spend {
+            Spend::Legacy(s) => s.fee.0 as u64,
+            Spend::Witness(s) => s.fee.0 as u64,
+        };
         inputs.push(TxV1Input {
             name_first: name.first,
+            signer_pubkey_b58: signer_pubkeys_b58_from_spend(&spend),
         });
-
-        // Extract fee from spend: spend is [tag [sig/witness [seeds fee]]]
-        // Navigate: value.tail().tail().tail() to get fee
-        if let Ok(spend_cell) = value.as_cell() {
-            // spend_cell is [tag spend-data]
-            if let Ok(spend_data) = spend_cell.tail().as_cell() {
-                // spend_data is [sig/witness [seeds fee]]
-                if let Ok(seeds_fee) = spend_data.tail().as_cell() {
-                    // seeds_fee is [seeds fee]
-                    let fee_noun = seeds_fee.tail();
-                    if let Ok(fee_atom) = fee_noun.as_atom() {
-                        if let Ok(fee) = fee_atom.as_u64() {
-                            total_fee += fee;
-                        }
-                    }
-                }
-            }
-        }
     }
 
     Ok((inputs, total_fee))
+}
+
+/// Schnorr pubkey base58 for every key that provided a signature on this spend.
+fn signer_pubkeys_b58_from_spend(spend: &Spend) -> Vec<String> {
+    match spend {
+        Spend::Legacy(s) => s
+            .signature
+            .0
+            .iter()
+            .filter_map(|(pk, _)| pk.to_base58().ok())
+            .collect(),
+        Spend::Witness(s) => s
+            .witness
+            .pkh_signature
+            .0
+            .iter()
+            .filter_map(|e| e.pubkey.to_base58().ok())
+            .collect(),
+    }
 }
 
 fn decode_outputs_v1(noun: &Noun) -> Result<Vec<TxV1Output>, NounDecodeError> {
@@ -1893,6 +1889,7 @@ fn build_transaction_details_v0(
             amount: Some(pb_common::Nicks { value: amount }),
             source_tx_id: input.note.tail.source.hash.to_base58(),
             coinbase: input.note.tail.source.is_coinbase,
+            signer_pubkey_b58: vec![],
         });
     }
 
@@ -1954,6 +1951,7 @@ fn build_transaction_details_v1(
             amount: None,                // Amount not available in v1 spend data
             source_tx_id: String::new(), // Not directly available
             coinbase: false,             // Would need to check the note being spent
+            signer_pubkey_b58: input.signer_pubkey_b58.clone(),
         });
     }
 
