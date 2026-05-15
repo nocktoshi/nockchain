@@ -425,6 +425,7 @@ mod tests {
     use wallet_tx_builder::note_data::{
         PackedBlob, NOTE_DATA_KEY_BLOB, NOTE_DATA_KEY_LOCK, NOTE_DATA_KEY_MEMO,
     };
+    use nockvm::noun::NounAllocator;
 
     use super::*;
 
@@ -614,8 +615,9 @@ mod tests {
         let mut slab = NounSlab::<NockJammer>::new();
         for spec in specs {
             let noun = spec.to_noun(&mut slab);
-            let decoded =
-                RecipientSpec::from_noun(&noun).expect("recipient spec should decode from noun");
+            let space = slab.noun_space();
+            let decoded = RecipientSpec::from_noun(&noun, &space)
+                .expect("recipient spec should decode from noun");
             assert_eq!(decoded, spec);
         }
     }
