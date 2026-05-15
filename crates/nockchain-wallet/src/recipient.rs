@@ -421,6 +421,7 @@ pub fn planner_refund_output_template(
 #[cfg(test)]
 mod tests {
     use nockapp::noun::slab::{NockJammer, NounSlab};
+    use nockvm::noun::NounAllocator;
     use noun_serde::{NounDecode, NounEncode};
     use wallet_tx_builder::note_data::{
         PackedBlob, NOTE_DATA_KEY_BLOB, NOTE_DATA_KEY_LOCK, NOTE_DATA_KEY_MEMO,

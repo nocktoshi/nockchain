@@ -14,8 +14,8 @@ use nockchain_math::noun_ext::NounMathExtHandle;
 use nockchain_math::structs::HoonMapIter;
 use nockchain_types::tx_engine::common::{BlockHeight, Hash, Name, Page};
 use nockchain_types::tx_engine::v0::{Lock, NoteV0, RawTx};
+use nockchain_types::tx_engine::v1::note::NoteData;
 use nockchain_types::tx_engine::v1::tx::{Spend, Spends};
-use nockchain_types::tx_engine::v1::NoteData;
 use nockvm::noun::{Noun, NounAllocator, NounHandle, NounSpace, SIG};
 use noun_serde::{NounDecode, NounDecodeError, NounEncode};
 use tokio::sync::{RwLock, Semaphore};
@@ -1706,17 +1706,18 @@ impl NounDecode for DecodedTx {
 }
 
 /// Returns (inputs, total_fee)
-fn decode_v1_spends(noun: &NounHandle) -> Result<(Vec<TxV1Input>, u64), NounDecodeError> {
+fn decode_v1_spends(noun: &NounHandle<'_>) -> Result<(Vec<TxV1Input>, u64), NounDecodeError> {
     if let Ok(atom) = noun.as_atom() {
         if atom.as_u64()? == 0 {
             return Ok((Vec::new(), 0));
         }
     }
 
-    let spends = Spends::from_noun_handle(noun)?;
+    let space = noun.space();
+    let Spends(pairs) = Spends::from_noun(&noun.noun(), space)?;
     let mut inputs = Vec::new();
     let mut total_fee = 0u64;
-    for (name, spend) in spends.0 {
+    for (name, spend) in pairs {
         total_fee += match &spend {
             Spend::Legacy(s) => s.fee.0 as u64,
             Spend::Witness(s) => s.fee.0 as u64,
@@ -1860,8 +1861,7 @@ fn decode_outputs_v1(noun: &NounHandle) -> Result<Vec<TxV1Output>, NounDecodeErr
                 idx
             ))
         })?;
-        let note_data_noun = note_tail.head();
-        let note_data = NoteData::from_noun_handle(&note_data_noun).map_err(|e| {
+        let note_data = NoteData::from_noun_handle(&note_tail.head()).map_err(|e| {
             NounDecodeError::Custom(format!(
                 "decode_outputs_v1: output {} note-data parse failed: {e:?}",
                 idx
@@ -2610,7 +2610,7 @@ mod tests {
     use bytes::Bytes;
     use nockchain_math::belt::Belt;
     use nockchain_types::tx_engine::common::{BlockHeight, Hash};
-    use nockchain_types::tx_engine::v1::{NoteData, NoteDataEntry};
+    use nockchain_types::tx_engine::v1::note::{NoteData, NoteDataEntry};
     use nockvm::noun::NounAllocator;
     use noun_serde::{NounDecode, NounEncode};
 

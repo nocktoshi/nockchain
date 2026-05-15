@@ -37,8 +37,8 @@ fn encode_blob_belts(bytes: &[u8]) -> Vec<Belt> {
 }
 
 /// Decodes a jammed  blob (`encode_blob_belts`).
-fn decode_blob_bytes(noun: &Noun) -> Result<Vec<u8>, NoteDataDecodeError> {
-    let belts = Vec::<Belt>::from_noun(noun)
+fn decode_blob_bytes(noun: &Noun, space: &NounSpace) -> Result<Vec<u8>, NoteDataDecodeError> {
+    let belts = Vec::<Belt>::from_noun(noun, space)
         .map_err(|err| NoteDataDecodeError::NounDecode(format!("blob belt list: {err}")))?;
     decode_len_prefixed_blob(&belts).ok_or_else(|| {
         NoteDataDecodeError::NounDecode("blob: expected length-prefixed belt list".into())
@@ -79,8 +79,11 @@ impl noun_serde::NounEncode for PackedBlob {
 }
 
 impl noun_serde::NounDecode for PackedBlob {
-    fn from_noun(noun: &nockvm::noun::Noun) -> Result<Self, noun_serde::NounDecodeError> {
-        let belts = Vec::<Belt>::from_noun(noun)?;
+    fn from_noun(
+        noun: &nockvm::noun::Noun,
+        space: &NounSpace,
+    ) -> Result<Self, noun_serde::NounDecodeError> {
+        let belts = Vec::<Belt>::from_noun(noun, space)?;
         decode_len_prefixed_blob(&belts)
             .map(PackedBlob)
             .ok_or_else(|| noun_serde::NounDecodeError::Custom("invalid packed blob".into()))
@@ -432,7 +435,8 @@ impl MemoDataPayload {
         let mut stack = NockStack::new(NOCK_STACK_SIZE, 0);
         let noun = Noun::cue_bytes_slice(&mut stack, blob.as_ref())
             .map_err(|error| NoteDataDecodeError::InvalidJam(error.to_string()))?;
-        let bytes = decode_blob_bytes(&noun)?;
+        let space = stack.noun_space();
+        let bytes = decode_blob_bytes(&noun, &space)?;
         Ok(Self { bytes })
     }
 }
