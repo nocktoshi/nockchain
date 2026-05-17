@@ -15,6 +15,8 @@
       kernel-state-4
       kernel-state-5
       kernel-state-6
+      kernel-state-7
+      kernel-state-8
   ==
 ::
 +$  kernel-state-0
@@ -80,8 +82,69 @@
       constants=blockchain-constants:v0:dt
   ==
 ::
+::  frozen pre-ASERT snapshot of blockchain-constants:v1 (without the five
+::  asert-* fields appended in this PR). used to decode old %6 states that
+::  were serialized before the schema change.
++$  blockchain-constants-v1-pre-asert
+  $:  v1-phase=@
+      bythos-phase=@
+      data=[max-size=@ min-fee=@]
+      base-fee=@
+      input-fee-divisor=@
+      blockchain-constants:v0:dt
+  ==
+::
 +$  kernel-state-6
   $:  %6
+      c=consensus-state-6
+      a=admin-state-6
+      m=mining-state-6
+    ::
+      d=derived-state-6
+      constants=blockchain-constants-v1-pre-asert
+  ==
+::
+::  frozen phase-1 snapshot of blockchain-constants:v1 (with the five
+::  asert-* fields from kernel-state-7 but WITHOUT the phase-2
+::  asert-anchor-min-timestamp field appended in this PR). used to decode
+::  old %7 states that were serialized before the schema change.
++$  blockchain-constants-v1-phase-1
+  $:  v1-phase=@
+      bythos-phase=@
+      data=[max-size=@ min-fee=@]
+      base-fee=@
+      input-fee-divisor=@
+      blockchain-constants:v0:dt
+      asert-phase=@
+      asert-anchor-height=@
+      asert-anchor-target-atom=@
+      asert-ideal-block-time=@
+      asert-half-life=@
+  ==
+::
+::  kernel-state-7 originally had the same shape as kernel-state-6 but
+::  tracked the schema change in blockchain-constants:v1: five ASERT fields
+::  (asert-phase, anchor-height, anchor-target-atom, ideal-block-time,
+::  half-life) were appended to the v1 wrapper in tx-engine-1.hoon. now
+::  that a sixth field (asert-anchor-min-timestamp) has been added by
+::  phase 2 of 014-aletheia, kernel-state-7 pins the frozen phase-1
+::  snapshot so old %7 states still decode.
++$  kernel-state-7
+  $:  %7
+      c=consensus-state-6
+      a=admin-state-6
+      m=mining-state-6
+    ::
+      d=derived-state-6
+      constants=blockchain-constants-v1-phase-1
+  ==
+::
+::  kernel-state-8 carries the full post-phase-2 blockchain-constants:v1
+::  (six asert-* fields, including the hardcoded anchor median-of-11).
+::  the state-7-to-8 upgrade discards the old constants noun and lets
+::  +update-constants reseed from *blockchain-constants:t on mainnet.
++$  kernel-state-8
+  $:  %8
       c=consensus-state-6
       a=admin-state-6
       m=mining-state-6
@@ -90,7 +153,7 @@
       constants=blockchain-constants:v1:dt
   ==
 ::
-+$  kernel-state  kernel-state-6
++$  kernel-state  kernel-state-8
 ::
 +$  consensus-state-0
   $+  consensus-state-0

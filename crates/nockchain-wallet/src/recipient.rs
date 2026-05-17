@@ -14,7 +14,6 @@ const MAX_BLOB_UTF8_BYTES: usize = 256 * 1024;
 
 /// Trims and checks size; `None` if absent or empty/whitespace-only.
 pub(crate) fn validate_blob_field(blob: Option<String>) -> Result<Option<Vec<u8>>, NockAppError> {
-pub(crate) fn validate_blob_field(blob: Option<String>) -> Result<Option<Vec<u8>>, NockAppError> {
     let Some(raw) = blob else {
         return Ok(None);
     };
@@ -422,6 +421,7 @@ pub fn planner_refund_output_template(
 #[cfg(test)]
 mod tests {
     use nockapp::noun::slab::{NockJammer, NounSlab};
+    use nockvm::noun::NounAllocator;
     use noun_serde::{NounDecode, NounEncode};
     use wallet_tx_builder::note_data::{
         PackedBlob, NOTE_DATA_KEY_BLOB, NOTE_DATA_KEY_LOCK, NOTE_DATA_KEY_MEMO,
@@ -615,8 +615,9 @@ mod tests {
         let mut slab = NounSlab::<NockJammer>::new();
         for spec in specs {
             let noun = spec.to_noun(&mut slab);
-            let decoded =
-                RecipientSpec::from_noun(&noun).expect("recipient spec should decode from noun");
+            let space = slab.noun_space();
+            let decoded = RecipientSpec::from_noun(&noun, &space)
+                .expect("recipient spec should decode from noun");
             assert_eq!(decoded, spec);
         }
     }

@@ -842,11 +842,12 @@
         ^-  @t
         ?~  memo-val=(~(get z-by:zo data) %memo)
           'N/A'
-        ?~  soft-memo=((soft blob-data:wt) u.memo-val)
+        ?~  soft-blob=((soft blob-data:wt) u.memo-val)
           ~>  %slog.[2 'memo data in note is malformed']  'N/A'
-        ?~  txt=(packed-blob-to-utf8-tape u.soft-memo)
-          ~>  %slog.[2 'memo data in note is malformed']  'N/A'
-        u.txt
+        =/  packed=(unit @t)  (packed-blob-to-utf8-tape u.soft-blob)
+        ?~  packed
+          (crip (turn u.soft-blob @tD))
+        u.packed
     ::
       ++  blob-display
         |=  data=note-data:v1:transact

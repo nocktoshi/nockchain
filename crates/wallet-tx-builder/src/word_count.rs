@@ -199,7 +199,7 @@ impl<'a> WordCountEstimator<'a> {
                 1 + beid_words + 5 + 5 + 1
             }
             DecodedNoteDataPayload::Memo(memo) | DecodedNoteDataPayload::Blob(memo) => {
-                // blob (`Vec<Belt>`): 1 + ceil(n/4) list elements, one leaf per belt.
+                // Packed belt list: 1 + ceil(n/4) list elements, one leaf per belt.
                 let n = memo.bytes.len() as u64;
                 let belt_count = 1 + n.saturating_add(3) / 4;
                 Self::estimate_list_words_len(belt_count, 1)
@@ -368,7 +368,8 @@ mod tests {
         let fixture_bytes = include_bytes!("../tests/fixtures/note_data_fixtures.jam");
         let mut stack = NockStack::new(NOCK_STACK_SIZE, 0);
         let noun = Noun::cue_bytes_slice(&mut stack, fixture_bytes).expect("fixture jam must cue");
-        Vec::<FixtureEntry>::from_noun(&noun).expect("fixture noun must decode")
+        let space = stack.noun_space();
+        Vec::<FixtureEntry>::from_noun(&noun, &space).expect("fixture noun must decode")
     }
 
     fn normalize_case_tag(tag: &str) -> &str {

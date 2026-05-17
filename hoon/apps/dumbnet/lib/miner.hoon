@@ -1,6 +1,7 @@
 /=  dk  /apps/dumbnet/lib/types
 /=  sp  /common/stark/prover
 /=  dumb-transact  /common/tx-engine
+/=  asert  /apps/dumbnet/lib/asert
 /=  *  /common/zoon
 ::
 :: everything to do with mining and mining state
@@ -212,7 +213,16 @@
   =.  candidate-block.m
     ?^  -.candidate-block.m
       candidate-block.m(coinbase (new:v0:coinbase-split:t new-assets v0-shares.m))
-    candidate-block.m(coinbase (new:v1:coinbase-split:t new-assets shares.m))
+    ::  v1 candidate: dispatch on activation height. Post-activation
+    ::  uses the fee-aware 80/20 fund-aware builder (014-aletheia) which
+    ::  takes emission and fees separately so the fund slot is computed
+    ::  from the subsidy alone; pre-activation retains the existing
+    ::  proportional-allocation arm.
+    ?:  (pre-asert-activation:t height.candidate-block.m)
+      candidate-block.m(coinbase (new:v1:coinbase-split:t new-assets shares.m))
+    =/  emission=coins:t
+      (emission-calc:coinbase:t height.candidate-block.m)
+    candidate-block.m(coinbase (new-with-fund-share:v1:coinbase-split:t emission new-fees shares.m))
   ::  check size of candidate block
   ?.  candidate-block-below-max-size
     ~>  %slog.[3 log-message-exceeds-max-size]
@@ -268,16 +278,44 @@
   ~>  %slog.[0 log-message]
   =/  parent-local=local-page:t  (~(got z-by blocks.c) u.heaviest-block.c)
   =/  parent=page:t  (to-page:local-page:t parent-local)
+  ::  determine the target the candidate (child of .parent) must have.
+  ::    post-activation: compute aserti3-2d fresh from the anchor and the
+  ::    parent's stored median-of-11. pre-activation: read the next target
+  ::    stored at parent.digest by the epoch rule.
+  =/  candidate-height=@  +(~(height get:page:t parent))
+  =/  candidate-target=bignum:bignum:t
+    ?:  (post-asert-activation:t candidate-height)
+      =/  parent-min-ts=@
+        (~(got z-by min-timestamps.c) u.heaviest-block.c)
+      ::  phase 2 of 014-aletheia: the anchor's median-of-11 is a
+      ::  hardcoded protocol constant. paired with the [%65.499 ...]
+      ::  checkpoint, only the canonical anchor block is admissible
+      ::  at the anchor height, so reading the constant is consensus-
+      ::  identical to the phase-1 parent-walk.
+      =/  anchor-min-ts=@
+        asert-anchor-min-timestamp.blockchain-constants
+      %-  chunk:bignum:t
+      %-  compute-target:asert
+      :*  asert-anchor-target-atom.blockchain-constants
+          anchor-min-ts
+          asert-anchor-height.blockchain-constants
+          parent-min-ts
+          candidate-height
+          asert-ideal-block-time.blockchain-constants
+          asert-half-life.blockchain-constants
+          max-target-atom:t
+      ==
+    (~(got z-by targets.c) u.heaviest-block.c)
   =.  candidate-block.m
     ?^  -.parent
       ::  v0 parent -
       ::    if candidate height is less than cutoff, use v0 new-candidate with v0 shares
       ::    otherwise use v1 new-candidate with v1 shares
       ?:  (lth +(height.parent) v1-phase.blockchain-constants)
-        (new-candidate:v0:page:t parent now (~(got z-by targets.c) u.heaviest-block.c) v0-shares.m)
-      (new-candidate:page:t parent now (~(got z-by targets.c) u.heaviest-block.c) shares.m)
+        (new-candidate:v0:page:t parent now candidate-target v0-shares.m)
+      (new-candidate:page:t parent now candidate-target shares.m asert-phase.blockchain-constants)
     ::  v1 parent - use v1 new-candidate with v1 shares
-    (new-candidate:page:t parent now (~(got z-by targets.c) u.heaviest-block.c) shares.m)
+    (new-candidate:page:t parent now candidate-target shares.m asert-phase.blockchain-constants)
   =.  candidate-acc.m
     %+  new:tx-acc:t
       (~(get z-by balance.c) u.heaviest-block.c)

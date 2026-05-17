@@ -50,7 +50,7 @@ use nockchain_types::tx_engine::common::Name;
 use nockchain_types::tx_engine::v1::tx::{LockPrimitive, SpendCondition};
 use nockchain_types::{default_fakenet_blockchain_constants, v0, v1};
 use nockvm::jets::cold::Nounable;
-use nockvm::noun::{Atom, Cell, IndirectAtom, Noun, D, NO, SIG, T, YES};
+use nockvm::noun::{Atom, Cell, IndirectAtom, Noun, NounAllocator, D, NO, SIG, T, YES};
 use noun_serde::prelude::*;
 #[cfg(test)]
 use recipient::BRIDGE_LOCK_ROOT_DEFAULT_B58;
@@ -125,10 +125,348 @@ async fn main() -> Result<(), NockAppError> {
         ));
     }
 
+    let requires_sync = match &cli.command {
+        // Commands that DON'T need syncing either because they don't sync
+        // or they don't interact with the chain
+        Commands::Keygen
+        | Commands::DeriveChild { .. }
+        | Commands::ImportKeys { .. }
+        | Commands::ExportKeys
+        | Commands::SignMessage { .. }
+        | Commands::VerifyMessage { .. }
+        | Commands::SignHash { .. }
+        | Commands::VerifyHash { .. }
+        | Commands::ExportMasterPubkey
+        | Commands::ImportMasterPubkey { .. }
+        | Commands::ListActiveAddresses
+        | Commands::SetActiveMasterAddress { .. }
+        | Commands::ListMasterAddresses
+        | Commands::ShowSeedphrase
+        | Commands::ShowMasterZPub
+        | Commands::ShowMasterZPrv
+        | Commands::ShowKeyTree { .. }
+        | Commands::ShowTx { .. }
+        | Commands::SignMultisigTx { .. }
+        | Commands::Watch { .. }
+        | Commands::TxAccepted { .. } => false,
+
+        // All other commands DO need sync
+        _ => true,
+    };
+
+    let mut poke = match &cli.command {
+        Commands::Keygen => {
+            let mut entropy = [0u8; 32];
+            let mut salt = [0u8; 16];
+            getrandom::fill(&mut entropy).map_err(|e| CrownError::Unknown(e.to_string()))?;
+            getrandom::fill(&mut salt).map_err(|e| CrownError::Unknown(e.to_string()))?;
+            Wallet::keygen(&entropy, &salt)
+        }
+        Commands::DeriveChild {
+            index,
+            hardened,
+            label,
+        } => Wallet::derive_child(*index, *hardened, label),
+        Commands::SignMessage {
+            message,
+            message_file,
+            message_pos,
+            index,
+            hardened,
+        } => {
+            let bytes = if let Some(m) = message.clone().or(message_pos.clone()) {
+                m.as_bytes().to_vec()
+            } else if let Some(path) = message_file {
+                fs::read(path).map_err(|e| {
+                    CrownError::Unknown(format!("Failed to read message file: {}", e))
+                })?
+            } else {
+                return Err(CrownError::Unknown(
+                    "either --message or --message-file must be provided".into(),
+                )
+                .into());
+            };
+            Wallet::sign_message(&bytes, *index, *hardened)
+        }
+        Commands::SignHash {
+            hash_b58,
+            index,
+            hardened,
+        } => Wallet::sign_hash(hash_b58, *index, *hardened),
+        Commands::VerifyMessage {
+            message,
+            message_file,
+            message_pos,
+            signature_path,
+            signature_pos,
+            pubkey,
+            pubkey_pos,
+        } => {
+            let msg_bytes = if let Some(m) = message.clone().or(message_pos.clone()) {
+                m.as_bytes().to_vec()
+            } else if let Some(path) = message_file {
+                fs::read(path).map_err(|e| {
+                    CrownError::Unknown(format!("Failed to read message file: {}", e))
+                })?
+            } else {
+                return Err(CrownError::Unknown(
+                    "either --message or --message-file must be provided".into(),
+                )
+                .into());
+            };
+            let sig_path = signature_path
+                .clone()
+                .or(signature_pos.clone())
+                .ok_or_else(|| {
+                    NockAppError::from(CrownError::Unknown(
+                        "--signature or SIGNATURE_FILE positional is required".into(),
+                    ))
+                })?;
+            let pk_b58 = pubkey.clone().or(pubkey_pos.clone()).ok_or_else(|| {
+                NockAppError::from(CrownError::Unknown(
+                    "--pubkey or PUBKEY positional is required".into(),
+                ))
+            })?;
+
+            let sig_bytes = fs::read(sig_path)
+                .map_err(|e| CrownError::Unknown(format!("Failed to read signature: {}", e)))?;
+            Wallet::verify_message(&msg_bytes, &sig_bytes, &pk_b58)
+        }
+        Commands::VerifyHash {
+            hash_b58,
+            signature_path,
+            signature_pos,
+            pubkey,
+            pubkey_pos,
+        } => {
+            let sig_path = signature_path
+                .clone()
+                .or(signature_pos.clone())
+                .ok_or_else(|| {
+                    NockAppError::from(CrownError::Unknown(
+                        "--signature or SIGNATURE_FILE positional is required".into(),
+                    ))
+                })?;
+            let pk_b58 = pubkey.clone().or(pubkey_pos.clone()).ok_or_else(|| {
+                NockAppError::from(CrownError::Unknown(
+                    "--pubkey or PUBKEY positional is required".into(),
+                ))
+            })?;
+            let sig_bytes = fs::read(sig_path)
+                .map_err(|e| CrownError::Unknown(format!("Failed to read signature: {}", e)))?;
+            Wallet::verify_hash(hash_b58, &sig_bytes, &pk_b58)
+        }
+        Commands::ImportKeys {
+            file,
+            key,
+            seedphrase,
+            version,
+        } => {
+            if let Some(file_path) = file {
+                Wallet::import_keys(file_path)
+            } else if let Some(extended_key) = key {
+                Wallet::import_extended(extended_key)
+            } else if let Some(seed) = seedphrase {
+                let version = version.ok_or_else(|| {
+                    NockAppError::from(CrownError::Unknown(
+                        "--version is required when using --seedphrase".into(),
+                    ))
+                })?;
+                // normalize seedphrase to have exactly one space between words
+                let normalized_seed = seed.split_whitespace().collect::<Vec<&str>>().join(" ");
+                Wallet::import_seed_phrase(&normalized_seed, version)
+            } else {
+                return Err(CrownError::Unknown(
+                    "One of --file, --key, --seedphrase, or --master-privkey must be provided for import-keys".to_string(),
+                )
+                .into());
+            }
+        }
+        Commands::Watch { subcommand } => match subcommand {
+            WatchSubcommand::Address { address } => match normalize_watch_address(address.clone())?
+            {
+                Some(normalized) => Wallet::watch_address(&normalized),
+                None => {
+                    return Err(
+                        CrownError::Unknown("Invalid watch identifier provided".into()).into(),
+                    );
+                }
+            },
+            WatchSubcommand::Pubkey { pubkey } => match normalize_watch_address(pubkey.clone())? {
+                Some(normalized) => Wallet::watch_address(&normalized),
+                None => {
+                    return Err(CrownError::Unknown("Invalid pubkey provided".into()).into());
+                }
+            },
+            //WatchSubcommand::FirstName { first_name } => {
+            //    match normalize_first_name(first_name.clone())? {
+            //        Some(name) => Wallet::watch_first_name(&name),
+            //        None => {
+            //            return Err(
+            //                CrownError::Unknown("Invalid first name provided".into()).into()
+            //            );
+            //        }
+            //    }
+            //}
+            WatchSubcommand::Multisig {
+                threshold,
+                participants,
+            } => Wallet::watch_multisig(*threshold, participants),
+        },
+        Commands::ExportKeys => Wallet::export_keys(),
+        Commands::ListNotes => Wallet::list_notes(),
+        Commands::ListNotesByAddress { address } => {
+            if let Some(pk) = address {
+                Wallet::list_notes_by_address(pk)
+            } else {
+                return Err(CrownError::Unknown("Address is required".into()).into());
+            }
+        }
+        Commands::ListNotesByAddressCsv { address } => Wallet::list_notes_by_address_csv(address),
+        Commands::CreateTx { .. } => {
+            // Planner-backed create-tx runs after sync once we have a fresh snapshot.
+            Wallet::show_balance()
+        }
+        Commands::MigrateV0Notes { .. } => {
+            // Planner-backed v0 migration runs after sync once we have a fresh snapshot.
+            Wallet::show_balance()
+        }
+        Commands::SignMultisigTx {
+            transaction,
+            sign_keys,
+        } => Wallet::sign_multisig_tx(transaction, sign_keys.as_deref()),
+        Commands::SendTx { transaction } => Wallet::send_tx(transaction),
+        Commands::ShowTx { transaction } => Wallet::show_tx(transaction),
+        Commands::ShowBalance => Wallet::show_balance(),
+        Commands::ExportMasterPubkey => Wallet::export_master_pubkey(),
+        Commands::ImportMasterPubkey { key_path } => Wallet::import_master_pubkey(key_path),
+        Commands::ListActiveAddresses => Wallet::list_active_addresses(),
+        Commands::SetActiveMasterAddress { address_b58 } => {
+            Wallet::set_active_master_address(address_b58)
+        }
+        Commands::ListMasterAddresses => Wallet::list_master_addresses(),
+        Commands::ShowSeedphrase => Wallet::show_seed_phrase(),
+        Commands::ShowMasterZPub => Wallet::show_master_pubkey(),
+        Commands::ShowMasterZPrv => Wallet::show_master_privkey(),
+        Commands::ShowKeyTree { include_values } => Wallet::show_key_tree(*include_values),
+        Commands::TxAccepted { .. } => {
+            unreachable!("transaction-accepted handled earlier")
+        }
+    }?;
+
+    // If this command requires sync, update the balance using a synchronous poke
+    if requires_sync {
+        info!(
+            "Command requires syncing the current balance, connecting to Nockchain gRPC server..."
+        );
+        let mut pubkey_peek_slab = NounSlab::new();
+        let tracked_tag = make_tas(&mut pubkey_peek_slab, "tracked-pubkeys").as_noun();
+        let path = T(&mut pubkey_peek_slab, &[tracked_tag, SIG]);
+        pubkey_peek_slab.set_root(path);
+        let pubkey_slab = wallet.app.peek_handle(pubkey_peek_slab).await?;
+
+        let mut first_name_peek_slab = NounSlab::new();
+        let tracked_tag = make_tas(&mut first_name_peek_slab, "tracked-names").as_noun();
+        let path = T(&mut first_name_peek_slab, &[tracked_tag, SIG]);
+        first_name_peek_slab.set_root(path);
+        let first_name_slab = wallet.app.peek_handle(first_name_peek_slab).await?;
+
+        let pubkeys = if let Some(pubkey_slab) = pubkey_slab {
+            pubkey_slab
+                .to_vec()
+                .iter()
+                .map(|key| {
+                    let space = key.noun_space();
+                    String::from_noun(unsafe { key.root() }, &space)
+                })
+                .collect::<Result<Vec<String>, NounDecodeError>>()?
+                .into_iter()
+                .filter_map(|value| match normalize_watch_address(value) {
+                    Ok(Some(normalized)) => Some(Ok(normalized)),
+                    Ok(None) => None,
+                    Err(err) => Some(Err(err)),
+                })
+                .collect::<Result<Vec<String>, NockAppError>>()?
+        } else {
+            Vec::new()
+        };
+
+        let first_names: Vec<String> = if let Some(name_slab) = first_name_slab {
+            let names_noun = unsafe { name_slab.root() };
+            let name_space = name_slab.noun_space();
+            <Vec<String>>::from_noun(names_noun, &name_space)?
+        } else {
+            Vec::new()
+        };
+
+        let connection_target = cli.connection.target();
+        let sync_result =
+            connection::sync_wallet_balance(&mut wallet, &connection_target, pubkeys, first_names)
+                .await?;
+
+        synced_snapshot_for_planner = sync_result.normalized_snapshot;
+
+        for poke in sync_result.pokes {
+            let _ = wallet
+                .app
+                .poke(SystemWire.to_wire(), poke)
+                .await
+                .expect("poke should succeed");
+        }
+    }
+
+    if let Commands::MigrateV0Notes { destination } = &cli.command {
+        let mut prepared = wallet
+            .prepare_migrate_v0_notes_per_signer(
+                synced_snapshot_for_planner.take(),
+                destination.clone(),
+            )
+            .await?;
+        if prepared.summary.created_count == 0 {
+            let markdown = Wallet::format_migrate_v0_notes_summary(&prepared.summary);
+            let skin = MadSkin::default_dark();
+            println!("{}", skin.term_text(&markdown));
+            return Err(NockAppError::OtherError(
+                "No v0 migration transactions were created".to_string(),
+            ));
+        }
+
+        let tx_dir = Path::new("txs");
+        let before = Wallet::snapshot_written_txs(tx_dir).await?;
+        let (noun, operation) = prepared.take_poke().ok_or_else(|| {
+            NockAppError::from(CrownError::Unknown(
+                "migrate-v0-notes prepared migration transactions but did not produce a batch create poke"
+                    .to_string(),
+            ))
+        })?;
+        wallet
+            .app
+            .add_io_driver(one_punch_driver(noun, operation))
+            .await;
+        wallet.app.add_io_driver(file_driver()).await;
+        wallet.app.add_io_driver(markdown_driver()).await;
+        wallet.app.add_io_driver(exit_driver()).await;
+
+        match wallet.app.run().await {
+            Ok(_) => {
+                let after = Wallet::snapshot_written_txs(tx_dir).await?;
+                let tx_paths = Wallet::detect_written_tx_paths(&before, &after)?;
+                let summary = prepared.finalize(tx_paths)?;
+                let markdown = Wallet::format_migrate_v0_notes_summary(&summary);
+                let skin = MadSkin::default_dark();
+                println!("{}", skin.term_text(&markdown));
+                info!("Command executed successfully");
+            }
+            Err(e) => {
+                error!("Command failed: {}", e);
+                return Err(e);
+            }
+        }
+        return Ok(());
+    }
     if matches!(cli.command, Commands::Repl) {
         return repl::run(&cli, wallet, synced_snapshot_for_planner).await;
     }
-
     crate::dispatch::execute_wallet_command(
         &cli,
         &mut wallet,
@@ -187,7 +525,7 @@ impl Wallet {
         slab.modify(|_| vec![tag, SIG]);
         let result = self.app.peek(slab).await?;
         let is_fakenet: Option<Option<bool>> =
-            unsafe { <Option<Option<bool>>>::from_noun(result.root())? };
+            unsafe { <Option<Option<bool>>>::from_noun(result.root(), &result.noun_space())? };
         match is_fakenet {
             Some(Some(res)) => Ok(res),
             _ => Err(NockAppError::OtherError(
@@ -1123,6 +1461,6 @@ fn format_transaction_accepted_markdown(tx_id: &str, accepted: bool) -> String {
 pub fn from_bytes(stack: &mut NounSlab, bytes: &[u8]) -> Atom {
     unsafe {
         let mut tas_atom = IndirectAtom::new_raw_bytes(stack, bytes.len(), bytes.as_ptr());
-        tas_atom.normalize_as_atom()
+        tas_atom.normalize_as_atom_stack()
     }
 }
