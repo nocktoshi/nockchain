@@ -2609,7 +2609,8 @@ mod tests {
     use bytes::Bytes;
     use nockchain_math::belt::Belt;
     use nockchain_types::tx_engine::common::{BlockHeight, Hash};
-    use nockchain_types::tx_engine::v1::NoteDataEntry;
+    use nockchain_types::tx_engine::v1::note::{NoteData, NoteDataEntry};
+    use nockvm::noun::NounAllocator;
     use noun_serde::{NounDecode, NounEncode};
 
     use super::*;
