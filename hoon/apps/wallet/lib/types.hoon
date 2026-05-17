@@ -670,6 +670,7 @@
   +$  effect
     $%  file-effect
         [%markdown @t]
+        ::  structured dumps: [%raw inner] (e.g. [%raw [%wbal-v1 …]], [%raw [%wnote-v1 …]])
         [%raw *]
         [%grpc grpc-effect]
         [%nockchain-grpc nockchain-grpc-effect]

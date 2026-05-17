@@ -130,6 +130,14 @@ impl NockAppExit {
             Ok(())
         }
     }
+
+    /// End the current [`NockApp::run`] loop with success without stopping the serf.
+    ///
+    /// Use this in multi-command sessions (e.g. an interactive REPL) when the kernel emits
+    /// a successful exit but the process should keep running further [`NockApp::run`] loops.
+    pub fn complete_run(&self) -> impl Future<Output = NockAppResult> + Send {
+        self.done(Ok(()))
+    }
 }
 
 impl<J: Jammer + Send + 'static> NockApp<J> {

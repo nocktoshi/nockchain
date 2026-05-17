@@ -349,11 +349,11 @@ pub fn planner_recipient_output(
             } else {
                 Vec::new()
             };
-            if let Some(packed) = memo {
-                note_data.push(TypedNoteDataEntry::memo(packed.0.clone()).to_raw_entry());
-            }
             if let Some(packed) = blob {
                 note_data.push(TypedNoteDataEntry::blob(packed.0.clone()).to_raw_entry());
+            }
+            if let Some(packed) = memo {
+                note_data.push(TypedNoteDataEntry::memo(packed.0.clone()).to_raw_entry());
             }
             Ok(PlannedOutput {
                 lock_root: lock_root(&lock)?,
@@ -370,11 +370,11 @@ pub fn planner_recipient_output(
         } => {
             let lock = pkh_lock(*threshold, addresses);
             let mut note_data = vec![RawNoteDataEntry::from_lock(lock.clone())];
-            if let Some(packed) = memo {
-                note_data.push(TypedNoteDataEntry::memo(packed.0.clone()).to_raw_entry());
-            }
             if let Some(packed) = blob {
                 note_data.push(TypedNoteDataEntry::blob(packed.0.clone()).to_raw_entry());
+            }
+            if let Some(packed) = memo {
+                note_data.push(TypedNoteDataEntry::memo(packed.0.clone()).to_raw_entry());
             }
             Ok(PlannedOutput {
                 lock_root: lock_root(&lock)?,
@@ -426,8 +426,6 @@ mod tests {
     use wallet_tx_builder::note_data::{
         PackedBlob, NOTE_DATA_KEY_BLOB, NOTE_DATA_KEY_LOCK, NOTE_DATA_KEY_MEMO,
     };
-
-    use wallet_tx_builder::note_data::NOTE_DATA_KEY_BLOB;
 
     use super::*;
 

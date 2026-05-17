@@ -1,0 +1,49 @@
+//! Exit-effect handling for interactive sessions that run the kernel multiple times on one serf.
+
+use tracing::{debug, error};
+
+use crate::nockapp::driver::{make_driver, IODriverFn};
+use crate::nockapp::EXIT_OK;
+use crate::NounExt;
+
+/// Like [`super::exit::exit`], but on exit code 0 completes the current [`crate::NockApp::run`]
+/// without shutting down the serf, so another `run` can be started.
+///
+/// Non-zero exits still go through the normal exit path (save + shutdown).
+pub fn complete_run_on_exit() -> IODriverFn {
+    make_driver(|handle| async move {
+        debug!("complete_run_on_exit: waiting for effects");
+        loop {
+            match handle.next_effect().await {
+                Ok(eff) => {
+                    let exit_code: Option<usize> = unsafe {
+                        let noun = eff.root();
+                        if let Ok(cell) = noun.as_cell() {
+                            if cell.head().eq_bytes(b"exit") && cell.tail().is_atom() {
+                                if let Ok(u) = cell.tail().as_atom().and_then(|a| a.as_u64()) {
+                                    Some(u as usize)
+                                } else {
+                                    Some(1)
+                                }
+                            } else {
+                                None
+                            }
+                        } else {
+                            None
+                        }
+                    };
+                    if let Some(code) = exit_code {
+                        if code == EXIT_OK {
+                            handle.exit.complete_run().await?;
+                        } else {
+                            handle.exit.exit(code).await?;
+                        }
+                    }
+                }
+                Err(e) => {
+                    error!("Error receiving effect: {:?}", e);
+                }
+            }
+        }
+    })
+}
