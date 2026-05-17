@@ -64,12 +64,15 @@ fn init_git_repo(path: &Path, files: &[(&str, &str)]) -> String {
 
 #[test]
 fn template_git_file_url_resolves() {
-    // Set up: a temp git repo with `templates/demo/{Cargo.toml, hoon/app/app.hoon}`.
+    // Set up: a temp git repo with `templates/demo/{Cargo.toml.hbs, hoon/app/app.hoon}`.
     let repo = TempDir::new().unwrap();
     let _commit = init_git_repo(
         repo.path(),
         &[
-            ("templates/demo/Cargo.toml", "name = \"{{project_name}}\"\n"),
+            (
+                "templates/demo/Cargo.toml.hbs",
+                "name = \"{{project_name}}\"\n",
+            ),
             ("templates/demo/hoon/app/app.hoon", "::  marker\n"),
         ],
     );

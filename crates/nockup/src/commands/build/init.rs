@@ -181,6 +181,19 @@ async fn resolve_git_template(
     Ok(resolved)
 }
 
+/// Map a template source filename to its output path. Files ending in `.hbs`
+/// are rendered and written with that suffix stripped (e.g. `Cargo.toml.hbs`
+/// → `Cargo.toml`) so cargo does not treat template manifests as workspace
+/// members when the template tree is used as a git dependency.
+fn dest_path_for_template_file(dest_dir: &Path, file_name: &std::ffi::OsStr) -> PathBuf {
+    let src = Path::new(file_name);
+    if src.extension().is_some_and(|ext| ext == "hbs") {
+        dest_dir.join(src.file_stem().expect("file ends with .hbs"))
+    } else {
+        dest_dir.join(file_name)
+    }
+}
+
 fn copy_dir_recursive(
     src_dir: &Path,
     dest_dir: &Path,
@@ -192,7 +205,7 @@ fn copy_dir_recursive(
         let entry = entry?;
         let src_path = entry.path();
         let file_name = entry.file_name();
-        let dest_path = dest_dir.join(&file_name);
+        let dest_path = dest_path_for_template_file(dest_dir, &file_name);
 
         if src_path.is_dir() {
             fs::create_dir_all(&dest_path)?;
