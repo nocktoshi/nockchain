@@ -1096,22 +1096,16 @@ impl NockStack {
         if ptr.is_null() {
             return false;
         }
+        let ptr_addr = ptr as usize;
+        let base = self.start as usize;
+        let arena_end = base.saturating_add(self.size.saturating_mul(mem::size_of::<u64>()));
+        // Callers (e.g. HAMT `preserve`) probe arbitrary pointers: cold jets, PMA,
+        // or Rust heap must yield `false`, not trip debug-only bounds asserts.
+        if ptr_addr < base || ptr_addr >= arena_end {
+            return false;
+        }
         // Calculate the pointer offset from the base in words
         let ptr_u64 = ptr as *const u64;
-        // We need to permit alloc here for panic reasons
-        debug_assert!(
-            ptr_u64 >= self.start,
-            "is_in_frame: {} >= {}",
-            ptr_u64 as usize,
-            self.start as usize,
-        );
-        debug_assert!(
-            ptr_u64 < self.start.add(self.size),
-            "is_in_frame: {} < {}",
-            ptr_u64 as usize,
-            self.start.add(self.size) as usize,
-        );
-
         let ptr_offset = (ptr_u64 as usize - self.start as usize) / 8;
 
         // Get the previous stack pointer
