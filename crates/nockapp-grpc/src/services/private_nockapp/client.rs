@@ -48,6 +48,26 @@ impl PrivateNockAppGrpcClient {
     //     }
     // }
 
+    pub async fn export_state(&mut self, path: impl Into<String>) -> Result<()> {
+        let request = ExportStateRequest {
+            path: path.into(),
+        };
+
+        let response = self.client.export_state(request).await?;
+        let response = response.into_inner();
+
+        match response.result {
+            Some(export_state_response::Result::Success(true)) => Ok(()),
+            Some(export_state_response::Result::Success(false)) => Err(NockAppGrpcError::Internal(
+                "ExportState returned success=false".to_string(),
+            )),
+            Some(export_state_response::Result::Error(error)) => {
+                Err(NockAppGrpcError::Internal(error.message))
+            }
+            None => Err(NockAppGrpcError::Internal("Empty response".to_string())),
+        }
+    }
+
     pub async fn poke(&mut self, pid: i32, wire: Wire, payload: Vec<u8>) -> Result<bool> {
         let request = PokeRequest {
             pid,

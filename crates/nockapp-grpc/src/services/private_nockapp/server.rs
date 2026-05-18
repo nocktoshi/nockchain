@@ -200,4 +200,30 @@ impl PrivateNockApp for PrivateNockAppGrpcServer {
             }
         }
     }
+
+    async fn export_state(
+        &self,
+        request: Request<ExportStateRequest>,
+    ) -> std::result::Result<Response<ExportStateResponse>, Status> {
+        let req = request.into_inner();
+        debug!("ExportState request: path={}", req.path);
+
+        match self.handle.export_state(req.path).await {
+            Ok(()) => {
+                let response = ExportStateResponse {
+                    result: Some(export_state_response::Result::Success(true)),
+                };
+                Ok(Response::new(response))
+            }
+            Err(e) => {
+                error!("ExportState operation failed: {}", e);
+                let response = ExportStateResponse {
+                    result: Some(export_state_response::Result::Error(
+                        self.build_error_response(NockAppGrpcError::NockApp(e)),
+                    )),
+                };
+                Ok(Response::new(response))
+            }
+        }
+    }
 }

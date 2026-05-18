@@ -523,6 +523,10 @@ impl<J: Jammer + Send + 'static> NockApp<J> {
                 path,
                 result_channel,
             } => self.handle_peek(path, result_channel).await,
+            IOAction::ExportState {
+                path,
+                result_channel,
+            } => self.handle_export_state(path, result_channel).await,
         }
     }
 
@@ -569,6 +573,16 @@ impl<J: Jammer + Send + 'static> NockApp<J> {
                 }
             }));
         }
+    }
+
+    #[instrument(skip_all)]
+    async fn handle_export_state(
+        &self,
+        path: std::path::PathBuf,
+        result_channel: tokio::sync::oneshot::Sender<Result<(), NockAppError>>,
+    ) {
+        let result = self.export_state(&path).await;
+        let _ = result_channel.send(result);
     }
 
     #[instrument(skip_all)]

@@ -9,6 +9,7 @@ import "nockchain/common/v1/primitives.proto";
 service NockAppService {
   rpc Peek(PeekRequest) returns (PeekResponse);
   rpc Poke(PokeRequest) returns (PokeResponse);
+  rpc ExportState(ExportStateRequest) returns (ExportStateResponse);
 }
 
 message PeekRequest {
@@ -32,6 +33,17 @@ message PokeRequest {
 message PokeResponse {
   oneof result {
     bool acknowledged = 1; // true if successful
+    common.v1.ErrorStatus error = 2;
+  }
+}
+
+message ExportStateRequest {
+  string path = 1;
+}
+
+message ExportStateResponse {
+  oneof result {
+    bool success = 1;
     common.v1.ErrorStatus error = 2;
   }
 }

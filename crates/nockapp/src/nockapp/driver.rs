@@ -1,3 +1,4 @@
+use std::path::PathBuf;
 use std::pin::Pin;
 use std::sync::Arc;
 use std::time::Duration;
@@ -67,6 +68,11 @@ pub enum IOAction {
     Peek {
         path: NounSlab,
         result_channel: oneshot::Sender<Option<NounSlab>>,
+    },
+    /// Export kernel state to a path in [`ExportedState`](crate::nockapp::export::ExportedState) format.
+    ExportState {
+        path: PathBuf,
+        result_channel: oneshot::Sender<Result<(), NockAppError>>,
     },
 }
 
@@ -194,6 +200,19 @@ impl NockAppHandle {
         let (result_channel, result_future) = oneshot::channel();
         self.send_peek(path, result_channel).await?;
         Ok(result_future.await?)
+    }
+
+    /// Export the live kernel state to `path` via the running [`crate::NockApp`].
+    #[tracing::instrument(name = "nockapp::NockAppHandle::export_state", skip_all)]
+    pub async fn export_state(&self, path: impl Into<PathBuf>) -> Result<(), NockAppError> {
+        let (result_channel, result_future) = oneshot::channel();
+        self.io_sender
+            .send(IOAction::ExportState {
+                path: path.into(),
+                result_channel,
+            })
+            .await?;
+        result_future.await?
     }
 
     #[instrument(skip(self))]
