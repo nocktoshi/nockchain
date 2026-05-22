@@ -1,4 +1,5 @@
 pub mod exit;
+pub mod repl_run;
 pub mod file;
 pub mod http;
 pub mod markdown;
@@ -6,6 +7,7 @@ pub mod one_punch;
 pub mod timer;
 
 pub use exit::exit as exit_driver;
+pub use repl_run::complete_run_on_exit as complete_run_on_exit_driver;
 pub use file::file as file_driver;
 pub use http::http::http as http_driver;
 pub use markdown::markdown as markdown_driver;

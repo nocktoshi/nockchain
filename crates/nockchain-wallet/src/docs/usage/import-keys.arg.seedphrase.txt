@@ -1,0 +1,3 @@
+Seed phrase to generate master private key, requires version. If your key was generated prior to
+the release of the v1 protocol upgrade on October 15, 2025, it is mostly likely version 0.
+If it was generated after that date, it is likely version 1.

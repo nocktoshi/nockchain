@@ -1041,42 +1041,84 @@
       --  ::  +v1
     --  ::  +display
   ::
+  ::  structured kernel effects (see +effect:types); used by +show and wallet.hoon
+  ++  balance-owned-totals
+    |=  [=state:wt =balance:wt]
+    ^-  [@ coins:transact]
+    =/  notes=(list nnote:transact)
+      ~(val z-by:zo notes.balance)
+    =/  owned-names=(set hash:transact)
+      %-  silt
+      %+  roll
+        ~(coils ~(get vault state) %pub)
+      |=  [=coil:wt first-names=(list hash:transact)]
+      ^-  (list hash:transact)
+      :*  (simple-first-name:coil:wt coil)
+          (coinbase-first-name:coil:wt coil)
+          first-names
+      ==
+    %+  roll
+      %+  skim  notes
+      |=  note=nnote:transact
+      %-  ~(has in owned-names)
+      ~(first-name get:nnote:transact note)
+    |=  [note=nnote:transact [len=@ acc=coins:transact]]
+    :-  +(len)
+    (add acc assets.note)
+  ::
+  ++  wallet-balance-v1-effect
+    |=  [=state:wt =balance:wt]
+    ^-  effect:wt
+    =/  [note-count=@ total-assets=coins:transact]
+      (balance-owned-totals state balance)
+    =/  block-b58=@t
+      (to-b58:hash:transact block-id.balance.state)
+    :-  %raw
+      :*  %wbal-v1
+          -.state
+          block-b58
+          height.balance.state
+          note-count
+          total-assets
+      ==
+  ::
+  ++  wallet-notes-v1-effect
+    |=  =state:wt
+    ^-  effect:wt
+    =/  rows=(list [name-first=@t name-last=@t version=@ assets=@])
+      %+  turn  ~(tap z-by:zo notes.balance.state)
+      |=  [nam=nname:transact note=nnote:transact]
+      =/  nb=[f=@t l=@t]  (to-b58:nname:transact nam)
+      :*  f.nb
+          l.nb
+          ?^  -.note  0  1
+          assets.note
+      ==
+    :-  %raw
+      :*  %wnote-v1
+          height.balance.state
+          (to-b58:hash:transact block-id.balance.state)
+          rows
+      ==
+  ::
   ++  show
       |=  [=state:wt =path]
       ^-  [(list effect:wt) state:wt]
       |^
       ?+    path  !!
           [%balance ~]
-        :-  ~[[%exit 0] (display-balance balance.state)]
+        :-  :~  (wallet-balance-v1-effect state balance.state)
+                [%exit 0]
+                (display-balance balance.state)
+            ==
         state
       ::
       ==
       ++  display-balance
         |=  =balance:wt
         ^-  effect:wt
-        =/  notes=(list nnote:transact)
-          ~(val z-by:zo notes.balance)
-        ::  shows the sum of assets included in balance, making sure to exclude watch-only pubkeys
-        =/  owned-names=(set hash:transact)
-          %-  silt
-          %+  roll
-            ~(coils ~(get vault state) %pub)
-          |=  [=coil:wt first-names=(list hash:transact)]
-          ^-  (list hash:transact)
-          :*  (simple-first-name:coil:wt coil)
-              (coinbase-first-name:coil:wt coil)
-              first-names
-          ==
         =/  [total-notes=@ total-nicks=coins:transact]
-          %+  roll
-            ::  all notes owned by keys in wallet, excluding watch-only pubkeys
-            %+  skim  notes
-            |=  note=nnote:transact
-            %-  ~(has in owned-names)
-            ~(first-name get:nnote:transact note)
-          |=  [note=nnote:transact [len=@ acc=coins:transact]]
-          :-  +(len)
-          (add acc assets.note)
+          (balance-owned-totals state balance)
         =/  nodes=markdown:m
           =+  block-b58=(to-b58:hash:transact block-id.balance.state)
           %-  need

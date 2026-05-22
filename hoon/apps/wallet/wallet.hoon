@@ -5,6 +5,7 @@
 /=  transact  /common/tx-engine
 /=  z   /common/zeke
 /=  zo  /common/zoon
+/=  hz  /common/h-zoon
 /=  dumb  /apps/dumbnet/lib/types
 /=  bridge  /apps/bridge/types
 /=  *   /common/zose
@@ -858,7 +859,7 @@
     =+  data=data:*blockchain-constants:transact
     =/  valid=(reason:dumb ~)
       %-  validate-with-context:spends:transact
-      [notes.balance.state signed-spends height.balance.state max-size.data bythos-phase.bc.state]
+      [(zh-molt:hz notes.balance.state) signed-spends height.balance.state max-size.data bythos-phase.bc.state]
     ?-    -.valid
         %.y
       =/  nock-cause=$>(%fact cause:dumb)
@@ -1233,7 +1234,8 @@
     ?>  ?=(%list-notes -.cause)
     %-  (debug "list-notes")
     :_  state
-    :~  :-  %markdown
+    :~  (wallet-notes-v1-effect:utils state)
+        :-  %markdown
       %-  crip
       %+  welp
       """

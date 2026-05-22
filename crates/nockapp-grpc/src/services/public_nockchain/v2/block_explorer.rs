@@ -212,7 +212,7 @@ pub struct BlockExplorerCache {
 }
 
 impl BlockExplorerCache {
-    const RANGE_CHUNK: u64 = 1024;
+    const RANGE_CHUNK: u64 = 256;
     const INITIAL_SEED_RETRY_DELAY: Duration = Duration::from_secs(2);
     const INITIAL_SEED_MAX_WAIT: Duration = Duration::from_secs(120);
     const MIN_TX_PREFIX_LEN: usize = 8;
@@ -2609,7 +2609,8 @@ mod tests {
     use bytes::Bytes;
     use nockchain_math::belt::Belt;
     use nockchain_types::tx_engine::common::{BlockHeight, Hash};
-    use nockchain_types::tx_engine::v1::NoteDataEntry;
+    use nockchain_types::tx_engine::v1::note::{NoteData, NoteDataEntry};
+    use nockvm::noun::NounAllocator;
     use noun_serde::{NounDecode, NounEncode};
 
     use super::*;

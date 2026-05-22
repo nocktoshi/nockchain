@@ -14,24 +14,25 @@
 mod command;
 mod connection;
 mod create_tx;
+mod dispatch;
 mod error;
+mod wallet_outcome;
 mod recipient;
+mod repl;
 #[cfg(test)]
 mod tests;
 
 use std::collections::BTreeMap;
 use std::fs;
 use std::io::{self, Write};
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
 use clap::Parser;
 #[cfg(test)]
 use command::TimelockRangeCli;
 #[cfg(test)]
 use command::WalletWire;
-use command::{
-    ClientType, CommandNoun, Commands, NoteSelectionStrategyCli, WalletCli, WatchSubcommand,
-};
+use command::{ClientType, CommandNoun, Commands, NoteSelectionStrategyCli, WalletCli};
 use kernels_open_wallet::KERNEL;
 use nockapp::driver::*;
 use nockapp::drivers::one_punch::OnePunchWire;
@@ -39,11 +40,8 @@ use nockapp::kernel::boot::{self, NockStackSize};
 use nockapp::noun::slab::{NockJammer, NounSlab};
 use nockapp::utils::bytes::Byts;
 use nockapp::utils::make_tas;
-use nockapp::wire::{SystemWire, Wire};
-use nockapp::{
-    exit_driver, file_driver, markdown_driver, one_punch_driver, system_data_dir, CrownError,
-    NockApp, NockAppError, ToBytesExt,
-};
+use nockapp::wire::Wire;
+use nockapp::{system_data_dir, CrownError, NockApp, NockAppError, ToBytesExt};
 use nockapp_grpc::pb::common::v1::Base58Hash as PbBase58Hash;
 use nockapp_grpc::pb::public::v2::transaction_accepted_response;
 use nockapp_grpc::{private_nockapp, public_nockchain};
@@ -54,16 +52,12 @@ use nockchain_types::{default_fakenet_blockchain_constants, v0, v1};
 use nockvm::jets::cold::Nounable;
 use nockvm::noun::{Atom, Cell, IndirectAtom, Noun, NounAllocator, D, NO, SIG, T, YES};
 use noun_serde::prelude::*;
-use noun_serde::NounDecodeError;
 #[cfg(test)]
 use recipient::BRIDGE_LOCK_ROOT_DEFAULT_B58;
-use recipient::{
-    planner_recipient_outputs, planner_refund_output_template, recipient_tokens_to_specs,
-    RecipientSpec,
-};
+use recipient::{planner_recipient_outputs, planner_refund_output_template, RecipientSpec};
 use termimad::MadSkin;
 use tokio::fs as tokio_fs;
-use tracing::{error, info, warn};
+use tracing::{info, warn};
 use wallet_tx_builder::adapter::{
     normalize_balance_pages, NormalizeSnapshotError, NormalizedSnapshot, SnapshotConsistencyError,
 };
@@ -85,6 +79,22 @@ async fn main() -> Result<(), NockAppError> {
     let mut cli = WalletCli::parse();
     // Use a smaller stack size for the wallet
     cli.boot.stack_size = NockStackSize::Tiny;
+
+    if std::env::var("RUST_LOG").is_err() {
+        if matches!(cli.command, Commands::Repl) {
+            if cli.verbose {
+                std::env::set_var(
+                    "RUST_LOG", "info,nockapp=info,nockchain_wallet=info,opentelemetry_sdk=off",
+                );
+            } else {
+                std::env::set_var(
+                    "RUST_LOG",
+                    "warn,nockapp=warn,nockchain_wallet=warn,tonic=warn,h2=warn,tower=warn,hyper=warn,rustls=warn,opentelemetry_sdk=off",
+                );
+            }
+        }
+    }
+
     boot::init_default_tracing(&cli.boot.clone()); // Init tracing early
 
     if let Commands::TxAccepted { tx_id } = &cli.command {
@@ -454,62 +464,26 @@ async fn main() -> Result<(), NockAppError> {
         }
         return Ok(());
     }
-
-    if let Commands::CreateTx {
-        names,
-        recipients,
-        fee,
-        allow_low_fee,
-        refund_pkh,
-        index,
-        hardened,
-        include_data,
-        sign_keys,
-        save_raw_tx,
-        note_selection_strategy,
-    } = &cli.command
-    {
-        let recipient_specs = recipient_tokens_to_specs(recipients.clone())?;
-        let signing_keys = Wallet::collect_signing_keys(*index, *hardened, sign_keys)?;
-        poke = wallet
-            .create_tx_with_planner(
-                synced_snapshot_for_planner.take(),
-                names.clone(),
-                *fee,
-                recipient_specs,
-                *allow_low_fee,
-                refund_pkh.clone(),
-                signing_keys,
-                *include_data,
-                *save_raw_tx,
-                *note_selection_strategy,
-            )
-            .await?;
+    if matches!(cli.command, Commands::Repl) {
+        return repl::run(&cli, wallet, synced_snapshot_for_planner).await;
     }
-
-    wallet
-        .app
-        .add_io_driver(one_punch_driver(poke.0, poke.1))
-        .await;
-    wallet.app.add_io_driver(file_driver()).await;
-    wallet.app.add_io_driver(markdown_driver()).await;
-    wallet.app.add_io_driver(exit_driver()).await;
-
-    match wallet.app.run().await {
-        Ok(_) => {
-            info!("Command executed successfully");
-            Ok(())
-        }
-        Err(e) => {
-            error!("Command failed: {}", e);
-            Err(e)
-        }
-    }
+    crate::dispatch::execute_wallet_command(
+        &cli,
+        &mut wallet,
+        &cli.command,
+        &mut synced_snapshot_for_planner,
+        false,
+        crate::dispatch::DispatchHooks::default(),
+    )
+    .await
+    .map(|_| ())
 }
 
 /// Wallet runtime wrapper around the underlying nockapp kernel.
 pub struct Wallet {
     app: NockApp,
+    /// REPL: `file` / markdown / exit-completion drivers are registered once for the session.
+    pub(crate) repl_io_drivers_installed: bool,
 }
 
 impl Wallet {
@@ -527,7 +501,10 @@ impl Wallet {
     /// A new `Wallet` instance with the kernel initialized
     /// as a NockApp.
     fn new(nockapp: NockApp) -> Self {
-        Wallet { app: nockapp }
+        Wallet {
+            app: nockapp,
+            repl_io_drivers_installed: false,
+        }
     }
 
     /// Applies the shared Rust fakenet constants so wallet state matches node fakenet defaults.
@@ -1365,7 +1342,7 @@ fn confirm_upper_bound_warning() -> Result<(), NockAppError> {
 }
 
 /// Normalizes watch input as either schnorr pubkey or hash base58 value.
-fn normalize_watch_address(value: String) -> Result<Option<String>, NockAppError> {
+pub(crate) fn normalize_watch_address(value: String) -> Result<Option<String>, NockAppError> {
     if value.len() >= SchnorrPubkey::BYTES_BASE58 {
         match SchnorrPubkey::from_base58(&value) {
             Ok(pubkey) => pubkey
