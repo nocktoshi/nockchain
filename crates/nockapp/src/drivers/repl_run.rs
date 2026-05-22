@@ -1,10 +1,10 @@
 //! Exit-effect handling for interactive sessions that run the kernel multiple times on one serf.
 
+use nockvm::noun::NounAllocator;
 use tracing::{debug, error};
 
 use crate::nockapp::driver::{make_driver, IODriverFn};
 use crate::nockapp::EXIT_OK;
-use crate::NounExt;
 
 /// Like [`super::exit::exit`], but on exit code 0 completes the current [`crate::NockApp::run`]
 /// without shutting down the serf, so another `run` can be started.
@@ -19,12 +19,16 @@ pub fn complete_run_on_exit() -> IODriverFn {
                     let exit_code: Option<usize> = unsafe {
                         let noun = eff.root();
                         if let Ok(cell) = noun.as_cell() {
+                            let space = eff.noun_space();
+                            let cell = cell.in_space(&space);
                             if cell.head().eq_bytes(b"exit") && cell.tail().is_atom() {
-                                if let Ok(u) = cell.tail().as_atom().and_then(|a| a.as_u64()) {
-                                    Some(u as usize)
-                                } else {
-                                    Some(1)
-                                }
+                                Some(
+                                    cell.tail()
+                                        .as_atom()
+                                        .and_then(|atom| atom.as_u64())
+                                        .map(|u| u as usize)
+                                        .unwrap_or(1),
+                                )
                             } else {
                                 None
                             }
