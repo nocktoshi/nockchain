@@ -18,7 +18,7 @@ use tokio::sync::{mpsc, Mutex};
 
 use super::app_state::status_modal_visible;
 use super::command_runner::{
-    BalanceRefreshCompletion, HomeIdentityCompletion, JobCompletion, NnsLookupCompletion,
+    BalanceRefreshCompletion, JobCompletion, NnsLookupCompletion,
     TuiRuntime, SendSimplePlanCompletion,
 };
 use super::ct_dispatch;

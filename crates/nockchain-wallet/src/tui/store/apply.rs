@@ -4,7 +4,7 @@ use std::time::{Duration, Instant};
 
 use nockapp::NockAppError;
 
-use super::super::app_state::{PanelFocus, UiState};
+use super::super::app_state::UiState;
 use super::super::components::menus::{CT_ERR_ACTIONS, GENERIC_ERR};
 use super::super::prompt_overlay::running_restore_screen;
 use super::super::screens::{ErrorCtx, Screen};
@@ -23,24 +23,16 @@ pub(crate) fn apply_ui_action(state: &mut UiState, action: UiAction) {
         UiAction::TakeToast => {
             state.toast.take();
         }
-        UiAction::TogglePanelFocus => {
-            state.panel_focus = state.panel_focus.toggle();
-        }
-        UiAction::SetPanelFocus(f) => {
-            state.panel_focus = f;
-        }
         UiAction::DismissStatusOutput => {
             state.last_command_output.clear();
             state.last_command_events.clear();
             state.output_scroll = 0;
-            state.panel_focus = PanelFocus::Activity;
         }
         UiAction::ReplaceScreen(s) => {
             state.screen = s;
         }
         UiAction::EnterMainFromSplash => {
             state.screen = Screen::Home;
-            state.panel_focus = PanelFocus::Activity;
             state.home_tab = 0;
         }
         UiAction::EnterRunningWalletJob {
@@ -63,7 +55,6 @@ pub(crate) fn apply_ui_action(state: &mut UiState, action: UiAction) {
                 restore: resume,
                 cmd: cmd_clone,
             };
-            state.panel_focus = PanelFocus::Activity;
             state.sync_progress = Some(progress_rx);
         }
         UiAction::BeginBalanceSidebarFetch { progress_rx } => {

@@ -11,23 +11,6 @@ use super::screens::Screen;
 use super::view;
 use crate::command::Commands;
 
-/// Which UI region receives keys before normal screen handlers.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub(crate) enum PanelFocus {
-    #[default]
-    Activity,
-    Status,
-}
-
-impl PanelFocus {
-    pub(crate) fn toggle(self) -> Self {
-        match self {
-            PanelFocus::Activity => PanelFocus::Status,
-            PanelFocus::Status => PanelFocus::Activity,
-        }
-    }
-}
-
 /// Bottom status/output panel: visible while a command runs or meaningful output exists.
 pub(crate) fn status_modal_visible(state: &UiState) -> bool {
     if let Screen::Running { restore, cmd, .. } = &state.screen {
@@ -103,7 +86,6 @@ pub(crate) struct UiState {
     pub output_scroll: u16,
     /// Scroll position for menu [`List`](ratatui::widgets::List) widgets (long menus).
     pub list_state: ListState,
-    pub panel_focus: PanelFocus,
     pub balance_panel: BalancePanelState,
     /// Bumped when starting a sidebar balance fetch or any queued wallet command.
     pub balance_job_nonce: u64,
@@ -128,7 +110,6 @@ impl UiState {
             last_command_events: Vec::new(),
             output_scroll: 0,
             list_state: ListState::default(),
-            panel_focus: PanelFocus::Activity,
             balance_panel: BalancePanelState::default(),
             balance_job_nonce: 0,
             ui_fx: UiFx::default(),

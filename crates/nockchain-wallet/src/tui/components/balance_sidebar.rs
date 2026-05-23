@@ -8,7 +8,7 @@ use ratatui::Frame;
 use super::loading::loading_indicator_paragraph;
 use super::scroll::estimate_wrapped_source_lines;
 use super::theme::THEME_ACCENT_GREEN;
-use crate::tui::app_state::{AppState, PanelFocus};
+use crate::tui::app_state::AppState;
 
 #[allow(dead_code)]
 pub(crate) fn draw_balance_sidebar(
@@ -17,21 +17,14 @@ pub(crate) fn draw_balance_sidebar(
     area: ratatui::layout::Rect,
     tick: u64,
 ) {
-    let focused = matches!(app.panel_focus, PanelFocus::Activity);
-    let mut balance_block = Block::default().borders(Borders::ALL);
-    if focused {
-        balance_block = balance_block
-            .border_type(BorderType::Thick)
-            .border_style(Style::default().fg(THEME_ACCENT_GREEN));
-    }
-    let balance_block = balance_block.title(Line::from(vec![Span::styled(
-        if focused {
-            " Balance ◆ "
-        } else {
-            " Balance "
-        },
-        Style::default().fg(Color::Cyan),
-    )]));
+    let balance_block = Block::default()
+        .borders(Borders::ALL)
+        .border_type(BorderType::Thick)
+        .border_style(Style::default().fg(THEME_ACCENT_GREEN))
+        .title(Line::from(vec![Span::styled(
+            " Balance ◆ ",
+            Style::default().fg(Color::Cyan),
+        )]));
 
     if app.balance_panel.loading {
         let body = loading_indicator_paragraph(app, tick, balance_block, "Refreshing balance…");

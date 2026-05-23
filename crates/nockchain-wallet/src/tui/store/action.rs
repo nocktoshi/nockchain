@@ -4,7 +4,6 @@ use nockapp::NockAppError;
 use tokio::sync::watch;
 
 use crate::command::Commands;
-use crate::tui::app_state::PanelFocus;
 use crate::tui::screens::Screen;
 
 /// All UI state transitions flow through [`super::apply_ui_action`](fn@super::apply_ui_action).
@@ -14,8 +13,6 @@ pub(crate) enum UiAction {
     Tick,
     /// Dismiss toast on any key (consumes toast field).
     TakeToast,
-    TogglePanelFocus,
-    SetPanelFocus(PanelFocus),
     /// Clear command output and hide the status modal.
     DismissStatusOutput,
     /// Full screen swap (routes through [`super::apply_ui_action`]).

@@ -26,7 +26,7 @@ pub(crate) const NNS: [&str; 5] = [
     "█   █  █   █  ███ ",
 ];
 
-/// Render block rows centered; `█` uses [`pulse_color`], gaps use `gap_bg`.
+/// Render block rows centered; `█` uses [`pulse_green_rgb`], gaps use `gap_bg`.
 pub(crate) fn render_block_wordmark(
     f: &mut Frame<'_>,
     area: Rect,

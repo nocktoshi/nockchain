@@ -181,11 +181,6 @@ pub(crate) async fn lookup_name(raw: &str) -> Result<NnsLookupOk, String> {
     lookup_name_canonical(&canonical).await
 }
 
-/// Returns `Ok(())` when the name appears available; `Err` with user-facing message otherwise.
-pub(crate) async fn ensure_name_available(canonical_name: &str) -> Result<(), String> {
-    lookup_name_canonical(canonical_name).await.map(|_| ())
-}
-
 async fn lookup_name_canonical(canonical_name: &str) -> Result<NnsLookupOk, String> {
     let _ = normalize_nns_name(canonical_name)?;
     let stem = canonical_name
@@ -231,23 +226,6 @@ async fn lookup_name_canonical(canonical_name: &str) -> Result<NnsLookupOk, Stri
         "`{}` could not be registered (status: {})",
         body.name, body.status
     ))
-}
-
-pub(crate) fn preview_lines(canonical_name: &str, usd_per_nock: Option<f64>) -> Vec<String> {
-    let stem = canonical_name
-        .strip_suffix(".nock")
-        .unwrap_or(canonical_name);
-    let fee_nicks = fee_nicks_for_stem(stem);
-    let blob = claim_blob_for_name(canonical_name);
-    vec![
-        format!("Name: {canonical_name}"),
-        format!("Registry: {REGISTRY_P2PKH}"),
-        format!(
-            "Fee: {}",
-            format_nock_amount_with_usd(fee_nicks as u128, usd_per_nock)
-        ),
-        format!("Blob: {blob}"),
-    ]
 }
 
 pub(crate) fn schedule_create_tx_command(

@@ -8,18 +8,10 @@ use ratatui::widgets::Widget;
 
 use super::theme::{THEME_ACCENT_CTA, THEME_ACCENT_GREEN, THEME_BG_PANEL};
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub(crate) enum ButtonAlign {
-    #[default]
-    Center,
-    Top,
-}
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum ButtonState {
     Normal,
     Selected,
-    Pressed,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -269,7 +261,6 @@ pub(crate) struct Button<'a> {
     lines: Vec<Line<'a>>,
     theme: ButtonTheme,
     state: ButtonState,
-    align: ButtonAlign,
 }
 
 impl<'a> Button<'a> {
@@ -278,18 +269,7 @@ impl<'a> Button<'a> {
             lines: vec![label.into()],
             theme: CANCEL_THEME,
             state: ButtonState::Normal,
-            align: ButtonAlign::Center,
         }
-    }
-
-    pub const fn align_top(mut self) -> Self {
-        self.align = ButtonAlign::Top;
-        self
-    }
-
-    pub fn line(mut self, line: Line<'a>) -> Self {
-        self.lines.push(line);
-        self
     }
 
     pub const fn theme(mut self, theme: ButtonTheme) -> Self {
@@ -345,12 +325,6 @@ impl Widget for Button<'_> {
                 self.theme.shadow,
                 self.theme.highlight,
             ),
-            ButtonState::Pressed => (
-                self.theme.background,
-                self.theme.text,
-                self.theme.highlight,
-                self.theme.shadow,
-            ),
         };
         let chrome = ButtonTheme {
             text,
@@ -360,11 +334,7 @@ impl Widget for Button<'_> {
         };
         paint_button_chrome(buf, area, chrome);
         let line_count = self.lines.len() as u16;
-        let content_top = area.y + u16::from(area.height > 2);
-        let mut y = match self.align {
-            ButtonAlign::Center => area.y + area.height.saturating_sub(line_count) / 2,
-            ButtonAlign::Top => content_top + 1,
-        };
+        let mut y = area.y + area.height.saturating_sub(line_count) / 2;
         for line in &self.lines {
             let label_w = line.width() as u16;
             let x = area.x + area.width.saturating_sub(label_w) / 2;

@@ -9,7 +9,7 @@ use tracing::warn;
 
 use super::input::{edit_line, esc_back, list_activate};
 use crate::command::{Commands, WalletCli, WatchSubcommand};
-use crate::tui::command_runner::{schedule_nns_register, JobCompletion, TuiRuntime};
+use crate::tui::command_runner::{JobCompletion, TuiRuntime};
 use crate::tui::components::menus::BOOL;
 use crate::tui::hooks::terminal::Term;
 use crate::tui::prompt_overlay::{
@@ -597,17 +597,6 @@ pub(super) async fn confirm_prompt(
                         },
                         "SignHash",
                     );
-                }
-                ConfirmThen::NnsRegisterConfirm { name } => {
-                    if i == 0 {
-                        if let Err(e) =
-                            schedule_nns_register(store, rt, done_tx.clone(), &name)
-                        {
-                            warn!("{e}");
-                        }
-                    } else {
-                        super::replace_screen(store, *underlay);
-                    }
                 }
             }
             Ok(TuiControl::Continue)

@@ -121,12 +121,6 @@ pub(crate) struct WalletCommandData {
     pub events: Vec<WalletEvent>,
 }
 
-impl WalletCommandData {
-    pub(crate) fn empty() -> Self {
-        Self { events: Vec::new() }
-    }
-}
-
 pub(crate) type WalletCommandOutcome = Result<WalletCommandData, NockAppError>;
 
 /// Wire/API envelope shared by TUI JSON tooling and the HTTP command endpoint.

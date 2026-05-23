@@ -41,21 +41,6 @@ pub(crate) const LOADING_BRAND_PALETTE: &[Color] = &[
     Color::Rgb(38, 135, 36),
 ];
 
-/// Subtle breathing grayscale around white — shared phase so the splash wordmark moves together.
-pub(crate) fn pulse_color(frame_counter: usize) -> Color {
-    const W: i32 = 255;
-    let period = 56usize;
-    let t = frame_counter % period;
-    let h = period / 2;
-    let wave = if t < h { t } else { period - t };
-    let d = (wave as i32 * 14 / h as i32) - 7;
-    Color::Rgb(
-        (W + d).clamp(222, 255) as u8,
-        (W + d).clamp(222, 255) as u8,
-        (W + d).clamp(222, 255) as u8,
-    )
-}
-
 /// Animated brand green from [`LOADING_BRAND_PALETTE`] (splash / home borders).
 pub(crate) fn pulse_green_rgb(frame_counter: usize) -> Color {
     let palette = LOADING_BRAND_PALETTE;

@@ -42,7 +42,7 @@ use crate::wallet_outcome::{
 };
 use crate::{connection, normalize_watch_address, Wallet};
 
-/// Optional progress hooks for callers. CLI uses [`DispatchHooks::cli`]; TUI/API use [`DispatchHooks::structured`].
+/// Optional progress hooks for callers. CLI uses [`DispatchHooks::cli`]; TUI/API use [`DispatchHooks::structured_with_markdown`].
 #[derive(Clone, Default)]
 pub(crate) struct DispatchHooks {
     /// Notified with `(attempt, max_attempts)` before each balance-sync RPC attempt.
@@ -60,15 +60,6 @@ impl DispatchHooks {
     }
 
     /// TUI / JSON API: structured `[%raw …]` plus captured `%markdown`.
-    pub(crate) fn structured(events: Arc<Mutex<Vec<WalletEvent>>>) -> Self {
-        Self {
-            sync_attempt: None,
-            markdown_capture: None,
-            wallet_events: Some(events),
-        }
-    }
-
-    /// TUI TUI: structured effects and `%markdown` (create-tx, send-tx, …).
     pub(crate) fn structured_with_markdown(
         events: Arc<Mutex<Vec<WalletEvent>>>,
         markdown: Arc<Mutex<String>>,
@@ -86,10 +77,6 @@ impl DispatchHooks {
     ) -> Self {
         self.sync_attempt = Some(tx);
         self
-    }
-
-    pub(crate) fn is_structured(&self) -> bool {
-        self.wallet_events.is_some() && self.markdown_capture.is_none()
     }
 }
 

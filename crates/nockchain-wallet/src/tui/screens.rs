@@ -1,4 +1,4 @@
-//! TUI TUI screen state.
+//! TUI screen state.
 
 use crate::command::Commands;
 
@@ -207,9 +207,6 @@ pub(crate) enum ConfirmThen {
         hash_b58: String,
         index: Option<u64>,
     },
-    NnsRegisterConfirm {
-        name: String,
-    },
 }
 
 impl Screen {
@@ -231,10 +228,5 @@ impl Screen {
             lookup_busy: false,
             verified_name: None,
         }
-    }
-
-    /// Sub-flow screens hide the home tab bar.
-    pub(crate) fn hides_home_tabs(&self) -> bool {
-        !matches!(self, Screen::Home)
     }
 }

@@ -175,7 +175,7 @@ struct TxFileSnapshot {
 pub(crate) struct WrittenTxSnapshot(BTreeMap<PathBuf, TxFileSnapshot>);
 
 #[derive(Debug, Clone)]
-struct CreateTxRequest {
+pub(crate) struct CreateTxRequest {
     names: String,
     recipients: Vec<RecipientSpec>,
     fee: u64,
