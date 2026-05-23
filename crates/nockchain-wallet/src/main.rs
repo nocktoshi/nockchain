@@ -17,11 +17,11 @@ mod create_tx;
 mod dispatch;
 mod error;
 mod recipient;
-mod repl;
+mod tui;
 #[cfg(test)]
 mod tests;
 
-pub(crate) use repl::wallet_outcome;
+pub(crate) use tui::wallet_outcome;
 use std::collections::BTreeMap;
 use std::fs;
 use std::io::{self, Write};
@@ -81,7 +81,7 @@ async fn main() -> Result<(), NockAppError> {
     cli.boot.stack_size = NockStackSize::Tiny;
 
     if std::env::var("RUST_LOG").is_err() {
-        if matches!(cli.command, Commands::Repl) {
+        if matches!(cli.command, Commands::Tui) {
             if cli.verbose {
                 std::env::set_var(
                     "RUST_LOG", "info,nockapp=info,nockchain_wallet=info,opentelemetry_sdk=off",
@@ -125,12 +125,12 @@ async fn main() -> Result<(), NockAppError> {
         ));
     }
 
-    if matches!(cli.command, Commands::Repl) {
-        return repl::run(&cli, wallet, synced_snapshot_for_planner, data_dir).await;
+    if matches!(cli.command, Commands::Tui) {
+        return tui::run(&cli, wallet, synced_snapshot_for_planner, data_dir).await;
     }
 
     // CLI one-shot: markdown renders via `markdown_driver` during `app.run()` (default hooks).
-    // `WalletCommandData` in the return value is unused for stdout; REPL/API consume structured events.
+    // `WalletCommandData` in the return value is unused for stdout; TUI/API consume structured events.
     crate::dispatch::execute_wallet_command(
         &cli,
         &mut wallet,
@@ -146,8 +146,8 @@ async fn main() -> Result<(), NockAppError> {
 /// Wallet runtime wrapper around the underlying nockapp kernel.
 pub struct Wallet {
     app: NockApp,
-    /// REPL: `file` / markdown / exit-completion drivers are registered once for the session.
-    pub(crate) repl_io_drivers_installed: bool,
+    /// TUI: `file` / markdown / exit-completion drivers are registered once for the session.
+    pub(crate) tui_io_drivers_installed: bool,
 }
 
 impl Wallet {
@@ -167,7 +167,7 @@ impl Wallet {
     fn new(nockapp: NockApp) -> Self {
         Wallet {
             app: nockapp,
-            repl_io_drivers_installed: false,
+            tui_io_drivers_installed: false,
         }
     }
 

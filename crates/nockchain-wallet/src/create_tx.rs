@@ -187,7 +187,7 @@ struct CreateTxRequest {
     note_selection: NoteSelectionStrategyCli,
 }
 
-/// Planner output before the kernel `create-tx` poke (REPL review screen).
+/// Planner output before the kernel `create-tx` poke (TUI review screen).
 #[derive(Debug, Clone)]
 pub(crate) struct PlannedCreateTx {
     pub(crate) request: CreateTxRequest,

@@ -185,7 +185,7 @@ pub struct WalletCli {
     #[command(flatten)]
     pub boot: BootCli,
 
-    /// More detailed logs (info/debug). When unset, `repl` uses a quiet default unless `RUST_LOG` is set.
+    /// More detailed logs (info/debug). When unset, `tui` uses a quiet default unless `RUST_LOG` is set.
     #[arg(short, long, global = true)]
     pub verbose: bool,
 
@@ -671,8 +671,8 @@ pub enum Commands {
         pubkey_pos: Option<String>,
     },
 
-    /// Interactive menu shell (REPL). Type `help` or `/help`, `exit` or `/exit`. Use `--verbose` for more logs.
-    Repl,
+    /// Interactive wallet TUI. Type `help` or `/help`, `exit` or `/exit`. Use `--verbose` for more logs.
+    Tui,
 }
 
 impl Commands {
@@ -705,7 +705,7 @@ impl Commands {
             Commands::SignHash { .. } => "sign-hash",
             Commands::VerifyHash { .. } => "verify-hash",
             Commands::TxAccepted { .. } => "tx-accepted",
-            Commands::Repl => "repl",
+            Commands::Tui => "tui",
             Commands::Watch { subcommand } => match subcommand {
                 WatchSubcommand::Address { .. } => "watch-address",
                 WatchSubcommand::Pubkey { .. } => "watch-address",

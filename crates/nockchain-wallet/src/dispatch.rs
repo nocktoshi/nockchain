@@ -1,4 +1,4 @@
-//! Shared wallet command execution for one-shot CLI and interactive REPL.
+//! Shared wallet command execution for one-shot CLI and interactive TUI.
 
 use std::fs;
 use std::path::Path;
@@ -42,14 +42,14 @@ use crate::wallet_outcome::{
 };
 use crate::{connection, normalize_watch_address, Wallet};
 
-/// Optional progress hooks for callers. CLI uses [`DispatchHooks::cli`]; REPL/API use [`DispatchHooks::structured`].
+/// Optional progress hooks for callers. CLI uses [`DispatchHooks::cli`]; TUI/API use [`DispatchHooks::structured`].
 #[derive(Clone, Default)]
 pub(crate) struct DispatchHooks {
     /// Notified with `(attempt, max_attempts)` before each balance-sync RPC attempt.
     pub sync_attempt: Option<tokio::sync::watch::Sender<(usize, usize)>>,
     /// When set, `%markdown` effects are captured for CLI presentation (termimad during `app.run()`).
     pub markdown_capture: Option<Arc<Mutex<String>>>,
-    /// When set, `[%raw …]` effects are decoded into structured [`WalletEvent`]s (REPL/API).
+    /// When set, `[%raw …]` effects are decoded into structured [`WalletEvent`]s (TUI/API).
     pub wallet_events: Option<Arc<Mutex<Vec<WalletEvent>>>>,
 }
 
@@ -59,7 +59,7 @@ impl DispatchHooks {
         Self::default()
     }
 
-    /// REPL / JSON API: structured `[%raw …]` plus captured `%markdown`.
+    /// TUI / JSON API: structured `[%raw …]` plus captured `%markdown`.
     pub(crate) fn structured(events: Arc<Mutex<Vec<WalletEvent>>>) -> Self {
         Self {
             sync_attempt: None,
@@ -68,7 +68,7 @@ impl DispatchHooks {
         }
     }
 
-    /// REPL TUI: structured effects and `%markdown` (create-tx, send-tx, …).
+    /// TUI TUI: structured effects and `%markdown` (create-tx, send-tx, …).
     pub(crate) fn structured_with_markdown(
         events: Arc<Mutex<Vec<WalletEvent>>>,
         markdown: Arc<Mutex<String>>,
@@ -227,7 +227,7 @@ fn present_migrate_summary(
     }
 }
 
-/// Capture `[%raw …]` into structured [`WalletEvent`]s (REPL / API). Ignores `%markdown`.
+/// Capture `[%raw …]` into structured [`WalletEvent`]s (TUI / API). Ignores `%markdown`.
 pub(crate) fn structured_effect_driver(wallet_events: Arc<Mutex<Vec<WalletEvent>>>) -> IODriverFn {
     make_driver(move |handle| {
         let wallet_events = Arc::clone(&wallet_events);
@@ -312,20 +312,20 @@ async fn add_markdown_io_driver(wallet: &mut Wallet, hooks: &DispatchHooks) {
     }
 }
 
-/// `one_punch` is always added per command; file / effect drivers install once in REPL.
+/// `one_punch` is always added per command; file / effect drivers install once in TUI.
 async fn add_kernel_io_drivers(wallet: &mut Wallet, hooks: &DispatchHooks) {
-    let is_repl = hooks.wallet_events.is_some();
-    if is_repl && wallet.repl_io_drivers_installed {
+    let is_tui = hooks.wallet_events.is_some();
+    if is_tui && wallet.tui_io_drivers_installed {
         return;
     }
     wallet.app.add_io_driver(file_driver()).await;
     add_markdown_io_driver(wallet, hooks).await;
-    if is_repl {
+    if is_tui {
         wallet
             .app
             .add_io_driver(complete_run_on_exit_driver())
             .await;
-        wallet.repl_io_drivers_installed = true;
+        wallet.tui_io_drivers_installed = true;
     } else {
         wallet.app.add_io_driver(exit_driver()).await;
     }
@@ -355,14 +355,14 @@ pub(crate) fn command_requires_sync(command: &Commands) -> bool {
         | Commands::SignMultisigTx { .. }
         | Commands::Watch { .. }
         | Commands::TxAccepted { .. }
-        | Commands::Repl => false,
+        | Commands::Tui => false,
         _ => true,
     }
 }
 
 fn build_initial_poke(command: &Commands) -> CommandNoun<NounSlab> {
     match command {
-        Commands::Repl | Commands::TxAccepted { .. } => Err(NockAppError::from(
+        Commands::Tui | Commands::TxAccepted { .. } => Err(NockAppError::from(
             CrownError::Unknown("internal: invalid command for poke builder".into()),
         )),
         Commands::Keygen => {
