@@ -179,7 +179,6 @@ fn truncate_display(s: &str, max_cols: usize) -> String {
 
 fn draw_balance_identity(f: &mut Frame<'_>, app: &AppState, area: Rect, button: Rect) {
     let row_bg = balance_gradient_bg_for_widget(area, button);
-    let max_cols = area.width as usize;
     let bold = Style::default()
         .fg(BALANCE_THEME.text)
         .add_modifier(Modifier::BOLD);

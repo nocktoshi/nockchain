@@ -28,9 +28,9 @@ pub(super) async fn handle_send_simple(
         mut amount_cursor,
         mut recipient_cursor,
         mut focus,
-        mut phase,
+        phase,
         mut status,
-        mut review_scroll,
+        review_scroll,
     } = taken
     else {
         return Ok(ReplControl::Continue);

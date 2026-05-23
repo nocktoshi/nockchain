@@ -62,7 +62,6 @@ pub(super) async fn dispatch_key(
     terminal: &Arc<Mutex<Term>>,
     done_tx: &mpsc::UnboundedSender<JobCompletion>,
     balance_done_tx: &mpsc::UnboundedSender<BalanceRefreshCompletion>,
-    identity_done_tx: &mpsc::UnboundedSender<HomeIdentityCompletion>,
     price_done_tx: &mpsc::UnboundedSender<Result<f64, String>>,
     plan_done_tx: &mpsc::UnboundedSender<SendSimplePlanCompletion>,
     nns_lookup_done_tx: &mpsc::UnboundedSender<NnsLookupCompletion>,
@@ -145,7 +144,6 @@ pub(super) async fn dispatch_paste(
     pasted: String,
     rt: &ReplRuntime,
     balance_done_tx: &mpsc::UnboundedSender<BalanceRefreshCompletion>,
-    identity_done_tx: &mpsc::UnboundedSender<HomeIdentityCompletion>,
     price_done_tx: &mpsc::UnboundedSender<Result<f64, String>>,
 ) -> Result<ReplControl, NockAppError> {
     if matches!(store.state.screen, Screen::Splash) {

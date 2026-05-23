@@ -26,7 +26,7 @@ use super::splash::draw_splash;
 use super::theme::{
     pulse_border_green, SPLASH_BRAND, THEME_ACCENT_GREEN, THEME_BG_DEEP, THEME_MUTED,
 };
-use crate::repl::app_state::{status_modal_visible, AppState, PanelFocus};
+use crate::repl::app_state::{status_modal_visible, AppState};
 use crate::repl::prompt_overlay::{activity_underlay, has_prompt_overlay};
 use crate::repl::screens::{Screen, SendSimplePhase};
 

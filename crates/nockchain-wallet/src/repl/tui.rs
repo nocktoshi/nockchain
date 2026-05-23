@@ -161,7 +161,6 @@ async fn run_tui_inner(
                             &terminal,
                             &job_done_tx,
                             &balance_done_tx,
-                            &identity_done_tx,
                             &price_done_tx,
                             &plan_done_tx,
                             &nns_lookup_done_tx,
@@ -184,7 +183,6 @@ async fn run_tui_inner(
                             text,
                             &rt,
                             &balance_done_tx,
-                            &identity_done_tx,
                             &price_done_tx,
                         )
                             .await
