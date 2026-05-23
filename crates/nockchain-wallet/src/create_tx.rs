@@ -5,6 +5,7 @@ use nockchain_math::noun_ext::NounMathExtHandle;
 use nockchain_math::zoon::zmap::ZMap;
 use nockchain_types::tx_engine::common::Signature;
 use nockvm::noun::NounSpace;
+use noun_serde::NounDecodeError;
 use wallet_tx_builder::types::CandidateNote;
 
 use super::*;

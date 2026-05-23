@@ -25,9 +25,9 @@ use nockapp::utils::make_tas as make_tas_util;
 use nockapp::wire::{SystemWire, Wire};
 use nockapp::{
     complete_run_on_exit_driver, exit_driver, file_driver, markdown_driver, one_punch_driver,
-    AtomExt, CrownError, NockAppError,
+    CrownError, NockAppError,
 };
-use nockvm::noun::{D, Noun, SIG, T};
+use nockvm::noun::{D, Noun, NounAllocator, NounSpace, SIG, T};
 use nockvm_macros::tas;
 use noun_serde::{NounDecode, NounDecodeError};
 use termimad::MadSkin;
@@ -52,19 +52,19 @@ pub(crate) struct DispatchHooks {
 }
 
 /// Decode additive `[%raw [%wbal-v1 …]]` / `[%raw [%wnote-v1 …]]` without touching `%markdown`.
-fn try_wallet_structured_event(noun: Noun) -> Option<WalletEvent> {
-    let cell = noun.as_cell().ok()?;
-    let head = cell.head();
-    let tail = cell.tail();
+fn try_wallet_structured_event(noun: Noun, space: &NounSpace) -> Option<WalletEvent> {
+    let cell = noun.in_space(space).as_cell().ok()?;
+    let head = cell.head().noun();
+    let tail = cell.tail().noun();
     if !unsafe { head.raw_equals(&D(tas!(b"raw"))) } {
         return None;
     }
-    let inner = tail.as_cell().ok()?;
-    let inner_head = inner.head();
-    let inner_tail = inner.tail();
+    let inner = tail.in_space(space).as_cell().ok()?;
+    let inner_head = inner.head().noun();
+    let inner_tail = inner.tail().noun();
     if unsafe { inner_head.raw_equals(&D(tas!(b"wbal-v1"))) } {
         let (wallet_version, block_id_b58, height, note_count, total_assets) =
-            <(u64, String, u64, u64, u64)>::from_noun(&inner_tail).ok()?;
+            <(u64, String, u64, u64, u64)>::from_noun(&inner_tail, space).ok()?;
         return Some(WalletEvent::BalanceSnapshotV1 {
             wallet_version,
             block_id_b58,
@@ -74,10 +74,8 @@ fn try_wallet_structured_event(noun: Noun) -> Option<WalletEvent> {
         });
     }
     if unsafe { inner_head.raw_equals(&D(tas!(b"wnote-v1"))) } {
-        let (height, block_id_b58, rows) = <(u64, String, Vec<(String, String, u64, u64)>)>::from_noun(
-            &inner_tail,
-        )
-        .ok()?;
+        let (height, block_id_b58, rows) =
+            <(u64, String, Vec<(String, String, u64, u64)>)>::from_noun(&inner_tail, space).ok()?;
         let rows: Vec<WalletNoteRowV1> = rows
             .into_iter()
             .map(
@@ -132,19 +130,20 @@ pub(crate) fn markdown_capture_driver(
             loop {
                 match handle.next_effect().await {
                     Ok(effect) => {
+                        let space = effect.noun_space();
                         let root = unsafe { effect.root() };
-                        if let Some(structured) = try_wallet_structured_event(*root) {
+                        if let Some(structured) = try_wallet_structured_event(*root, &space) {
                             if let Some(ref ev) = wallet_events {
                                 ev.lock().unwrap().push(structured);
                             }
                             continue;
                         }
-                        let Ok(effect_cell) = root.as_cell() else {
+                        let Ok(effect_cell) = root.in_space(&space).as_cell() else {
                             continue;
                         };
-                        if unsafe { effect_cell.head().raw_equals(&D(tas!(b"markdown"))) } {
-                            let markdown_text = effect_cell.tail();
-                            let text = if let Ok(atom) = markdown_text.as_atom() {
+                        if unsafe { effect_cell.head().noun().raw_equals(&D(tas!(b"markdown"))) } {
+                            let markdown_text = effect_cell.tail().noun();
+                            let text = if let Ok(atom) = markdown_text.in_space(&space).as_atom() {
                                 String::from_utf8_lossy(&atom.to_bytes_until_nul()?).to_string()
                             } else {
                                 tracing::error!("Failed to convert markdown text to string");
@@ -457,7 +456,10 @@ pub(crate) async fn execute_wallet_command(
             pubkey_slab
                 .to_vec()
                 .iter()
-                .map(|key| String::from_noun(unsafe { key.root() }))
+                .map(|key| {
+                    let space = key.noun_space();
+                    String::from_noun(unsafe { key.root() }, &space)
+                })
                 .collect::<Result<Vec<String>, NounDecodeError>>()?
                 .into_iter()
                 .filter_map(|value| match normalize_watch_address(value) {
@@ -472,7 +474,8 @@ pub(crate) async fn execute_wallet_command(
 
         let first_names: Vec<String> = if let Some(name_slab) = first_name_slab {
             let names_noun = unsafe { name_slab.root() };
-            <Vec<String>>::from_noun(names_noun)?
+            let name_space = name_slab.noun_space();
+            <Vec<String>>::from_noun(names_noun, &name_space)?
         } else {
             Vec::new()
         };
