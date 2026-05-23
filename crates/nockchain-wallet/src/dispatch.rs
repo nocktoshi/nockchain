@@ -59,11 +59,23 @@ impl DispatchHooks {
         Self::default()
     }
 
-    /// REPL / JSON API: structured `[%raw …]` only; `%markdown` is ignored.
+    /// REPL / JSON API: structured `[%raw …]` plus captured `%markdown`.
     pub(crate) fn structured(events: Arc<Mutex<Vec<WalletEvent>>>) -> Self {
         Self {
             sync_attempt: None,
             markdown_capture: None,
+            wallet_events: Some(events),
+        }
+    }
+
+    /// REPL TUI: structured effects and `%markdown` (create-tx, send-tx, …).
+    pub(crate) fn structured_with_markdown(
+        events: Arc<Mutex<Vec<WalletEvent>>>,
+        markdown: Arc<Mutex<String>>,
+    ) -> Self {
+        Self {
+            sync_attempt: None,
+            markdown_capture: Some(markdown),
             wallet_events: Some(events),
         }
     }
@@ -279,11 +291,15 @@ pub(crate) fn markdown_capture_driver(sink: Arc<Mutex<String>>) -> IODriverFn {
 }
 
 async fn add_markdown_io_driver(wallet: &mut Wallet, hooks: &DispatchHooks) {
-    if hooks.is_structured() {
-        if let Some(events) = hooks.wallet_events.clone() {
+    if let Some(events) = hooks.wallet_events.clone() {
+        wallet
+            .app
+            .add_io_driver(structured_effect_driver(events))
+            .await;
+        if let Some(sink) = hooks.markdown_capture.clone() {
             wallet
                 .app
-                .add_io_driver(structured_effect_driver(events))
+                .add_io_driver(markdown_capture_driver(sink))
                 .await;
         }
     } else if let Some(sink) = hooks.markdown_capture.clone() {

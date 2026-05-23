@@ -10,13 +10,14 @@ use super::scroll::estimate_wrapped_source_lines;
 use super::theme::THEME_ACCENT_GREEN;
 use crate::repl::app_state::{AppState, PanelFocus};
 
+#[allow(dead_code)]
 pub(crate) fn draw_balance_sidebar(
     f: &mut Frame<'_>,
     app: &mut AppState,
     area: ratatui::layout::Rect,
     tick: u64,
 ) {
-    let focused = matches!(app.panel_focus, PanelFocus::Balance);
+    let focused = matches!(app.panel_focus, PanelFocus::Activity);
     let mut balance_block = Block::default().borders(Borders::ALL);
     if focused {
         balance_block = balance_block

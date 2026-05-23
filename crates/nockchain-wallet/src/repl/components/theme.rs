@@ -5,20 +5,25 @@ use ratatui::style::Color;
 /// Forest green accent (`#228B22` / rgb 34,139,32) — matches the boot splash border and wordmark.
 pub(crate) const THEME_ACCENT_GREEN: Color = Color::Rgb(34, 139, 32);
 
+/// Send CTA — gold/yellow (extension primary action).
+pub(crate) const THEME_ACCENT_CTA: Color = Color::Rgb(255, 193, 7);
+
 /// `#0B0B0B` — deep fill (splash page background).
 pub(crate) const THEME_BG_DEEP: Color = Color::Rgb(11, 11, 11);
 
 /// `#3C3C3C` — panel / card surfaces.
 pub(crate) const THEME_BG_PANEL: Color = Color::Rgb(60, 60, 60);
 
-/// Drop shadow — visibly distinct from [`THEME_BG_DEEP`] (not the same as the page background).
+/// Drop shadow — visibly distinct from [`THEME_BG_DEEP`].
 pub(crate) const THEME_SHADOW: Color = Color::Rgb(36, 36, 40);
+
+/// Muted hint text.
+pub(crate) const THEME_MUTED: Color = Color::Rgb(140, 140, 140);
 
 /// Unicode mathematical sans-serif bold — reuse for boot splash and loading state.
 pub(crate) const SPLASH_BRAND: &str = " 𝐍 𝐎 𝐂 𝐊 𝐂 𝐇 𝐀 𝐈𝐍 ";
 
-/// Ramp through forest greens into a bright peak and back — drives the loading brand “chase” so the
-/// highlight reads as a pulse as it moves across the wordmark.
+/// Ramp through forest greens into a bright peak and back.
 pub(crate) const LOADING_BRAND_PALETTE: &[Color] = &[
     Color::Rgb(28, 105, 26),
     Color::Rgb(38, 135, 36),
@@ -43,11 +48,27 @@ pub(crate) fn pulse_color(frame_counter: usize) -> Color {
     let t = frame_counter % period;
     let h = period / 2;
     let wave = if t < h { t } else { period - t };
-    // ±7 around white; clamp so it stays bright / slightly cool gray at trough.
     let d = (wave as i32 * 14 / h as i32) - 7;
     Color::Rgb(
         (W + d).clamp(222, 255) as u8,
         (W + d).clamp(222, 255) as u8,
         (W + d).clamp(222, 255) as u8,
     )
+}
+
+/// Animated brand green from [`LOADING_BRAND_PALETTE`] (splash / home borders).
+pub(crate) fn pulse_green_rgb(frame_counter: usize) -> Color {
+    let palette = LOADING_BRAND_PALETTE;
+    let n = palette.len().max(1);
+    let idx = (frame_counter / 4) % n;
+    palette[idx]
+}
+
+/// Pulsing border green (splash outer frame).
+pub(crate) fn pulse_border_green(frame_counter: usize) -> Color {
+    if (frame_counter % 48) < 24 {
+        THEME_ACCENT_GREEN
+    } else {
+        Color::Rgb(26, 115, 25)
+    }
 }

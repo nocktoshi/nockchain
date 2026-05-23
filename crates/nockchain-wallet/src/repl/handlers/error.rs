@@ -23,7 +23,7 @@ pub(super) async fn error_screen(
     done_tx: &mpsc::UnboundedSender<JobCompletion>,
 ) -> Result<ReplControl, NockAppError> {
     let state = store.state.screen.clone();
-    super::replace_screen(store, Screen::Main { sel: 0 });
+    super::replace_screen(store, Screen::Home);
     let (msg, mut sel, actions, ctx) = match state {
         Screen::ErrorScreen {
             msg,
@@ -38,7 +38,7 @@ pub(super) async fn error_screen(
     };
 
     if esc_back(key.code) {
-        super::replace_screen(store, Screen::Main { sel: 0 });
+        super::replace_screen(store, Screen::Home);
         return Ok(ReplControl::Continue);
     }
 
@@ -74,7 +74,7 @@ pub(super) async fn error_screen(
                         super::schedule_cmd(store, rt, done_tx, cmd.clone(), "Retry");
                     }
                     1 => {
-                        super::replace_screen(store, Screen::Main { sel: 0 });
+                        super::replace_screen(store, Screen::Home);
                     }
                     _ => {
                         super::replace_screen(
@@ -90,7 +90,7 @@ pub(super) async fn error_screen(
                 },
                 ErrorCtx::CreateTx { cmd } => {
                     if !matches!(cmd, Commands::CreateTx { .. }) {
-                        super::replace_screen(store, Screen::Main { sel: 0 });
+                        super::replace_screen(store, Screen::Home);
                     } else {
                         match i {
                             0 => {

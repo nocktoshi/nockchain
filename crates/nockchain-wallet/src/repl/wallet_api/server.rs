@@ -129,7 +129,8 @@ async fn health() -> Json<serde_json::Value> {
             "keygen_v1",
             "migrate_summary_v1",
             "tx_accepted_v1",
-            "nns_registration_v1"
+            "nns_registration_v1",
+            "create_tx_v1"
         ],
     }))
 }

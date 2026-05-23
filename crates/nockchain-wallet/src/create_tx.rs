@@ -187,6 +187,15 @@ struct CreateTxRequest {
     note_selection: NoteSelectionStrategyCli,
 }
 
+/// Planner output before the kernel `create-tx` poke (REPL review screen).
+#[derive(Debug, Clone)]
+pub(crate) struct PlannedCreateTx {
+    pub(crate) request: CreateTxRequest,
+    pub(crate) plan: wallet_tx_builder::types::PlanResult,
+    pub(crate) block_id_b58: String,
+    pub(crate) height: u64,
+}
+
 #[derive(Debug, Clone)]
 struct PendingMigrationTx {
     summary_index: usize,
@@ -798,8 +807,8 @@ impl Wallet {
         candidates
     }
 
-    /// Plans create-tx inputs/fee and dispatches final hoon create-tx poke.
-    pub(crate) async fn create_tx_with_planner(
+    /// Plans create-tx inputs/fee without dispatching the kernel poke.
+    pub(crate) async fn plan_create_tx_with_planner(
         &mut self,
         synced_snapshot: Option<NormalizedSnapshot>,
         names: Option<String>,
@@ -811,8 +820,8 @@ impl Wallet {
         include_data: bool,
         save_raw_tx: bool,
         note_selection: NoteSelectionStrategyCli,
-    ) -> CommandNoun<NounSlab> {
-        let planner_error = |reason: String| -> CommandNoun<NounSlab> {
+    ) -> Result<PlannedCreateTx, NockAppError> {
+        let planner_error = |reason: String| -> Result<PlannedCreateTx, NockAppError> {
             Err(CrownError::Unknown(format!("create-tx planner failed: {}", reason)).into())
         };
 
@@ -1072,17 +1081,56 @@ impl Wallet {
             planned_fee
         };
 
-        Self::create_tx(CreateTxRequest {
-            names: planned_names_arg,
-            recipients,
-            fee: final_fee,
-            allow_low_fee,
-            refund_pkh,
-            sign_keys,
-            include_data,
-            save_raw_tx,
-            note_selection,
+        Ok(PlannedCreateTx {
+            request: CreateTxRequest {
+                names: planned_names_arg,
+                recipients,
+                fee: final_fee,
+                allow_low_fee,
+                refund_pkh,
+                sign_keys,
+                include_data,
+                save_raw_tx,
+                note_selection,
+            },
+            plan,
+            block_id_b58: snapshot.metadata.block_id.to_base58(),
+            height: (snapshot.metadata.height.0).0,
         })
+    }
+
+    /// Plans create-tx inputs/fee and dispatches final hoon create-tx poke.
+    pub(crate) async fn create_tx_with_planner(
+        &mut self,
+        synced_snapshot: Option<NormalizedSnapshot>,
+        names: Option<String>,
+        fee: Option<u64>,
+        recipients: Vec<RecipientSpec>,
+        allow_low_fee: bool,
+        refund_pkh: Option<String>,
+        sign_keys: Vec<(u64, bool)>,
+        include_data: bool,
+        save_raw_tx: bool,
+        note_selection: NoteSelectionStrategyCli,
+    ) -> CommandNoun<NounSlab> {
+        match self
+            .plan_create_tx_with_planner(
+                synced_snapshot,
+                names,
+                fee,
+                recipients,
+                allow_low_fee,
+                refund_pkh,
+                sign_keys,
+                include_data,
+                save_raw_tx,
+                note_selection,
+            )
+            .await
+        {
+            Ok(planned) => Self::create_tx(planned.request),
+            Err(err) => Err(err),
+        }
     }
 
     pub(crate) fn format_migrate_v0_notes_summary(summary: &MigrateV0NotesSummary) -> String {

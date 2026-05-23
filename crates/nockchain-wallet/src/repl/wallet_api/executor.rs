@@ -48,7 +48,8 @@ async fn execute_repl_api_command(
     }
 
     let outcome =
-        command_runner::run_command_on_runtime(rt, &parsed, parsed.command.clone(), None).await;
+        command_runner::run_command_on_runtime(rt, &parsed, parsed.command.clone(), None, None)
+            .await;
     WalletCommandJsonResponse::from_outcome(outcome)
 }
 

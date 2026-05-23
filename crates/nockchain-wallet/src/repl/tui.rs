@@ -15,7 +15,10 @@ use nockapp::NockAppError;
 use tokio::sync::mpsc;
 use tokio::task::LocalSet;
 
-use super::command_runner::{self, BalanceRefreshCompletion, JobCompletion, ReplRuntime};
+use super::command_runner::{
+    self, BalanceRefreshCompletion, HomeIdentityCompletion, JobCompletion, NnsLookupCompletion,
+    ReplRuntime, SendSimplePlanCompletion,
+};
 use super::components::root::draw_ui;
 use super::handlers;
 use super::hooks::events::spawn_crossterm_channel;
@@ -33,9 +36,17 @@ pub(super) async fn run_tui(
     cli: WalletCli,
     rt: ReplRuntime,
     api_job_rx: mpsc::Receiver<ReplApiJob>,
+    price_done_tx: mpsc::UnboundedSender<Result<f64, String>>,
+    price_done_rx: mpsc::UnboundedReceiver<Result<f64, String>>,
 ) -> Result<(), NockAppError> {
     LocalSet::new()
-        .run_until(run_tui_inner(cli, rt, api_job_rx))
+        .run_until(run_tui_inner(
+            cli,
+            rt,
+            api_job_rx,
+            price_done_tx,
+            price_done_rx,
+        ))
         .await
 }
 
@@ -43,6 +54,8 @@ async fn run_tui_inner(
     cli: WalletCli,
     rt: ReplRuntime,
     api_job_rx: mpsc::Receiver<ReplApiJob>,
+    price_done_tx: mpsc::UnboundedSender<Result<f64, String>>,
+    mut price_done_rx: mpsc::UnboundedReceiver<Result<f64, String>>,
 ) -> Result<(), NockAppError> {
     let rt_api = rt.clone();
     tokio::task::spawn_local(async move {
@@ -62,6 +75,11 @@ async fn run_tui_inner(
     let (job_done_tx, mut job_done_rx) = mpsc::unbounded_channel::<JobCompletion>();
     let (balance_done_tx, mut balance_done_rx) =
         mpsc::unbounded_channel::<BalanceRefreshCompletion>();
+    let (plan_done_tx, mut plan_done_rx) = mpsc::unbounded_channel::<SendSimplePlanCompletion>();
+    let (nns_lookup_done_tx, mut nns_lookup_done_rx) =
+        mpsc::unbounded_channel::<NnsLookupCompletion>();
+    let (identity_done_tx, mut identity_done_rx) =
+        mpsc::unbounded_channel::<HomeIdentityCompletion>();
 
     let mut store = UIStore::new(Screen::Splash);
     let _ = super::session::refresh_session_from_api(&rt).await;
@@ -79,13 +97,51 @@ async fn run_tui_inner(
         tokio::select! {
             biased;
             maybe_job = job_done_rx.recv() => {
-                if let Some((res, captured)) = maybe_job {
-                    command_runner::apply_job_result(&mut store, res, captured);
+                if let Some((res, captured, markdown)) = maybe_job {
+                    command_runner::apply_job_result(
+                        &mut store,
+                        res,
+                        captured,
+                        markdown,
+                        &identity_done_tx,
+                    );
                 }
             }
             maybe_bal = balance_done_rx.recv() => {
                 if let Some((nonce, res, captured)) = maybe_bal {
+                    let ok = res.is_ok();
                     command_runner::apply_balance_sidebar_result(&mut store, nonce, res, captured);
+                    if ok {
+                        command_runner::schedule_price_fetch(&mut store, &price_done_tx);
+                        command_runner::schedule_home_identity_fetch(
+                            &mut store,
+                            &rt,
+                            &identity_done_tx,
+                        );
+                    }
+                }
+            }
+            maybe_plan = plan_done_rx.recv() => {
+                if let Some(result) = maybe_plan {
+                    handlers::apply_send_simple_plan_result(&mut store, result);
+                }
+            }
+            maybe_nns = nns_lookup_done_rx.recv() => {
+                if let Some(result) = maybe_nns {
+                    handlers::apply_nns_lookup_result(&mut store, result);
+                }
+            }
+            maybe_identity = identity_done_rx.recv() => {
+                if let Some((address, nockname)) = maybe_identity {
+                    command_runner::apply_home_identity_result(&mut store, address, nockname);
+                }
+            }
+            maybe_price = price_done_rx.recv() => {
+                if let Some(result) = maybe_price {
+                    match result {
+                        Ok(usd) => store.dispatch(UiAction::PriceFetched { usd_per_coin: usd }),
+                        Err(msg) => store.dispatch(UiAction::PriceFetchFailed { msg }),
+                    }
                 }
             }
             _ = interval.tick() => {
@@ -105,6 +161,10 @@ async fn run_tui_inner(
                             &terminal,
                             &job_done_tx,
                             &balance_done_tx,
+                            &identity_done_tx,
+                            &price_done_tx,
+                            &plan_done_tx,
+                            &nns_lookup_done_tx,
                         )
                         .await
                         {
@@ -118,7 +178,15 @@ async fn run_tui_inner(
                         }
                     }
                     Event::Paste(text) => {
-                        match handlers::dispatch_paste(&cli, &mut store, text, &rt, &balance_done_tx)
+                        match handlers::dispatch_paste(
+                            &cli,
+                            &mut store,
+                            text,
+                            &rt,
+                            &balance_done_tx,
+                            &identity_done_tx,
+                            &price_done_tx,
+                        )
                             .await
                         {
                             Ok(super::screens::ReplControl::Continue) => {}

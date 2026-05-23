@@ -4,7 +4,7 @@ mod action;
 mod apply;
 
 pub(crate) use action::UiAction;
-pub(crate) use apply::apply_ui_action;
+pub(crate) use apply::{apply_ui_action, price_fetch_stale};
 
 use crate::repl::app_state::UiState;
 use crate::repl::screens::Screen;
@@ -49,13 +49,13 @@ mod tests {
     #[test]
     fn replace_screen_action() {
         let mut s = UiState::new(Screen::Splash);
-        apply_ui_action(&mut s, UiAction::ReplaceScreen(Screen::Main { sel: 0 }));
-        assert!(matches!(s.screen, Screen::Main { sel: 0 }));
+        apply_ui_action(&mut s, UiAction::ReplaceScreen(Screen::Home));
+        assert!(matches!(s.screen, Screen::Home));
     }
 
     #[test]
     fn balance_sidebar_completed_ignores_stale_nonce() {
-        let mut s = UiState::new(Screen::Main { sel: 0 });
+        let mut s = UiState::new(Screen::Home);
         s.balance_job_nonce = 5;
         s.balance_panel.text = "keep".into();
         apply_ui_action(
@@ -71,7 +71,7 @@ mod tests {
 
     #[test]
     fn balance_sidebar_completed_applies_matching_nonce() {
-        let mut s = UiState::new(Screen::Main { sel: 0 });
+        let mut s = UiState::new(Screen::Home);
         s.balance_job_nonce = 5;
         apply_ui_action(
             &mut s,
@@ -92,7 +92,7 @@ mod tests {
 
     #[test]
     fn enter_running_skips_when_already_running() {
-        let mut s = UiState::new(Screen::Main { sel: 0 });
+        let mut s = UiState::new(Screen::Home);
         let (tx, rx) = watch::channel((0usize, 5usize));
         apply_ui_action(
             &mut s,
@@ -125,7 +125,7 @@ mod tests {
 
     #[test]
     fn job_completed_ok_restores_screen() {
-        let mut s = UiState::new(Screen::Main { sel: 2 });
+        let mut s = UiState::new(Screen::Home);
         let (tx, rx) = watch::channel((0usize, 5usize));
         apply_ui_action(
             &mut s,
@@ -141,9 +141,10 @@ mod tests {
             UiAction::JobCompleted {
                 result: Ok(()),
                 events: vec![],
+                markdown: String::new(),
             },
         );
-        assert!(matches!(s.screen, Screen::Main { sel: 2 }));
-        assert!(s.last_command_output.contains("structured"));
+        assert!(matches!(s.screen, Screen::Home));
+        assert!(s.last_command_output.is_empty());
     }
 }

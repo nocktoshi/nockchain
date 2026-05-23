@@ -20,8 +20,8 @@ mod recipient;
 mod repl;
 #[cfg(test)]
 mod tests;
-mod wallet_outcome;
 
+pub(crate) use repl::wallet_outcome;
 use std::collections::BTreeMap;
 use std::fs;
 use std::io::{self, Write};

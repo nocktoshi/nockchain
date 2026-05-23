@@ -108,6 +108,11 @@ pub(crate) enum WalletEvent {
         blob: String,
         tx_paths: Vec<String>,
     },
+    /// Kernel `%markdown` from create-tx (saved path + transaction display).
+    CreateTxV1 {
+        tx_paths: Vec<String>,
+        summary: String,
+    },
 }
 
 /// Machine-readable command result (REPL store, HTTP API).

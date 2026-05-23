@@ -11,15 +11,19 @@ mod ct_dispatch;
 mod format;
 mod handlers;
 mod hooks;
+mod clipboard;
 mod nns;
 mod paste;
+mod prompt_overlay;
 mod screens;
+mod send_simple;
 mod session;
 mod session_client;
 mod store;
 mod tui;
 mod view;
 mod wallet_api;
+pub(crate) mod wallet_outcome;
 
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -53,11 +57,13 @@ pub async fn run(
     let wallet = Arc::new(Mutex::new(wallet));
     let snapshot = Arc::new(Mutex::new(synced_snapshot_for_planner));
     let (api_job_tx, api_job_rx) = mpsc::channel::<ReplApiJob>(32);
+    let (price_done_tx, price_done_rx) = mpsc::unbounded_channel();
     let rt = ReplRuntime {
         wallet: Arc::clone(&wallet),
         snapshot: Arc::clone(&snapshot),
         cli: Arc::new(std::sync::Mutex::new(cli.clone())),
         wallet_event_sink: Arc::new(std::sync::Mutex::new(Vec::new())),
+        repl_markdown_sink: Arc::new(std::sync::Mutex::new(String::new())),
         session_config,
         session_path,
         api_auth_token,
@@ -65,7 +71,7 @@ pub async fn run(
         api_server: Arc::new(std::sync::Mutex::new(None)),
     };
     session::apply_session_to_cli(&rt);
-    tui::run_tui(cli.clone(), rt, api_job_rx).await
+    tui::run_tui(cli.clone(), rt, api_job_rx, price_done_tx, price_done_rx).await
 }
 
 #[cfg(test)]
