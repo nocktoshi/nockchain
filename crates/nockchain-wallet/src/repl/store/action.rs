@@ -4,7 +4,6 @@ use nockapp::NockAppError;
 use tokio::sync::watch;
 
 use crate::command::Commands;
-
 use crate::repl::app_state::PanelFocus;
 use crate::repl::screens::Screen;
 
@@ -31,11 +30,14 @@ pub(crate) enum UiAction {
     BeginBalanceSidebarFetch {
         progress_rx: watch::Receiver<(usize, usize)>,
     },
-    JobCompleted(Result<(), NockAppError>, String),
+    JobCompleted {
+        result: Result<(), NockAppError>,
+        events: Vec<crate::wallet_outcome::WalletEvent>,
+    },
     BalanceSidebarCompleted {
         nonce: u64,
         result: Result<(), NockAppError>,
-        markdown: String,
+        events: Vec<crate::wallet_outcome::WalletEvent>,
     },
     NudgeBalanceScroll {
         delta: i32,

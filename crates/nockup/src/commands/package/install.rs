@@ -241,8 +241,8 @@ pub async fn run(opts: InstallOptions) -> Result<()> {
         #[derive(PartialEq)]
         enum Decision {
             Apply,
-            Skip,      // user declined, or every patch is already in shape
-            PlanOnly,  // dry-run
+            Skip,     // user declined, or every patch is already in shape
+            PlanOnly, // dry-run
         }
         let decision = if opts.dry_run {
             Decision::PlanOnly
@@ -315,7 +315,10 @@ pub async fn run(opts: InstallOptions) -> Result<()> {
                 println!(
                     "{} Dry run — no files modified ({} patches would be applied)",
                     "·".dimmed(),
-                    patch_plan.iter().map(|(_, p)| p.patches.len()).sum::<usize>()
+                    patch_plan
+                        .iter()
+                        .map(|(_, p)| p.patches.len())
+                        .sum::<usize>()
                 );
             }
             Decision::Skip => { /* already printed its own reason above */ }
@@ -385,10 +388,7 @@ fn packages_relative_symlink_target(
             hoon_dir.display()
         )
     })?;
-    let ups = rel
-        .parent()
-        .map(|p| p.components().count())
-        .unwrap_or(0);
+    let ups = rel.parent().map(|p| p.components().count()).unwrap_or(0);
     let mut target = PathBuf::new();
     for _ in 0..ups {
         target.push("..");
@@ -426,12 +426,7 @@ fn link_install_tree(
             let path = entry.path();
             if path.is_dir() {
                 link_tree(
-                    &path,
-                    package_dir,
-                    hoon_dir,
-                    target_root,
-                    package_dir_name,
-                    relative_path,
+                    &path, package_dir, hoon_dir, target_root, package_dir_name, relative_path,
                 )?;
             } else if path.is_file() {
                 let rel = path
@@ -483,16 +478,10 @@ fn link_install_tree(
         Ok(())
     }
 
-    fs::create_dir_all(&target_root).with_context(|| {
-        format!("Failed to create directory {}", target_root.display())
-    })?;
+    fs::create_dir_all(&target_root)
+        .with_context(|| format!("Failed to create directory {}", target_root.display()))?;
     link_tree(
-        package_dir,
-        package_dir,
-        hoon_dir,
-        &target_root,
-        &package_dir_name,
-        relative_path,
+        package_dir, package_dir, hoon_dir, &target_root, &package_dir_name, relative_path,
     )
     .with_context(|| format!("Failed to link install tree for package {}", package_name))?;
     Ok(())
@@ -531,9 +520,8 @@ fn link_registry_package(
 
             let link_path = target_dir.join(filename);
             if let Some(parent) = link_path.parent() {
-                fs::create_dir_all(parent).with_context(|| {
-                    format!("Failed to create directory {}", parent.display())
-                })?;
+                fs::create_dir_all(parent)
+                    .with_context(|| format!("Failed to create directory {}", parent.display()))?;
             }
 
             // Remove existing symlink if it exists

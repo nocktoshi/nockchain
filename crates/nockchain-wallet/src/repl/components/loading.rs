@@ -5,13 +5,11 @@ use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Paragraph, Wrap};
 
+use super::theme::{LOADING_BRAND_PALETTE, SPLASH_BRAND, THEME_SHADOW};
 use crate::repl::app_state::AppState;
 
-use super::theme::{LOADING_BRAND_PALETTE, SPLASH_BRAND, THEME_SHADOW};
-
 pub(crate) fn braille_spinner_char(tick: u64) -> &'static str {
-    const SPIN: &[&str] =
-        &["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
+    const SPIN: &[&str] = &["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
     SPIN[tick as usize % SPIN.len()]
 }
 

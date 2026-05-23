@@ -8,9 +8,6 @@ use ratatui::widgets::{
 };
 use ratatui::Frame;
 
-use crate::repl::app_state::{AppState, PanelFocus};
-use crate::repl::screens::Screen;
-
 use super::balance_sidebar::draw_balance_sidebar;
 use super::create_tx_panel::draw_create_tx;
 use super::loading::loading_indicator_paragraph;
@@ -21,8 +18,11 @@ use super::menus::{
 use super::scroll::estimate_wrapped_source_lines;
 use super::splash::draw_splash;
 use super::theme::{SPLASH_BRAND, THEME_ACCENT_GREEN};
+use crate::repl::app_state::{AppState, PanelFocus};
+use crate::repl::screens::Screen;
 
-pub(crate) fn draw_ui(f: &mut Frame<'_>, app: &mut AppState) {
+pub(crate) fn draw_ui(f: &mut Frame<'_>, store: &mut crate::repl::store::UIStore) {
+    let app = &mut store.state;
     let tick = app.ui_fx.frame_clock;
     if matches!(app.screen, Screen::Splash) {
         draw_splash(f, tick);
@@ -47,16 +47,15 @@ pub(crate) fn draw_ui(f: &mut Frame<'_>, app: &mut AppState) {
     };
     let is_running = matches!(app.screen, Screen::Running { .. });
 
-    let (menu_area, balance_area) =
-        if matches!(panel, Screen::Main { .. }) && !is_running {
-            let h = Layout::default()
-                .direction(Direction::Horizontal)
-                .constraints([Constraint::Fill(1), Constraint::Fill(1)])
-                .split(chunks[0]);
-            (h[0], Some(h[1]))
-        } else {
-            (chunks[0], None)
-        };
+    let (menu_area, balance_area) = if matches!(panel, Screen::Main { .. }) && !is_running {
+        let h = Layout::default()
+            .direction(Direction::Horizontal)
+            .constraints([Constraint::Fill(1), Constraint::Fill(1)])
+            .split(chunks[0]);
+        (h[0], Some(h[1]))
+    } else {
+        (chunks[0], None)
+    };
 
     match &panel {
         Screen::Splash => {}
@@ -82,20 +81,38 @@ pub(crate) fn draw_ui(f: &mut Frame<'_>, app: &mut AppState) {
             list_draw(f, app, menu_area, "Sign / verify", SIGN_MENU, *sel);
         }
         Screen::Settings { sel } => {
-            list_draw(f, app, menu_area, "Settings & help", SETTINGS_MENU, *sel);
+            let session = &store.session_display;
+            let endpoint_line = format!(
+                "Public gRPC: `{}`\nJSON API: `{}`",
+                session.public_grpc_server_addr, session.api_listen,
+            );
+            let chunks = Layout::default()
+                .direction(Direction::Vertical)
+                .constraints([Constraint::Length(3), Constraint::Min(3)])
+                .split(menu_area);
+            let endpoint = Paragraph::new(endpoint_line)
+                .block(Block::default().borders(Borders::ALL).title("Connection"));
+            f.render_widget(endpoint, chunks[0]);
+            list_draw(f, app, chunks[1], "Settings & help", SETTINGS_MENU, *sel);
         }
         Screen::Quick { line } => {
             let t = format!("Quick command (help, exit, …)\n\n> {line}");
             let p = Paragraph::new(t)
                 .wrap(Wrap { trim: true })
-                .block(menu_panel_block("Quick", app.panel_focus == PanelFocus::Menu));
+                .block(menu_panel_block(
+                    "Quick",
+                    app.panel_focus == PanelFocus::Menu,
+                ));
             f.render_widget(p, menu_area);
         }
         Screen::TextPrompt { title, value, .. } => {
             let t = format!("{title}\n\n> {value}");
             let p = Paragraph::new(t)
                 .wrap(Wrap { trim: true })
-                .block(menu_panel_block(title.as_str(), app.panel_focus == PanelFocus::Menu));
+                .block(menu_panel_block(
+                    title.as_str(),
+                    app.panel_focus == PanelFocus::Menu,
+                ));
             f.render_widget(p, menu_area);
         }
         Screen::Confirm {
@@ -243,9 +260,7 @@ fn menu_panel_block<'a>(title: &'a str, focused: bool) -> Block<'a> {
 }
 
 fn output_panel_block(focused: bool, title: Span<'static>) -> Block<'static> {
-    let mut b = Block::default()
-        .borders(Borders::ALL)
-        .title(title);
+    let mut b = Block::default().borders(Borders::ALL).title(title);
     if focused {
         b = b
             .border_type(BorderType::Thick)

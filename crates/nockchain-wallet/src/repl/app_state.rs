@@ -1,6 +1,6 @@
 //! Aggregates REPL screen plus ephemeral UI state (toast, sync progress watch).
-//! Domain fields and presentation/FX are combined in [`UiState`]; all updates go through
-//! [`crate::repl::store::UIStore::dispatch`].
+//! Persisted connection/API settings live in [`crate::repl::wallet_api::WalletSessionState`]
+//! (`session.json`, GET/POST `/v1/wallet/state`).
 
 use ratatui::widgets::ListState;
 use tokio::sync::watch;
@@ -59,8 +59,10 @@ pub(crate) struct UiState {
     pub screen: Screen,
     pub toast: Option<String>,
     pub sync_progress: Option<watch::Receiver<(usize, usize)>>,
-    /// Terminal-rendered markdown text from the last `markdown` effect(s), shown in the output panel.
+    /// Terminal text rendered from [`Self::last_command_events`] for the output panel.
     pub last_command_output: String,
+    /// Structured kernel events from the last wallet command (data layer).
+    pub last_command_events: Vec<crate::wallet_outcome::WalletEvent>,
     /// Vertical scroll (wrapped lines) for the output panel.
     pub output_scroll: u16,
     /// Scroll position for menu [`List`](ratatui::widgets::List) widgets (long menus).
@@ -83,6 +85,7 @@ impl UiState {
             toast: None,
             sync_progress: None,
             last_command_output: String::new(),
+            last_command_events: Vec::new(),
             output_scroll: 0,
             list_state: ListState::default(),
             panel_focus: PanelFocus::Menu,

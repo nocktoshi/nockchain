@@ -529,8 +529,9 @@ impl DecodedNoteDataEntry {
             NormalizedNoteDataKey::Memo => {
                 MemoDataPayload::from_blob(&entry.blob).map(DecodedNoteDataPayload::Memo)
             }
-            NormalizedNoteDataKey::Blob => MemoDataPayload::from_blob(&entry.blob)
-                .map(DecodedNoteDataPayload::Blob),
+            NormalizedNoteDataKey::Blob => {
+                MemoDataPayload::from_blob(&entry.blob).map(DecodedNoteDataPayload::Blob)
+            }
             NormalizedNoteDataKey::Other(_) => Ok(DecodedNoteDataPayload::Raw),
         };
 

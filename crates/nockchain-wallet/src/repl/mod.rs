@@ -8,25 +8,33 @@ mod command_runner;
 mod components;
 mod create_tx;
 mod ct_dispatch;
+mod format;
 mod handlers;
 mod hooks;
-mod markdown_display;
+mod nns;
 mod paste;
 mod screens;
+mod session;
+mod session_client;
 mod store;
 mod tui;
+mod view;
+mod wallet_api;
 
+use std::path::PathBuf;
 use std::sync::Arc;
 
 use command_runner::ReplRuntime;
 use nockapp::NockAppError;
-use tokio::sync::Mutex;
+use session::init_session_config;
+use tokio::sync::{mpsc, Mutex};
+pub(crate) use wallet_api::ReplApiJob;
+use wallet_api::{generate_api_token, SESSION_FILE_NAME};
 use wallet_tx_builder::adapter::NormalizedSnapshot;
 
 use crate::command::WalletCli;
 use crate::Wallet;
 
-/// Normalize optional leading `/` for slash-style commands (e.g. `/help` → `help`).
 pub(crate) fn normalize_slash_cmd(line: &str) -> &str {
     let t = line.trim();
     t.strip_prefix('/').unwrap_or(t).trim()
@@ -37,17 +45,27 @@ pub async fn run(
     cli: &WalletCli,
     wallet: Wallet,
     synced_snapshot_for_planner: Option<NormalizedSnapshot>,
+    wallet_data_dir: PathBuf,
 ) -> Result<(), NockAppError> {
+    let session_path = wallet_data_dir.join(SESSION_FILE_NAME);
+    let session_config = init_session_config(session_path.clone(), cli);
+    let api_auth_token: Arc<str> = Arc::from(generate_api_token());
     let wallet = Arc::new(Mutex::new(wallet));
     let snapshot = Arc::new(Mutex::new(synced_snapshot_for_planner));
+    let (api_job_tx, api_job_rx) = mpsc::channel::<ReplApiJob>(32);
     let rt = ReplRuntime {
         wallet: Arc::clone(&wallet),
         snapshot: Arc::clone(&snapshot),
-        cli: cli.clone(),
-        markdown_sink: Arc::new(std::sync::Mutex::new(String::new())),
+        cli: Arc::new(std::sync::Mutex::new(cli.clone())),
         wallet_event_sink: Arc::new(std::sync::Mutex::new(Vec::new())),
+        session_config,
+        session_path,
+        api_auth_token,
+        api_job_tx,
+        api_server: Arc::new(std::sync::Mutex::new(None)),
     };
-    tui::run_tui(cli.clone(), rt).await
+    session::apply_session_to_cli(&rt);
+    tui::run_tui(cli.clone(), rt, api_job_rx).await
 }
 
 #[cfg(test)]

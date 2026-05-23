@@ -6,14 +6,13 @@ use crossterm::event::KeyEvent;
 use nockapp::NockAppError;
 use tokio::sync::{mpsc, Mutex};
 
+use super::input::{esc_back, list_activate};
 use crate::command::{Commands, WalletCli};
-use crate::repl::store::UIStore;
 use crate::repl::command_runner::{JobCompletion, ReplRuntime};
 use crate::repl::create_tx::CreateTxWizard;
-use crate::repl::screens::{ErrorCtx, ReplControl, Screen};
 use crate::repl::hooks::terminal::Term;
-
-use super::input::{esc_back, list_activate};
+use crate::repl::screens::{ErrorCtx, ReplControl, Screen};
+use crate::repl::store::UIStore;
 
 pub(super) async fn error_screen(
     _cli: &WalletCli,
@@ -45,21 +44,27 @@ pub(super) async fn error_screen(
 
     match list_activate(&mut sel, actions.len(), key.code) {
         Err(()) => {
-            super::replace_screen(store, Screen::ErrorScreen {
-                msg,
-                sel,
-                actions,
-                ctx,
-            });
+            super::replace_screen(
+                store,
+                Screen::ErrorScreen {
+                    msg,
+                    sel,
+                    actions,
+                    ctx,
+                },
+            );
             Ok(ReplControl::Continue)
         }
         Ok(None) => {
-            super::replace_screen(store, Screen::ErrorScreen {
-                msg,
-                sel,
-                actions,
-                ctx,
-            });
+            super::replace_screen(
+                store,
+                Screen::ErrorScreen {
+                    msg,
+                    sel,
+                    actions,
+                    ctx,
+                },
+            );
             Ok(ReplControl::Continue)
         }
         Ok(Some(i)) => {
@@ -72,12 +77,15 @@ pub(super) async fn error_screen(
                         super::replace_screen(store, Screen::Main { sel: 0 });
                     }
                     _ => {
-                        super::replace_screen(store, Screen::ErrorScreen {
-                            msg,
-                            sel,
-                            actions,
-                            ctx,
-                        });
+                        super::replace_screen(
+                            store,
+                            Screen::ErrorScreen {
+                                msg,
+                                sel,
+                                actions,
+                                ctx,
+                            },
+                        );
                     }
                 },
                 ErrorCtx::CreateTx { cmd } => {
@@ -96,20 +104,26 @@ pub(super) async fn error_screen(
                                 }
                             }
                             2 => {
-                                super::replace_screen(store, Screen::CreateTx {
-                                    w: CreateTxWizard::new(),
-                                });
+                                super::replace_screen(
+                                    store,
+                                    Screen::CreateTx {
+                                        w: CreateTxWizard::new(),
+                                    },
+                                );
                             }
                             3 => {
                                 super::replace_screen(store, Screen::Transactions { sel: 0 });
                             }
                             _ => {
-                                super::replace_screen(store, Screen::ErrorScreen {
-                                    msg,
-                                    sel,
-                                    actions,
-                                    ctx,
-                                });
+                                super::replace_screen(
+                                    store,
+                                    Screen::ErrorScreen {
+                                        msg,
+                                        sel,
+                                        actions,
+                                        ctx,
+                                    },
+                                );
                             }
                         }
                     }

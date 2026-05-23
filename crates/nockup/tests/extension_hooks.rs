@@ -70,8 +70,7 @@ fn template_git_file_url_resolves() {
         repo.path(),
         &[
             (
-                "templates/demo/Cargo.toml.hbs",
-                "name = \"{{project_name}}\"\n",
+                "templates/demo/Cargo.toml.hbs", "name = \"{{project_name}}\"\n",
             ),
             ("templates/demo/hoon/app/app.hoon", "::  marker\n"),
         ],
@@ -135,11 +134,7 @@ fn plugin_discovery_executes_path_binary() {
     // its exit code propagated.
     let plugin_dir = TempDir::new().unwrap();
     let script = plugin_dir.path().join("nockup-greet");
-    fs::write(
-        &script,
-        "#!/bin/sh\necho \"plugin says: $1\"\nexit 0\n",
-    )
-    .unwrap();
+    fs::write(&script, "#!/bin/sh\necho \"plugin says: $1\"\nexit 0\n").unwrap();
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;

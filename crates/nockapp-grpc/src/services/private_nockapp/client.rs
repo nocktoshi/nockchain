@@ -49,9 +49,7 @@ impl PrivateNockAppGrpcClient {
     // }
 
     pub async fn export_state(&mut self, path: impl Into<String>) -> Result<()> {
-        let request = ExportStateRequest {
-            path: path.into(),
-        };
+        let request = ExportStateRequest { path: path.into() };
 
         let response = self.client.export_state(request).await?;
         let response = response.into_inner();

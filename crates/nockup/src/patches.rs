@@ -292,9 +292,9 @@ fn ensure_toml_entry(
     let leaf = table_path.len() - 1;
     let mut cursor: &mut Item = doc.as_item_mut();
     for (i, segment) in table_path.iter().enumerate() {
-        let tbl = cursor
-            .as_table_mut()
-            .ok_or_else(|| anyhow::anyhow!("expected `{segment}` to be a table in {}", patch.file))?;
+        let tbl = cursor.as_table_mut().ok_or_else(|| {
+            anyhow::anyhow!("expected `{segment}` to be a table in {}", patch.file)
+        })?;
         if !tbl.contains_key(segment) {
             let mut new_table = Table::new();
             new_table.set_implicit(i != leaf);

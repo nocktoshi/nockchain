@@ -126,6 +126,10 @@ impl ActiveSignerEntryNoun {
     }
 }
 
+pub(crate) fn migrate_signer_label(signer: &ActiveSignerEntryNoun) -> String {
+    signer.label()
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct MigrateV0SignerSummary {
     pub(crate) signer: ActiveSignerEntryNoun,

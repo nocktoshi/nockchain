@@ -106,6 +106,9 @@ pub(crate) enum TextThen {
         threshold: u64,
     },
     TxMigrateDest,
+    NnsRegisterName,
+    SettingsGrpcEndpoint,
+    SettingsApiListen,
     WatchAddr,
     WatchPubkey,
     SignMsgStepMessage,
@@ -150,5 +153,8 @@ pub(crate) enum ConfirmThen {
     SignHashHardened {
         hash_b58: String,
         index: Option<u64>,
+    },
+    NnsRegisterConfirm {
+        name: String,
     },
 }

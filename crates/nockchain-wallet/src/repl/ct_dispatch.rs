@@ -5,10 +5,10 @@ use nockapp::NockAppError;
 use nockchain_types::common::Hash;
 use tokio::sync::mpsc;
 
-use super::store::{UIStore, UiAction};
 use super::command_runner::{schedule_wallet_command, JobCompletion, ReplRuntime};
 use super::create_tx::{CreateTxWizard, OptSub, Phase, RecSub};
 use super::screens::{ReplControl, Screen};
+use super::store::{UIStore, UiAction};
 use crate::command::{NoteSelectionStrategyCli, WalletCli};
 use crate::recipient::{validate_blob_field, validate_memo_utf8, RecipientSpecToken};
 

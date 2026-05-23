@@ -27,7 +27,7 @@ use nockapp::{
     complete_run_on_exit_driver, exit_driver, file_driver, markdown_driver, one_punch_driver,
     CrownError, NockAppError,
 };
-use nockvm::noun::{D, Noun, NounAllocator, NounSpace, SIG, T};
+use nockvm::noun::{Noun, NounAllocator, NounSpace, D, SIG, T};
 use nockvm_macros::tas;
 use noun_serde::{NounDecode, NounDecodeError};
 use termimad::MadSkin;
@@ -36,22 +36,52 @@ use wallet_tx_builder::adapter::NormalizedSnapshot;
 
 use crate::command::{CommandNoun, Commands, WalletCli, WatchSubcommand};
 use crate::recipient::recipient_tokens_to_specs;
-use crate::wallet_outcome::{WalletCommandOutcome, WalletEvent, WalletNoteRowV1, WalletSuccess};
+use crate::wallet_outcome::{
+    migrate_summary_event, WalletAddressRowV1, WalletCommandData, WalletCommandOutcome,
+    WalletEvent, WalletKeyTreeNodeV1, WalletKeygenV1, WalletNoteRowV1,
+};
 use crate::{connection, normalize_watch_address, Wallet};
 
-/// Optional progress hooks for callers (REPL/TUI). CLI uses [`DispatchHooks::default`].
+/// Optional progress hooks for callers. CLI uses [`DispatchHooks::cli`]; REPL/API use [`DispatchHooks::structured`].
 #[derive(Clone, Default)]
 pub(crate) struct DispatchHooks {
     /// Notified with `(attempt, max_attempts)` before each balance-sync RPC attempt.
     pub sync_attempt: Option<tokio::sync::watch::Sender<(usize, usize)>>,
-    /// When set, **raw** markdown cords from `%markdown` effects are appended here (no [`termimad`]).
-    /// Presentation applies later in CLI (`markdown_driver`) or REPL ([`crate::repl::markdown_display`]).
+    /// When set, `%markdown` effects are captured for CLI presentation (termimad during `app.run()`).
     pub markdown_capture: Option<Arc<Mutex<String>>>,
-    /// When set, each `%markdown` effect also pushes [`WalletEvent::KernelMarkdown`].
+    /// When set, `[%raw …]` effects are decoded into structured [`WalletEvent`]s (REPL/API).
     pub wallet_events: Option<Arc<Mutex<Vec<WalletEvent>>>>,
 }
 
-/// Decode additive `[%raw [%wbal-v1 …]]` / `[%raw [%wnote-v1 …]]` without touching `%markdown`.
+impl DispatchHooks {
+    /// One-shot CLI: kernel `%markdown` → nockapp `markdown_driver` (stdout).
+    pub(crate) fn cli() -> Self {
+        Self::default()
+    }
+
+    /// REPL / JSON API: structured `[%raw …]` only; `%markdown` is ignored.
+    pub(crate) fn structured(events: Arc<Mutex<Vec<WalletEvent>>>) -> Self {
+        Self {
+            sync_attempt: None,
+            markdown_capture: None,
+            wallet_events: Some(events),
+        }
+    }
+
+    pub(crate) fn with_sync_attempt(
+        mut self,
+        tx: tokio::sync::watch::Sender<(usize, usize)>,
+    ) -> Self {
+        self.sync_attempt = Some(tx);
+        self
+    }
+
+    pub(crate) fn is_structured(&self) -> bool {
+        self.wallet_events.is_some() && self.markdown_capture.is_none()
+    }
+}
+
+/// Decode additive `[%raw [tag …]]` kernel effects.
 fn try_wallet_structured_event(noun: Noun, space: &NounSpace) -> Option<WalletEvent> {
     let cell = noun.in_space(space).as_cell().ok()?;
     let head = cell.head().noun();
@@ -90,42 +120,105 @@ fn try_wallet_structured_event(noun: Noun, space: &NounSpace) -> Option<WalletEv
         return Some(WalletEvent::NotesListV1 {
             height,
             block_id_b58,
+            filter_address: None,
             rows,
         });
+    }
+    if unsafe { inner_head.raw_equals(&D(tas!(b"wnot-adv"))) } {
+        let (filter_address, height, block_id_b58, rows) =
+            <(String, u64, String, Vec<(String, String, u64, u64)>)>::from_noun(&inner_tail, space)
+                .ok()?;
+        let rows: Vec<WalletNoteRowV1> = rows
+            .into_iter()
+            .map(
+                |(name_first_b58, name_last_b58, version, assets)| WalletNoteRowV1 {
+                    name_first_b58,
+                    name_last_b58,
+                    version,
+                    assets,
+                },
+            )
+            .collect();
+        return Some(WalletEvent::NotesListV1 {
+            height,
+            block_id_b58,
+            filter_address: Some(filter_address),
+            rows,
+        });
+    }
+    if unsafe { inner_head.raw_equals(&D(tas!(b"waddr-ls"))) } {
+        let (list_kind, rows) =
+            <(String, Vec<(String, u64)>)>::from_noun(&inner_tail, space).ok()?;
+        return Some(WalletEvent::AddressListV1 {
+            list_kind,
+            rows: rows
+                .into_iter()
+                .map(|(address_b58, version)| WalletAddressRowV1 {
+                    address_b58,
+                    version,
+                })
+                .collect(),
+        });
+    }
+    if unsafe { inner_head.raw_equals(&D(tas!(b"wkey-tre"))) } {
+        let (include_values, nodes) =
+            <(u64, Vec<(String, String, Option<String>)>)>::from_noun(&inner_tail, space).ok()?;
+        return Some(WalletEvent::KeyTreeV1 {
+            include_values: include_values != 0,
+            nodes: nodes
+                .into_iter()
+                .map(|(path, label, pubkey_b58)| WalletKeyTreeNodeV1 {
+                    path,
+                    label,
+                    pubkey_b58,
+                })
+                .collect(),
+        });
+    }
+    if unsafe { inner_head.raw_equals(&D(tas!(b"wkeygn1"))) } {
+        let (message, paths, pubkeys_b58) =
+            <(String, Vec<String>, Vec<String>)>::from_noun(&inner_tail, space).ok()?;
+        return Some(WalletEvent::KeygenV1(WalletKeygenV1 {
+            message,
+            paths,
+            pubkeys_b58,
+        }));
     }
     None
 }
 
-fn wallet_success_from_hooks(hooks: &DispatchHooks) -> WalletSuccess {
-    let raw_markdown = hooks
-        .markdown_capture
-        .as_ref()
-        .map(|m| m.lock().unwrap().clone())
-        .unwrap_or_default();
-    let mut events = hooks
+fn wallet_data_from_hooks(hooks: &DispatchHooks) -> WalletCommandData {
+    let events = hooks
         .wallet_events
         .as_ref()
         .map(|e| e.lock().unwrap().clone())
         .unwrap_or_default();
-    if events.is_empty() && !raw_markdown.is_empty() {
-        events.push(WalletEvent::KernelMarkdown {
-            raw: raw_markdown.clone(),
-        });
-    }
-    WalletSuccess {
-        events,
-        raw_markdown,
+    WalletCommandData { events }
+}
+
+fn print_cli_markdown(markdown: &str) {
+    let skin = MadSkin::default_dark();
+    println!("{}", skin.term_text(markdown));
+}
+
+fn present_migrate_summary(
+    hooks: &DispatchHooks,
+    summary: &crate::create_tx::MigrateV0NotesSummary,
+    markdown: &str,
+) {
+    if hooks.wallet_events.is_some() {
+        if let Some(ref ev) = hooks.wallet_events {
+            ev.lock().unwrap().push(migrate_summary_event(summary));
+        }
+    } else {
+        print_cli_markdown(markdown);
     }
 }
 
-/// Append **raw** markdown kernel cords to `sink` (REPL); optionally record structured [`WalletEvent`]s.
-pub(crate) fn markdown_capture_driver(
-    sink: Arc<Mutex<String>>,
-    wallet_events: Option<Arc<Mutex<Vec<WalletEvent>>>>,
-) -> IODriverFn {
+/// Capture `[%raw …]` into structured [`WalletEvent`]s (REPL / API). Ignores `%markdown`.
+pub(crate) fn structured_effect_driver(wallet_events: Arc<Mutex<Vec<WalletEvent>>>) -> IODriverFn {
     make_driver(move |handle| {
-        let sink = Arc::clone(&sink);
-        let wallet_events = wallet_events.clone();
+        let wallet_events = Arc::clone(&wallet_events);
         async move {
             loop {
                 match handle.next_effect().await {
@@ -133,11 +226,29 @@ pub(crate) fn markdown_capture_driver(
                         let space = effect.noun_space();
                         let root = unsafe { effect.root() };
                         if let Some(structured) = try_wallet_structured_event(*root, &space) {
-                            if let Some(ref ev) = wallet_events {
-                                ev.lock().unwrap().push(structured);
-                            }
-                            continue;
+                            wallet_events.lock().unwrap().push(structured);
                         }
+                    }
+                    Err(e) => {
+                        tracing::error!("Error in structured effect driver: {:?}", e);
+                        continue;
+                    }
+                }
+            }
+        }
+    })
+}
+
+/// Append **raw** markdown kernel cords to `sink` (legacy CLI capture path).
+pub(crate) fn markdown_capture_driver(sink: Arc<Mutex<String>>) -> IODriverFn {
+    make_driver(move |handle| {
+        let sink = Arc::clone(&sink);
+        async move {
+            loop {
+                match handle.next_effect().await {
+                    Ok(effect) => {
+                        let space = effect.noun_space();
+                        let root = unsafe { effect.root() };
                         let Ok(effect_cell) = root.in_space(&space).as_cell() else {
                             continue;
                         };
@@ -150,11 +261,6 @@ pub(crate) fn markdown_capture_driver(
                                 continue;
                             };
                             tracing::debug!("Markdown text (captured raw): {}", text);
-                            if let Some(ref ev) = wallet_events {
-                                ev.lock().unwrap().push(WalletEvent::KernelMarkdown {
-                                    raw: text.clone(),
-                                });
-                            }
                             let mut g = sink.lock().unwrap();
                             if !g.is_empty() && !text.is_empty() {
                                 g.push_str("\n\n");
@@ -173,19 +279,26 @@ pub(crate) fn markdown_capture_driver(
 }
 
 async fn add_markdown_io_driver(wallet: &mut Wallet, hooks: &DispatchHooks) {
-    if let Some(sink) = hooks.markdown_capture.clone() {
+    if hooks.is_structured() {
+        if let Some(events) = hooks.wallet_events.clone() {
+            wallet
+                .app
+                .add_io_driver(structured_effect_driver(events))
+                .await;
+        }
+    } else if let Some(sink) = hooks.markdown_capture.clone() {
         wallet
             .app
-            .add_io_driver(markdown_capture_driver(sink, hooks.wallet_events.clone()))
+            .add_io_driver(markdown_capture_driver(sink))
             .await;
     } else {
         wallet.app.add_io_driver(markdown_driver()).await;
     }
 }
 
-/// `one_punch` is always added per command; file / markdown / exit drivers install once in REPL.
+/// `one_punch` is always added per command; file / effect drivers install once in REPL.
 async fn add_kernel_io_drivers(wallet: &mut Wallet, hooks: &DispatchHooks) {
-    let is_repl = hooks.markdown_capture.is_some();
+    let is_repl = hooks.wallet_events.is_some();
     if is_repl && wallet.repl_io_drivers_installed {
         return;
     }
@@ -535,8 +648,7 @@ pub(crate) async fn execute_wallet_command(
             .await?;
         if prepared.summary.created_count == 0 {
             let markdown = Wallet::format_migrate_v0_notes_summary(&prepared.summary);
-            let skin = MadSkin::default_dark();
-            println!("{}", skin.term_text(&markdown));
+            present_migrate_summary(&hooks, &prepared.summary, &markdown);
             return Err(NockAppError::OtherError(
                 "No v0 migration transactions were created".to_string(),
             ));
@@ -578,10 +690,9 @@ pub(crate) async fn execute_wallet_command(
                 let tx_paths = Wallet::detect_written_tx_paths(&before, &after)?;
                 let summary = prepared.finalize(tx_paths)?;
                 let markdown = Wallet::format_migrate_v0_notes_summary(&summary);
-                let skin = MadSkin::default_dark();
-                println!("{}", skin.term_text(&markdown));
+                present_migrate_summary(&hooks, &summary, &markdown);
                 info!("Command executed successfully");
-                Ok(wallet_success_from_hooks(&hooks))
+                Ok(wallet_data_from_hooks(&hooks))
             }
             Err(e) => {
                 error!("Command failed: {}", e);
@@ -653,7 +764,7 @@ pub(crate) async fn execute_wallet_command(
             Ok(_) => {
                 *synced_snapshot_for_planner = None;
                 info!("Command executed successfully");
-                Ok(wallet_success_from_hooks(&hooks))
+                Ok(wallet_data_from_hooks(&hooks))
             }
             Err(e) => {
                 error!("Command failed: {}", e);
@@ -682,7 +793,7 @@ pub(crate) async fn execute_wallet_command(
         match run_result {
             Ok(_) => {
                 info!("Command executed successfully");
-                Ok(wallet_success_from_hooks(&hooks))
+                Ok(wallet_data_from_hooks(&hooks))
             }
             Err(e) => {
                 error!("Command failed: {}", e);

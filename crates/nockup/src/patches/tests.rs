@@ -97,7 +97,9 @@ fn overwrite_refuses_user_edited_file() {
     fs::write(dir.path().join("build.rs"), "// user's own version\n").unwrap();
     let second = apply_patches(dir.path(), &patches, &first.applied, opts()).unwrap();
     assert_eq!(second.refused.len(), 1);
-    assert!(second.refused[0].reason.contains("edited since last install"));
+    assert!(second.refused[0]
+        .reason
+        .contains("edited since last install"));
 }
 
 // --- replace_pattern -------------------------------------------------------
@@ -106,11 +108,7 @@ fn overwrite_refuses_user_edited_file() {
 fn replace_pattern_once_replaces_first_match_only() {
     let dir = scratch();
     fs::write(dir.path().join("main.rs"), "Some(cli) Some(cli)").unwrap();
-    let patches = vec![patch_replace(
-        "main.rs",
-        r#"Some\(cli\)"#,
-        "cli",
-    )];
+    let patches = vec![patch_replace("main.rs", r#"Some\(cli\)"#, "cli")];
     apply_patches(dir.path(), &patches, &[], opts()).unwrap();
     let body = fs::read_to_string(dir.path().join("main.rs")).unwrap();
     assert_eq!(body, "cli Some(cli)");
@@ -120,11 +118,7 @@ fn replace_pattern_once_replaces_first_match_only() {
 fn replace_pattern_idempotent_after_first_apply() {
     let dir = scratch();
     fs::write(dir.path().join("main.rs"), "Some(cli)").unwrap();
-    let patches = vec![patch_replace(
-        "main.rs",
-        r#"Some\(cli\)"#,
-        "cli",
-    )];
+    let patches = vec![patch_replace("main.rs", r#"Some\(cli\)"#, "cli")];
     let first = apply_patches(dir.path(), &patches, &[], opts()).unwrap();
     let second = apply_patches(dir.path(), &patches, &first.applied, opts()).unwrap();
     assert_eq!(second.skipped_noop, 1);
@@ -137,11 +131,7 @@ fn replace_pattern_refuses_on_missing_pattern_and_replacement() {
     // Neither pattern nor replacement present → consumer file is in an
     // unknown state; engine refuses rather than guessing.
     fs::write(dir.path().join("main.rs"), "something unrelated").unwrap();
-    let patches = vec![patch_replace(
-        "main.rs",
-        r#"Some\(cli\)"#,
-        "cli",
-    )];
+    let patches = vec![patch_replace("main.rs", r#"Some\(cli\)"#, "cli")];
     let report = apply_patches(dir.path(), &patches, &[], opts()).unwrap();
     assert_eq!(report.refused.len(), 1);
 }
@@ -156,11 +146,8 @@ fn ensure_dependency_inserts_into_fresh_file() {
         "[package]\nname = \"x\"\n\n[dependencies]\n",
     )
     .unwrap();
-    let patches = vec![patch_ensure_dep(
-        "Cargo.toml",
-        "vesl-core",
-        toml::Value::String("1.0".into()),
-    )];
+    let patches =
+        vec![patch_ensure_dep("Cargo.toml", "vesl-core", toml::Value::String("1.0".into()))];
     apply_patches(dir.path(), &patches, &[], opts()).unwrap();
     let body = fs::read_to_string(dir.path().join("Cargo.toml")).unwrap();
     assert!(body.contains("vesl-core = \"1.0\""), "body was: {}", body);
@@ -174,11 +161,8 @@ fn ensure_dependency_no_op_when_identical() {
         "[package]\nname = \"x\"\n\n[dependencies]\nvesl-core = \"1.0\"\n",
     )
     .unwrap();
-    let patches = vec![patch_ensure_dep(
-        "Cargo.toml",
-        "vesl-core",
-        toml::Value::String("1.0".into()),
-    )];
+    let patches =
+        vec![patch_ensure_dep("Cargo.toml", "vesl-core", toml::Value::String("1.0".into()))];
     let report = apply_patches(dir.path(), &patches, &[], opts()).unwrap();
     assert_eq!(report.skipped_noop, 1);
     assert!(report.refused.is_empty());
@@ -189,11 +173,8 @@ fn ensure_dependency_preserves_user_value_on_conflict() {
     let dir = scratch();
     let before = "[package]\nname = \"x\"\n\n[dependencies]\nvesl-core = \"9.9\"\n";
     fs::write(dir.path().join("Cargo.toml"), before).unwrap();
-    let patches = vec![patch_ensure_dep(
-        "Cargo.toml",
-        "vesl-core",
-        toml::Value::String("1.0".into()),
-    )];
+    let patches =
+        vec![patch_ensure_dep("Cargo.toml", "vesl-core", toml::Value::String("1.0".into()))];
     let report = apply_patches(dir.path(), &patches, &[], opts()).unwrap();
     assert_eq!(report.refused.len(), 1);
     let body = fs::read_to_string(dir.path().join("Cargo.toml")).unwrap();
@@ -218,11 +199,7 @@ fn ensure_dependency_inline_table_round_trips_values() {
         "path".into(),
         toml::Value::String("../../vesl/crates/vesl-core".into()),
     );
-    let patches = vec![patch_ensure_dep(
-        "Cargo.toml",
-        "vesl-core",
-        toml::Value::Table(inline),
-    )];
+    let patches = vec![patch_ensure_dep("Cargo.toml", "vesl-core", toml::Value::Table(inline))];
     apply_patches(dir.path(), &patches, &[], opts()).unwrap();
     let body = fs::read_to_string(dir.path().join("Cargo.toml")).unwrap();
     assert!(
@@ -246,9 +223,7 @@ fn ensure_patch_merges_into_registry_table() {
         toml::Value::Table(inline)
     });
     let patches = vec![patch_ensure_patch(
-        "Cargo.toml",
-        "https://github.com/nockchain/nockchain.git",
-        entries,
+        "Cargo.toml", "https://github.com/nockchain/nockchain.git", entries,
     )];
     apply_patches(dir.path(), &patches, &[], opts()).unwrap();
     let body = fs::read_to_string(dir.path().join("Cargo.toml")).unwrap();
@@ -273,13 +248,7 @@ fn ensure_patch_merges_into_registry_table() {
 fn dry_run_does_not_touch_filesystem() {
     let dir = scratch();
     let patches = vec![patch_overwrite("build.rs", "fn main() {}\n")];
-    let report = apply_patches(
-        dir.path(),
-        &patches,
-        &[],
-        PatchOptions { dry_run: true },
-    )
-    .unwrap();
+    let report = apply_patches(dir.path(), &patches, &[], PatchOptions { dry_run: true }).unwrap();
     assert_eq!(report.applied.len(), 1);
     assert!(!dir.path().join("build.rs").exists());
 }
@@ -287,10 +256,7 @@ fn dry_run_does_not_touch_filesystem() {
 #[test]
 fn summarize_lists_every_patch() {
     let dir = scratch();
-    let patches = vec![
-        patch_overwrite("build.rs", "x"),
-        patch_replace("main.rs", "a", "b"),
-    ];
+    let patches = vec![patch_overwrite("build.rs", "x"), patch_replace("main.rs", "a", "b")];
     let text = summarize(dir.path(), "zkvesl/vesl-graft", &patches);
     assert!(text.contains("zkvesl/vesl-graft"));
     assert!(text.contains("build.rs"));

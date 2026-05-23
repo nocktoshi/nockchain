@@ -16,11 +16,11 @@ mod connection;
 mod create_tx;
 mod dispatch;
 mod error;
-mod wallet_outcome;
 mod recipient;
 mod repl;
 #[cfg(test)]
 mod tests;
+mod wallet_outcome;
 
 use std::collections::BTreeMap;
 use std::fs;
@@ -109,7 +109,7 @@ async fn main() -> Result<(), NockAppError> {
         cli.boot.clone(),
         prover_hot_state.as_slice(),
         "wallet",
-        Some(data_dir),
+        Some(data_dir.clone()),
     )
     .await
     .map_err(|e| CrownError::Unknown(format!("Kernel setup failed: {}", e)))?;
@@ -126,16 +126,18 @@ async fn main() -> Result<(), NockAppError> {
     }
 
     if matches!(cli.command, Commands::Repl) {
-        return repl::run(&cli, wallet, synced_snapshot_for_planner).await;
+        return repl::run(&cli, wallet, synced_snapshot_for_planner, data_dir).await;
     }
 
+    // CLI one-shot: markdown renders via `markdown_driver` during `app.run()` (default hooks).
+    // `WalletCommandData` in the return value is unused for stdout; REPL/API consume structured events.
     crate::dispatch::execute_wallet_command(
         &cli,
         &mut wallet,
         &cli.command,
         &mut synced_snapshot_for_planner,
         false,
-        crate::dispatch::DispatchHooks::default(),
+        crate::dispatch::DispatchHooks::cli(),
     )
     .await
     .map(|_| ())
@@ -1096,7 +1098,8 @@ async fn run_transaction_accepted(
         }
     };
 
-    let markdown = format_transaction_accepted_markdown(tx_id, accepted);
+    let _event = crate::wallet_outcome::tx_accepted_event(tx_id, accepted);
+    let markdown = crate::wallet_outcome::tx_accepted_markdown(tx_id, accepted);
     let skin = MadSkin::default_dark();
     println!("{}", skin.term_text(&markdown));
 
@@ -1104,19 +1107,9 @@ async fn run_transaction_accepted(
 }
 
 /// Renders a compact markdown summary for transaction acceptance status.
+#[allow(dead_code)]
 fn format_transaction_accepted_markdown(tx_id: &str, accepted: bool) -> String {
-    let status_line = if accepted {
-        "- status: **accepted by node**"
-    } else {
-        "- status: **not yet accepted**"
-    };
-
-    [
-        "## Transaction Acceptance".to_string(),
-        format!("- tx id: `{}`", tx_id),
-        status_line.to_string(),
-    ]
-    .join("\n")
+    crate::wallet_outcome::tx_accepted_markdown(tx_id, accepted)
 }
 
 /// Builds an atom from raw bytes using indirect atom allocation.

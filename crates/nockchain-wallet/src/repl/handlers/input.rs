@@ -18,27 +18,19 @@ pub(super) fn try_balance_scroll_keys(store: &mut UIStore, key: KeyEvent) -> boo
     const PAGE_STEP: i32 = 6;
     match key.code {
         KeyCode::Up => {
-            store.dispatch(UiAction::NudgeBalanceScroll {
-                delta: -LINE_STEP,
-            });
+            store.dispatch(UiAction::NudgeBalanceScroll { delta: -LINE_STEP });
             true
         }
         KeyCode::Down => {
-            store.dispatch(UiAction::NudgeBalanceScroll {
-                delta: LINE_STEP,
-            });
+            store.dispatch(UiAction::NudgeBalanceScroll { delta: LINE_STEP });
             true
         }
         KeyCode::PageUp => {
-            store.dispatch(UiAction::NudgeBalanceScroll {
-                delta: -PAGE_STEP,
-            });
+            store.dispatch(UiAction::NudgeBalanceScroll { delta: -PAGE_STEP });
             true
         }
         KeyCode::PageDown => {
-            store.dispatch(UiAction::NudgeBalanceScroll {
-                delta: PAGE_STEP,
-            });
+            store.dispatch(UiAction::NudgeBalanceScroll { delta: PAGE_STEP });
             true
         }
         KeyCode::Home => {
@@ -50,15 +42,11 @@ pub(super) fn try_balance_scroll_keys(store: &mut UIStore, key: KeyEvent) -> boo
             true
         }
         KeyCode::Char('k') => {
-            store.dispatch(UiAction::NudgeBalanceScroll {
-                delta: -LINE_STEP,
-            });
+            store.dispatch(UiAction::NudgeBalanceScroll { delta: -LINE_STEP });
             true
         }
         KeyCode::Char('j') => {
-            store.dispatch(UiAction::NudgeBalanceScroll {
-                delta: LINE_STEP,
-            });
+            store.dispatch(UiAction::NudgeBalanceScroll { delta: LINE_STEP });
             true
         }
         _ => false,
@@ -77,27 +65,19 @@ pub(super) fn try_output_scroll_keys(store: &mut UIStore, key: KeyEvent) -> bool
     const PAGE_STEP: i32 = 6;
     match key.code {
         KeyCode::Up => {
-            store.dispatch(UiAction::NudgeOutputScroll {
-                delta: -LINE_STEP,
-            });
+            store.dispatch(UiAction::NudgeOutputScroll { delta: -LINE_STEP });
             true
         }
         KeyCode::Down => {
-            store.dispatch(UiAction::NudgeOutputScroll {
-                delta: LINE_STEP,
-            });
+            store.dispatch(UiAction::NudgeOutputScroll { delta: LINE_STEP });
             true
         }
         KeyCode::PageUp => {
-            store.dispatch(UiAction::NudgeOutputScroll {
-                delta: -PAGE_STEP,
-            });
+            store.dispatch(UiAction::NudgeOutputScroll { delta: -PAGE_STEP });
             true
         }
         KeyCode::PageDown => {
-            store.dispatch(UiAction::NudgeOutputScroll {
-                delta: PAGE_STEP,
-            });
+            store.dispatch(UiAction::NudgeOutputScroll { delta: PAGE_STEP });
             true
         }
         KeyCode::Home => {
@@ -109,15 +89,11 @@ pub(super) fn try_output_scroll_keys(store: &mut UIStore, key: KeyEvent) -> bool
             true
         }
         KeyCode::Char('k') => {
-            store.dispatch(UiAction::NudgeOutputScroll {
-                delta: -LINE_STEP,
-            });
+            store.dispatch(UiAction::NudgeOutputScroll { delta: -LINE_STEP });
             true
         }
         KeyCode::Char('j') => {
-            store.dispatch(UiAction::NudgeOutputScroll {
-                delta: LINE_STEP,
-            });
+            store.dispatch(UiAction::NudgeOutputScroll { delta: LINE_STEP });
             true
         }
         _ => false,
@@ -128,7 +104,11 @@ pub(super) fn esc_back(code: KeyCode) -> bool {
     matches!(code, KeyCode::Esc | KeyCode::Char('q') | KeyCode::Char('Q'))
 }
 
-pub(super) fn list_activate(sel: &mut usize, len: usize, key: KeyCode) -> Result<Option<usize>, ()> {
+pub(super) fn list_activate(
+    sel: &mut usize,
+    len: usize,
+    key: KeyCode,
+) -> Result<Option<usize>, ()> {
     match key {
         KeyCode::Up | KeyCode::Char('k') => {
             *sel = sel.saturating_sub(1);

@@ -8,18 +8,17 @@ mod prompts;
 use std::sync::Arc;
 
 use crossterm::event::{KeyCode, KeyEvent, KeyEventKind};
+use input::{try_balance_scroll_keys, try_output_scroll_keys};
 use nockapp::NockAppError;
 use tokio::sync::{mpsc, Mutex};
 
 use super::app_state::PanelFocus;
 use super::command_runner::{BalanceRefreshCompletion, JobCompletion, ReplRuntime};
+use super::ct_dispatch;
 use super::hooks::terminal::Term;
 use super::screens::{ReplControl, Screen};
 use super::store::{UIStore, UiAction};
-use super::ct_dispatch;
 use crate::command::Commands;
-
-use input::{try_balance_scroll_keys, try_output_scroll_keys};
 
 fn schedule_cmd(
     store: &mut UIStore,
@@ -104,7 +103,7 @@ pub(super) async fn dispatch_key(
         Screen::Transactions { .. } => menus::handle_transactions(cli, store, key).await,
         Screen::Watch { .. } => menus::handle_watch(cli, store, key).await,
         Screen::SignVerify { .. } => menus::handle_sign(cli, store, key).await,
-        Screen::Settings { .. } => menus::handle_settings(cli, store, key),
+        Screen::Settings { .. } => menus::handle_settings(cli, store, key, rt),
         Screen::Quick { .. } => menus::handle_quick(cli, store, key),
         Screen::TextPrompt { .. } => {
             prompts::text_prompt(cli, store, key, rt, terminal, done_tx).await
@@ -112,7 +111,9 @@ pub(super) async fn dispatch_key(
         Screen::Confirm { .. } => {
             prompts::confirm_prompt(cli, store, key, rt, terminal, done_tx).await
         }
-        Screen::CreateTx { .. } => ct_dispatch::handle_create_tx(cli, store, key, rt, done_tx).await,
+        Screen::CreateTx { .. } => {
+            ct_dispatch::handle_create_tx(cli, store, key, rt, done_tx).await
+        }
         Screen::ExitConfirm { .. } => menus::handle_exit_confirm(store, key),
         Screen::ErrorScreen { .. } => {
             error::error_screen(cli, store, key, rt, terminal, done_tx).await

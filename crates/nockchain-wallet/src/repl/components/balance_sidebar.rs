@@ -5,11 +5,10 @@ use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, BorderType, Borders, Paragraph, Wrap};
 use ratatui::Frame;
 
-use crate::repl::app_state::{AppState, PanelFocus};
-
 use super::loading::loading_indicator_paragraph;
 use super::scroll::estimate_wrapped_source_lines;
 use super::theme::THEME_ACCENT_GREEN;
+use crate::repl::app_state::{AppState, PanelFocus};
 
 pub(crate) fn draw_balance_sidebar(
     f: &mut Frame<'_>,
@@ -24,19 +23,17 @@ pub(crate) fn draw_balance_sidebar(
             .border_type(BorderType::Thick)
             .border_style(Style::default().fg(THEME_ACCENT_GREEN));
     }
-    let balance_block = balance_block
-        .title(Line::from(vec![Span::styled(
-            if focused { " Balance ◆ " } else { " Balance " },
-            Style::default().fg(Color::Cyan),
-        )]));
+    let balance_block = balance_block.title(Line::from(vec![Span::styled(
+        if focused {
+            " Balance ◆ "
+        } else {
+            " Balance "
+        },
+        Style::default().fg(Color::Cyan),
+    )]));
 
     if app.balance_panel.loading {
-        let body = loading_indicator_paragraph(
-            app,
-            tick,
-            balance_block,
-            "Refreshing balance…",
-        );
+        let body = loading_indicator_paragraph(app, tick, balance_block, "Refreshing balance…");
         f.render_widget(body, area);
         return;
     }

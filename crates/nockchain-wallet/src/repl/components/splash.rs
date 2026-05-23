@@ -7,8 +7,7 @@ use ratatui::widgets::{Block, BorderType, Borders, Padding, Paragraph, Wrap};
 use ratatui::Frame;
 
 use super::theme::{
-    pulse_color, THEME_ACCENT_GREEN as ACCENT, THEME_BG_DEEP, THEME_BG_PANEL,
-    THEME_SHADOW,
+    pulse_color, THEME_ACCENT_GREEN as ACCENT, THEME_BG_DEEP, THEME_BG_PANEL, THEME_SHADOW,
 };
 
 const LOGO_W: u16 = 53;
@@ -39,9 +38,7 @@ pub(crate) fn draw_splash(f: &mut Frame<'_>, _tick: u64) {
         .title_alignment(Alignment::Center)
         .title(Line::from(vec![Span::styled(
             " nockchain-wallet ",
-            Style::new()
-                .fg(ACCENT)
-                .add_modifier(Modifier::BOLD),
+            Style::new().fg(ACCENT).add_modifier(Modifier::BOLD),
         )]))
         .style(Style::new().bg(THEME_BG_DEEP));
     let inner = outer.inner(area);
@@ -49,20 +46,12 @@ pub(crate) fn draw_splash(f: &mut Frame<'_>, _tick: u64) {
 
     let v = Layout::default()
         .direction(Direction::Vertical)
-        .constraints([
-            Constraint::Percentage(22),
-            Constraint::Length(12),
-            Constraint::Min(2),
-        ])
+        .constraints([Constraint::Percentage(22), Constraint::Length(12), Constraint::Min(2)])
         .split(inner);
 
     let mid = Layout::default()
         .direction(Direction::Horizontal)
-        .constraints([
-            Constraint::Fill(1),
-            Constraint::Length(LOGO_W + 6),
-            Constraint::Fill(1),
-        ])
+        .constraints([Constraint::Fill(1), Constraint::Length(LOGO_W + 6), Constraint::Fill(1)])
         .flex(Flex::Center)
         .split(v[1]);
 
@@ -147,18 +136,12 @@ pub(crate) fn draw_splash(f: &mut Frame<'_>, _tick: u64) {
     f.render_widget(card_body, card_inner);
 
     let hint = Paragraph::new(Line::from(vec![
-        Span::styled(
-            blink_glyph(fc, 1),
-            Style::new().fg(ACCENT),
-        ),
+        Span::styled(blink_glyph(fc, 1), Style::new().fg(ACCENT)),
         Span::styled(
             "  press any key to start  ",
             Style::new().fg(Color::Rgb(140, 140, 140)),
         ),
-        Span::styled(
-            blink_glyph(fc, 3),
-            Style::new().fg(ACCENT),
-        ),
+        Span::styled(blink_glyph(fc, 3), Style::new().fg(ACCENT)),
     ]))
     .alignment(Alignment::Center);
     f.render_widget(hint, bottom_split[1]);
@@ -172,42 +155,24 @@ fn render_card_shadow(f: &mut Frame<'_>, card: Rect) {
     if card.width == 0 || card.height == 0 {
         return;
     }
-    let right = Rect::new(
-        card.x.saturating_add(card.width),
-        card.y,
-        T,
-        card.height,
-    );
+    let right = Rect::new(card.x.saturating_add(card.width), card.y, T, card.height);
     // Under left rim + card + under right arm — fixes bottom-left notch.
     let (bottom_x, bottom_w) = if card.x >= TL {
-        (
-            card.x - TL,
-            TL.saturating_add(card.width).saturating_add(T),
-        )
+        (card.x - TL, TL.saturating_add(card.width).saturating_add(T))
     } else {
         (card.x, card.width.saturating_add(T))
     };
-    let bottom = Rect::new(
-        bottom_x,
-        card.y.saturating_add(card.height),
-        bottom_w,
-        T,
-    );
+    let bottom = Rect::new(bottom_x, card.y.saturating_add(card.height), bottom_w, T);
     // Above left rim + card + above right arm — fixes top-right notch.
     let (top_x, top_w) = if card.x >= TL {
-        (
-            card.x - TL,
-            TL.saturating_add(card.width).saturating_add(T),
-        )
+        (card.x - TL, TL.saturating_add(card.width).saturating_add(T))
     } else {
         (card.x, card.width.saturating_add(T))
     };
     let top = Rect::new(top_x, card.y.saturating_sub(TL), top_w, TL);
 
     let shadow_fill = Style::new().fg(THEME_SHADOW).bg(THEME_SHADOW);
-    let patch = Block::default()
-        .borders(Borders::NONE)
-        .style(shadow_fill);
+    let patch = Block::default().borders(Borders::NONE).style(shadow_fill);
 
     if card.x >= TL {
         let left = Rect::new(card.x - TL, card.y, TL, card.height);
@@ -219,7 +184,6 @@ fn render_card_shadow(f: &mut Frame<'_>, card: Rect) {
         f.render_widget(patch.clone(), top);
     }
 }
-
 
 fn blink_glyph(fc: usize, salt: usize) -> &'static str {
     const GLYPHS: &[&str] = &["·", "✧", "·", "⋆"];
@@ -256,12 +220,17 @@ fn scan_style_for_global_row(global_y: usize) -> Style {
 fn scanline_row_string(w: usize, fc: usize, global_y: usize, start_x: u16) -> String {
     let period = 160usize.max(w.saturating_add(start_x as usize));
     let speed = 10usize;
-    let b0 = fc.wrapping_mul(speed).wrapping_add(global_y.wrapping_mul(13)) % period;
-    let b1 = fc.wrapping_mul(6)
+    let b0 = fc
+        .wrapping_mul(speed)
+        .wrapping_add(global_y.wrapping_mul(13))
+        % period;
+    let b1 = fc
+        .wrapping_mul(6)
         .wrapping_add(73)
         .wrapping_add(global_y.wrapping_mul(5))
         % period;
-    let b2 = fc.wrapping_mul(14).wrapping_add(global_y.wrapping_mul(17)) % period.saturating_mul(2).max(8);
+    let b2 = fc.wrapping_mul(14).wrapping_add(global_y.wrapping_mul(17))
+        % period.saturating_mul(2).max(8);
 
     (0..w)
         .map(|i| {

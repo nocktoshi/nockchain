@@ -6,6 +6,7 @@ license = "MIT OR Apache-2.0"
 
 [dependencies]
 
+axum = { workspace = true }
 bytes.workspace = true
 bs58 = { workspace = true }
 clap = { workspace = true, features = ["derive", "cargo"] }

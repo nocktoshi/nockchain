@@ -21,7 +21,7 @@ pub(crate) const NOTES_MENU: &[&str] = &[
 
 pub(crate) const TX_MENU: &[&str] = &[
     "Create transaction (planner)", "Send transaction file", "Show transaction file",
-    "Sign multisig transaction", "Migrate v0 notes", "Back",
+    "Sign multisig transaction", "Migrate v0 notes", "Register .nock name (NNS)", "Back",
 ];
 
 pub(crate) const WATCH_MENU: &[&str] = &["Address or pubkey", "Pubkey only", "Multisig", "Back"];
@@ -29,7 +29,10 @@ pub(crate) const WATCH_MENU: &[&str] = &["Address or pubkey", "Pubkey only", "Mu
 pub(crate) const SIGN_MENU: &[&str] =
     &["Sign message", "Verify message", "Sign hash", "Verify hash", "Back"];
 
-pub(crate) const SETTINGS_MENU: &[&str] = &["Show help again", "Verbose / logging info", "Back"];
+pub(crate) const SETTINGS_MENU: &[&str] = &[
+    "Public gRPC server", "JSON API listen", "API token & curl examples", "Show help again",
+    "Verbose / logging info", "Back",
+];
 
 pub(crate) const BOOL: &[&str] = &["Yes", "No"];
 

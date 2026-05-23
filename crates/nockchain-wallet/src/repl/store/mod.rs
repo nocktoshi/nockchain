@@ -8,16 +8,20 @@ pub(crate) use apply::apply_ui_action;
 
 use crate::repl::app_state::UiState;
 use crate::repl::screens::Screen;
+use crate::repl::wallet_api::WalletSessionState;
 
 /// Holds [`UiState`] and exposes the single mutation entry point [`Self::dispatch`].
 pub(crate) struct UIStore {
     pub(crate) state: UiState,
+    /// Cached session settings for Settings screen (source of truth: API + `session.json`).
+    pub(crate) session_display: WalletSessionState,
 }
 
 impl UIStore {
     pub(crate) fn new(initial_screen: Screen) -> Self {
         Self {
             state: UiState::new(initial_screen),
+            session_display: WalletSessionState::default(),
         }
     }
 
@@ -30,11 +34,10 @@ impl UIStore {
 mod tests {
     use tokio::sync::watch;
 
+    use super::{apply_ui_action, UiAction};
     use crate::command::Commands;
     use crate::repl::app_state::UiState;
     use crate::repl::screens::Screen;
-
-    use super::{apply_ui_action, UiAction};
 
     #[test]
     fn tick_advances_frame_clock() {
@@ -60,7 +63,7 @@ mod tests {
             UiAction::BalanceSidebarCompleted {
                 nonce: 4,
                 result: Ok(()),
-                markdown: "new".into(),
+                events: vec![],
             },
         );
         assert_eq!(s.balance_panel.text, "keep");
@@ -75,10 +78,16 @@ mod tests {
             UiAction::BalanceSidebarCompleted {
                 nonce: 5,
                 result: Ok(()),
-                markdown: "fresh".into(),
+                events: vec![crate::wallet_outcome::WalletEvent::BalanceSnapshotV1 {
+                    wallet_version: 1,
+                    block_id_b58: "blk".into(),
+                    height: 1,
+                    note_count: 0,
+                    total_assets: 0,
+                }],
             },
         );
-        assert_eq!(s.balance_panel.text, "fresh");
+        assert!(s.balance_panel.text.contains("Balance"));
     }
 
     #[test]
@@ -127,8 +136,14 @@ mod tests {
             },
         );
         drop(tx);
-        apply_ui_action(&mut s, UiAction::JobCompleted(Ok(()), "md out".into()));
+        apply_ui_action(
+            &mut s,
+            UiAction::JobCompleted {
+                result: Ok(()),
+                events: vec![],
+            },
+        );
         assert!(matches!(s.screen, Screen::Main { sel: 2 }));
-        assert_eq!(s.last_command_output, "md out");
+        assert!(s.last_command_output.contains("structured"));
     }
 }

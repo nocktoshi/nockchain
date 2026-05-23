@@ -2,12 +2,12 @@
 
 use nockapp::NockAppError;
 
-use crate::command::Commands;
-
-use super::action::UiAction;
 use super::super::app_state::{PanelFocus, UiState};
 use super::super::components::menus::{CT_ERR_ACTIONS, GENERIC_ERR};
 use super::super::screens::{ErrorCtx, Screen};
+use super::super::view;
+use super::action::UiAction;
+use crate::command::Commands;
 
 /// Invariants: at most one `Screen::Running`; `balance_job_nonce` monotonic for stale sidebar drops.
 pub(crate) fn apply_ui_action(state: &mut UiState, action: UiAction) {
@@ -41,7 +41,10 @@ pub(crate) fn apply_ui_action(state: &mut UiState, action: UiAction) {
             }
             state.balance_job_nonce = state.balance_job_nonce.wrapping_add(1);
             state.balance_panel.loading = false;
-            let resume = Box::new(std::mem::replace(&mut state.screen, Screen::Main { sel: 0 }));
+            let resume = Box::new(std::mem::replace(
+                &mut state.screen,
+                Screen::Main { sel: 0 },
+            ));
             let cmd_clone = cmd.clone();
             state.screen = Screen::Running {
                 label,
@@ -63,27 +66,23 @@ pub(crate) fn apply_ui_action(state: &mut UiState, action: UiAction) {
             state.balance_job_nonce = state.balance_job_nonce.wrapping_add(1);
             state.sync_progress = Some(progress_rx);
         }
-        UiAction::JobCompleted(result, captured_markdown) => {
-            apply_job_completed(state, result, captured_markdown);
+        UiAction::JobCompleted { result, events } => {
+            apply_job_completed(state, result, events);
         }
         UiAction::BalanceSidebarCompleted {
             nonce,
             result,
-            markdown,
+            events,
         } => {
-            apply_balance_sidebar_completed(state, nonce, result, markdown);
+            apply_balance_sidebar_completed(state, nonce, result, events);
         }
         UiAction::NudgeBalanceScroll { delta } => {
             if delta >= 0 {
-                state.balance_panel.scroll = state
-                    .balance_panel
-                    .scroll
-                    .saturating_add(delta as u16);
+                state.balance_panel.scroll =
+                    state.balance_panel.scroll.saturating_add(delta as u16);
             } else {
-                state.balance_panel.scroll = state
-                    .balance_panel
-                    .scroll
-                    .saturating_sub((-delta) as u16);
+                state.balance_panel.scroll =
+                    state.balance_panel.scroll.saturating_sub((-delta) as u16);
             }
         }
         UiAction::NudgeOutputScroll { delta } => {
@@ -106,26 +105,28 @@ fn apply_balance_sidebar_completed(
     state: &mut UiState,
     nonce: u64,
     result: Result<(), NockAppError>,
-    captured_markdown: String,
+    events: Vec<crate::wallet_outcome::WalletEvent>,
 ) {
     state.sync_progress = None;
     state.balance_panel.loading = false;
+    state.last_command_events = events.clone();
     if nonce != state.balance_job_nonce {
         return;
     }
     if matches!(state.screen, Screen::Running { .. }) {
         return;
     }
+    let display = view::render_balance_sidebar(&events);
     match result {
         Ok(()) => {
-            state.balance_panel.text = captured_markdown;
+            state.balance_panel.text = display;
             state.balance_panel.error = None;
             state.balance_panel.scroll = 0;
         }
         Err(e) => {
             state.balance_panel.error = Some(e.to_string());
-            if !captured_markdown.is_empty() {
-                state.balance_panel.text = format!("{captured_markdown}\n\n--- error ---\n{e}");
+            if !display.is_empty() {
+                state.balance_panel.text = format!("{display}\n\n--- error ---\n{e}");
             }
         }
     }
@@ -134,15 +135,17 @@ fn apply_balance_sidebar_completed(
 fn apply_job_completed(
     state: &mut UiState,
     result: Result<(), NockAppError>,
-    captured_markdown: String,
+    events: Vec<crate::wallet_outcome::WalletEvent>,
 ) {
     state.sync_progress = None;
+    state.last_command_events = events.clone();
+    let display = view::render_events_for_output(&events);
     let placeholder = Screen::Main { sel: 0 };
     let taken = std::mem::replace(&mut state.screen, placeholder);
     match taken {
         Screen::Running { restore, cmd, .. } => match result {
             Ok(()) => {
-                state.last_command_output = captured_markdown.clone();
+                state.last_command_output = display.clone();
                 state.output_scroll = 0;
                 state.panel_focus = PanelFocus::Output;
                 if matches!(&cmd, Commands::CreateTx { .. }) {
@@ -151,16 +154,15 @@ fn apply_job_completed(
                     state.screen = *restore;
                 }
                 if matches!(&cmd, Commands::ShowBalance) {
-                    state.balance_panel.text = captured_markdown;
+                    state.balance_panel.text = view::render_balance_sidebar(&events);
                     state.balance_panel.error = None;
                     state.balance_panel.scroll = 0;
                 }
                 state.toast = Some(success_line(&cmd));
             }
             Err(e) => {
-                if !captured_markdown.is_empty() {
-                    state.last_command_output =
-                        format!("{captured_markdown}\n\n--- error ---\n{}", e);
+                if !display.is_empty() {
+                    state.last_command_output = format!("{display}\n\n--- error ---\n{e}");
                 } else {
                     state.last_command_output = e.to_string();
                 }
@@ -168,9 +170,8 @@ fn apply_job_completed(
                 state.panel_focus = PanelFocus::Output;
                 if matches!(&cmd, Commands::ShowBalance) {
                     state.balance_panel.error = Some(e.to_string());
-                    if !captured_markdown.is_empty() {
-                        state.balance_panel.text =
-                            format!("{captured_markdown}\n\n--- error ---\n{e}");
+                    if !display.is_empty() {
+                        state.balance_panel.text = format!("{display}\n\n--- error ---\n{e}");
                     }
                 }
                 state.screen = Screen::ErrorScreen {

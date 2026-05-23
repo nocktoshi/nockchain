@@ -5,10 +5,9 @@ use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, BorderType, Borders, Paragraph, Wrap};
 use ratatui::Frame;
 
-use crate::repl::create_tx::{OptSub, Phase, RecSub};
-
 use super::menus::{BOOL, NOTE_ORDER};
 use super::theme::THEME_ACCENT_GREEN;
+use crate::repl::create_tx::{OptSub, Phase, RecSub};
 
 fn list_inline(lines: &mut Vec<Line>, items: &[&str], sel: usize) {
     for (i, s) in items.iter().enumerate() {
@@ -136,8 +135,6 @@ pub(crate) fn draw_create_tx(
             .border_type(BorderType::Thick)
             .border_style(Style::default().fg(THEME_ACCENT_GREEN));
     }
-    let p = Paragraph::new(lines)
-        .wrap(Wrap { trim: true })
-        .block(block);
+    let p = Paragraph::new(lines).wrap(Wrap { trim: true }).block(block);
     f.render_widget(p, area);
 }

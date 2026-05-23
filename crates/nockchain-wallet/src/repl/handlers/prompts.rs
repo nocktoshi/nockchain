@@ -7,14 +7,14 @@ use nockapp::NockAppError;
 use tokio::sync::{mpsc, Mutex};
 use tracing::warn;
 
+use super::input::{edit_line, esc_back, list_activate};
 use crate::command::{Commands, WalletCli, WatchSubcommand};
-use crate::repl::store::UIStore;
 use crate::repl::command_runner::{JobCompletion, ReplRuntime};
-use crate::repl::screens::{ConfirmThen, ReplControl, Screen, TextThen};
 use crate::repl::components::menus::BOOL;
 use crate::repl::hooks::terminal::Term;
-
-use super::input::{edit_line, esc_back, list_activate};
+use crate::repl::screens::{ConfirmThen, ReplControl, Screen, TextThen};
+use crate::repl::store::UIStore;
+use crate::repl::{session, wallet_api};
 
 pub(super) async fn text_prompt(
     _cli: &WalletCli,
@@ -42,12 +42,15 @@ pub(super) async fn text_prompt(
         match then {
             TextThen::KeysDeriveIndex => match v.parse::<u64>() {
                 Ok(index) => {
-                    super::replace_screen(store, Screen::Confirm {
-                        title: "Hardened?".into(),
-                        sel: 1,
-                        labels: BOOL,
-                        then: ConfirmThen::KeysDeriveAfterIndex { index },
-                    });
+                    super::replace_screen(
+                        store,
+                        Screen::Confirm {
+                            title: "Hardened?".into(),
+                            sel: 1,
+                            labels: BOOL,
+                            then: ConfirmThen::KeysDeriveAfterIndex { index },
+                        },
+                    );
                 }
                 Err(e) => warn!("Invalid index: {e}"),
             },
@@ -94,11 +97,14 @@ pub(super) async fn text_prompt(
                 );
             }
             TextThen::KeysImportSeed => {
-                super::replace_screen(store, Screen::TextPrompt {
-                    title: "Master key version (optional, u64)".into(),
-                    value: String::new(),
-                    then: TextThen::KeysImportSeedVersion { seed: v },
-                });
+                super::replace_screen(
+                    store,
+                    Screen::TextPrompt {
+                        title: "Master key version (optional, u64)".into(),
+                        value: String::new(),
+                        then: TextThen::KeysImportSeedVersion { seed: v },
+                    },
+                );
             }
             TextThen::KeysImportSeedVersion { seed } => {
                 let version = if v.is_empty() {
@@ -108,11 +114,14 @@ pub(super) async fn text_prompt(
                         Ok(n) => Some(n),
                         Err(e) => {
                             warn!("Invalid version: {e}");
-                            super::replace_screen(store, Screen::TextPrompt {
-                                title: "Master key version (optional, u64)".into(),
-                                value: v,
-                                then: TextThen::KeysImportSeedVersion { seed },
-                            });
+                            super::replace_screen(
+                                store,
+                                Screen::TextPrompt {
+                                    title: "Master key version (optional, u64)".into(),
+                                    value: v,
+                                    then: TextThen::KeysImportSeedVersion { seed },
+                                },
+                            );
                             return Ok(ReplControl::Continue);
                         }
                     }
@@ -187,11 +196,14 @@ pub(super) async fn text_prompt(
                 );
             }
             TextThen::TxSignMultisigTxFile => {
-                super::replace_screen(store, Screen::TextPrompt {
-                    title: "Sign keys (optional: index:hardened, comma-separated)".into(),
-                    value: String::new(),
-                    then: TextThen::TxSignMultisigKeys { transaction: v },
-                });
+                super::replace_screen(
+                    store,
+                    Screen::TextPrompt {
+                        title: "Sign keys (optional: index:hardened, comma-separated)".into(),
+                        value: String::new(),
+                        then: TextThen::TxSignMultisigKeys { transaction: v },
+                    },
+                );
             }
             TextThen::TxSignMultisigKeys { transaction } => {
                 super::schedule_cmd(
@@ -207,11 +219,14 @@ pub(super) async fn text_prompt(
             }
             TextThen::TxMultisigThreshold => match v.parse::<u64>() {
                 Ok(threshold) => {
-                    super::replace_screen(store, Screen::TextPrompt {
-                        title: "Participants (comma-separated pubkey hashes)".into(),
-                        value: String::new(),
-                        then: TextThen::TxMultisigParticipants { threshold },
-                    });
+                    super::replace_screen(
+                        store,
+                        Screen::TextPrompt {
+                            title: "Participants (comma-separated pubkey hashes)".into(),
+                            value: String::new(),
+                            then: TextThen::TxMultisigParticipants { threshold },
+                        },
+                    );
                 }
                 Err(e) => warn!("Invalid threshold: {e}"),
             },
@@ -238,6 +253,50 @@ pub(super) async fn text_prompt(
                     "MigrateV0Notes",
                 );
             }
+            TextThen::NnsRegisterName => match crate::repl::nns::normalize_nns_name(&v) {
+                Ok(name) => {
+                    let preview = crate::repl::nns::preview_lines(&name).join("\n");
+                    super::replace_screen(
+                        store,
+                        Screen::Confirm {
+                            title: format!("Register `{name}`?\n\n{preview}"),
+                            sel: 1,
+                            labels: BOOL,
+                            then: ConfirmThen::NnsRegisterConfirm { name },
+                        },
+                    );
+                }
+                Err(e) => warn!("{e}"),
+            },
+            TextThen::SettingsGrpcEndpoint => match crate::connection::GrpcEndpoint::parse(&v) {
+                Ok(endpoint) => {
+                    let old_listen = session::current_api_listen(rt);
+                    let mut next = session::session_config_snapshot(rt);
+                    next.public_grpc_server_addr = endpoint.to_string();
+                    match session::commit_session(rt, next).await {
+                        Ok(_) => {
+                            wallet_api::restart_api_server_if_listen_changed(rt, &old_listen);
+                            store.session_display = session::session_config_snapshot(rt);
+                            super::replace_screen(store, Screen::Settings { sel: 0 });
+                        }
+                        Err(e) => warn!("{e}"),
+                    }
+                }
+                Err(e) => warn!("{e}"),
+            },
+            TextThen::SettingsApiListen => {
+                let old_listen = session::current_api_listen(rt);
+                let mut next = session::session_config_snapshot(rt);
+                next.api_listen = v.trim().to_string();
+                match session::commit_session(rt, next).await {
+                    Ok(_) => {
+                        wallet_api::restart_api_server_if_listen_changed(rt, &old_listen);
+                        store.session_display = session::session_config_snapshot(rt);
+                        super::replace_screen(store, Screen::Settings { sel: 0 });
+                    }
+                    Err(e) => warn!("{e}"),
+                }
+            }
             TextThen::WatchAddr => {
                 super::schedule_cmd(
                     store,
@@ -261,11 +320,14 @@ pub(super) async fn text_prompt(
                 );
             }
             TextThen::SignMsgStepMessage => {
-                super::replace_screen(store, Screen::TextPrompt {
-                    title: "Key index (optional, u64; empty = master)".into(),
-                    value: String::new(),
-                    then: TextThen::SignMsgStepIndex { message: v },
-                });
+                super::replace_screen(
+                    store,
+                    Screen::TextPrompt {
+                        title: "Key index (optional, u64; empty = master)".into(),
+                        value: String::new(),
+                        then: TextThen::SignMsgStepIndex { message: v },
+                    },
+                );
             }
             TextThen::SignMsgStepIndex { message } => {
                 let index = if v.is_empty() {
@@ -275,43 +337,55 @@ pub(super) async fn text_prompt(
                         Ok(i) => Some(i),
                         Err(e) => {
                             warn!("Invalid index: {e}");
-                            super::replace_screen(store, Screen::TextPrompt {
-                                title: "Key index (optional, u64; empty = master)".into(),
-                                value: v,
-                                then: TextThen::SignMsgStepIndex { message },
-                            });
+                            super::replace_screen(
+                                store,
+                                Screen::TextPrompt {
+                                    title: "Key index (optional, u64; empty = master)".into(),
+                                    value: v,
+                                    then: TextThen::SignMsgStepIndex { message },
+                                },
+                            );
                             return Ok(ReplControl::Continue);
                         }
                     }
                 };
-                super::replace_screen(store, Screen::Confirm {
-                    title: "Hardened?".into(),
-                    sel: 1,
-                    labels: BOOL,
-                    then: ConfirmThen::SignMsgHardened {
-                        message: Some(message),
-                        message_file: None,
-                        message_pos: None,
-                        index,
+                super::replace_screen(
+                    store,
+                    Screen::Confirm {
+                        title: "Hardened?".into(),
+                        sel: 1,
+                        labels: BOOL,
+                        then: ConfirmThen::SignMsgHardened {
+                            message: Some(message),
+                            message_file: None,
+                            message_pos: None,
+                            index,
+                        },
                     },
-                });
+                );
             }
             TextThen::VerifyMsgM => {
-                super::replace_screen(store, Screen::TextPrompt {
-                    title: "Path to signature file".into(),
-                    value: String::new(),
-                    then: TextThen::VerifyMsgS { message: v },
-                });
+                super::replace_screen(
+                    store,
+                    Screen::TextPrompt {
+                        title: "Path to signature file".into(),
+                        value: String::new(),
+                        then: TextThen::VerifyMsgS { message: v },
+                    },
+                );
             }
             TextThen::VerifyMsgS { message } => {
-                super::replace_screen(store, Screen::TextPrompt {
-                    title: "Public key (base58)".into(),
-                    value: String::new(),
-                    then: TextThen::VerifyMsgP {
-                        message,
-                        sig_path: v,
+                super::replace_screen(
+                    store,
+                    Screen::TextPrompt {
+                        title: "Public key (base58)".into(),
+                        value: String::new(),
+                        then: TextThen::VerifyMsgP {
+                            message,
+                            sig_path: v,
+                        },
                     },
-                });
+                );
             }
             TextThen::VerifyMsgP { message, sig_path } => {
                 super::schedule_cmd(
@@ -331,11 +405,14 @@ pub(super) async fn text_prompt(
                 );
             }
             TextThen::SignHashGetHash => {
-                super::replace_screen(store, Screen::TextPrompt {
-                    title: "Key index (optional, u64)".into(),
-                    value: String::new(),
-                    then: TextThen::SignHashIndex { hash_b58: v },
-                });
+                super::replace_screen(
+                    store,
+                    Screen::TextPrompt {
+                        title: "Key index (optional, u64)".into(),
+                        value: String::new(),
+                        then: TextThen::SignHashIndex { hash_b58: v },
+                    },
+                );
             }
             TextThen::SignHashIndex { hash_b58 } => {
                 let index = if v.is_empty() {
@@ -345,38 +422,50 @@ pub(super) async fn text_prompt(
                         Ok(i) => Some(i),
                         Err(e) => {
                             warn!("Invalid index: {e}");
-                            super::replace_screen(store, Screen::TextPrompt {
-                                title: "Key index (optional, u64)".into(),
-                                value: v,
-                                then: TextThen::SignHashIndex { hash_b58 },
-                            });
+                            super::replace_screen(
+                                store,
+                                Screen::TextPrompt {
+                                    title: "Key index (optional, u64)".into(),
+                                    value: v,
+                                    then: TextThen::SignHashIndex { hash_b58 },
+                                },
+                            );
                             return Ok(ReplControl::Continue);
                         }
                     }
                 };
-                super::replace_screen(store, Screen::Confirm {
-                    title: "Hardened?".into(),
-                    sel: 1,
-                    labels: BOOL,
-                    then: ConfirmThen::SignHashHardened { hash_b58, index },
-                });
+                super::replace_screen(
+                    store,
+                    Screen::Confirm {
+                        title: "Hardened?".into(),
+                        sel: 1,
+                        labels: BOOL,
+                        then: ConfirmThen::SignHashHardened { hash_b58, index },
+                    },
+                );
             }
             TextThen::VerifyHashFirst => {
-                super::replace_screen(store, Screen::TextPrompt {
-                    title: "Path to signature file".into(),
-                    value: String::new(),
-                    then: TextThen::VerifyHashSig { hash_b58: v },
-                });
+                super::replace_screen(
+                    store,
+                    Screen::TextPrompt {
+                        title: "Path to signature file".into(),
+                        value: String::new(),
+                        then: TextThen::VerifyHashSig { hash_b58: v },
+                    },
+                );
             }
             TextThen::VerifyHashSig { hash_b58 } => {
-                super::replace_screen(store, Screen::TextPrompt {
-                    title: "Public key (base58)".into(),
-                    value: String::new(),
-                    then: TextThen::VerifyHashPk {
-                        hash_b58,
-                        sig_path: v,
+                super::replace_screen(
+                    store,
+                    Screen::TextPrompt {
+                        title: "Public key (base58)".into(),
+                        value: String::new(),
+                        then: TextThen::VerifyHashPk {
+                            hash_b58,
+                            sig_path: v,
+                        },
                     },
-                });
+                );
             }
             TextThen::VerifyHashPk { hash_b58, sig_path } => {
                 super::schedule_cmd(
@@ -429,32 +518,41 @@ pub(super) async fn confirm_prompt(
     }
     match list_activate(&mut sel, labels.len(), key.code) {
         Err(()) => {
-            super::replace_screen(store, Screen::Confirm {
-                title,
-                sel,
-                labels,
-                then,
-            });
+            super::replace_screen(
+                store,
+                Screen::Confirm {
+                    title,
+                    sel,
+                    labels,
+                    then,
+                },
+            );
             Ok(ReplControl::Continue)
         }
         Ok(None) => {
-            super::replace_screen(store, Screen::Confirm {
-                title,
-                sel,
-                labels,
-                then,
-            });
+            super::replace_screen(
+                store,
+                Screen::Confirm {
+                    title,
+                    sel,
+                    labels,
+                    then,
+                },
+            );
             Ok(ReplControl::Continue)
         }
         Ok(Some(i)) => {
             match then {
                 ConfirmThen::KeysDeriveAfterIndex { index } => {
                     let hardened = i == 0;
-                    super::replace_screen(store, Screen::TextPrompt {
-                        title: "Label (optional)".into(),
-                        value: String::new(),
-                        then: TextThen::KeysDeriveRun { index, hardened },
-                    });
+                    super::replace_screen(
+                        store,
+                        Screen::TextPrompt {
+                            title: "Label (optional)".into(),
+                            value: String::new(),
+                            then: TextThen::KeysDeriveRun { index, hardened },
+                        },
+                    );
                 }
                 ConfirmThen::KeysKeyTree => {
                     let include_values = i == 0;
@@ -500,6 +598,23 @@ pub(super) async fn confirm_prompt(
                         },
                         "SignHash",
                     );
+                }
+                ConfirmThen::NnsRegisterConfirm { name } => {
+                    if i == 0 {
+                        match crate::repl::nns::ensure_name_available(&name).await {
+                            Ok(()) => match crate::repl::nns::build_registry_recipient(&name) {
+                                Ok(recipient) => {
+                                    let cmd =
+                                        crate::repl::nns::schedule_create_tx_command(recipient);
+                                    super::schedule_cmd(store, rt, done_tx, cmd, "NNS register");
+                                }
+                                Err(e) => warn!("{e}"),
+                            },
+                            Err(e) => warn!("{e}"),
+                        }
+                    } else {
+                        super::replace_screen(store, Screen::Transactions { sel: 0 });
+                    }
                 }
             }
             Ok(ReplControl::Continue)
