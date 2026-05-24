@@ -1,5 +1,9 @@
 # Wallet TUI
 
+<img width="656" height="608" alt="telegram-cloud-photo-size-1-4940823604891421713-y" src="https://github.com/user-attachments/assets/c45fdd7b-902a-4a26-bc53-220620dab5bd" />
+<br />
+<br />
+
 Interactive full-screen terminal UI for `nockchain-wallet`, built with [ratatui](https://github.com/ratatui-org/ratatui) and [crossterm](https://github.com/crossterm-rs/crossterm). The TUI exposes the same wallet kernel commands as the CLI, plus a session-scoped JSON HTTP API for automation.
 
 ## Launch
