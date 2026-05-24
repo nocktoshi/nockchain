@@ -667,11 +667,78 @@
     $%  [%send-tx tx=raw-tx:v1:transact]
     ==
   ::
+  ::
+  +$  wallet-note-row
+    [name-first=@t name-last=@t version=@ assets=@]
+  ::
+  +$  wallet-effect-kind
+    $?  %balance
+        %notes
+    ==
+  ::
+  +$  balance-payload-v1
+    $:  %v1
+        wallet-version=@
+        block-id-b58=@t
+        height=@
+        note-count=@
+        total-assets=@
+    ==
+  ::
+  +$  notes-payload-v1
+    $:  %v1
+        height=@
+        block-id-b58=@t
+        rows=(list wallet-note-row)
+    ==
+  ::
+  +$  notes-advanced-payload-v1
+    $:  %v1
+        filter-address=@t
+        height=@
+        block-id-b58=@t
+        rows=(list wallet-note-row)
+    ==
+  ::
+  +$  address-row-v1
+    [address-b58=@t version=@]
+  ::
+  +$  addresses-payload-v1
+    $:  %v1
+        list-kind=@t
+        rows=(list address-row-v1)
+    ==
+  ::
+  +$  key-tree-node-v1
+    [path=@t label=@t pubkey-b58=(unit @t)]
+  ::
+  +$  key-tree-payload-v1
+    $:  %v1
+        include-values=?
+        nodes=(list key-tree-node-v1)
+    ==
+  ::
+  +$  keygen-payload-v1
+    $:  %v1
+        message=@t
+        paths=(list @t)
+        pubkeys-b58=(list @t)
+    ==
+  ::
+  +$  wallet-effect-cell
+    $%  [%balance balance-payload-v1]
+        [%notes notes-payload-v1]
+        [%not-adv notes-advanced-payload-v1]
+        [%address addresses-payload-v1]
+        [%key-tre key-tree-payload-v1]
+        [%keygen keygen-payload-v1]
+    ==
+  ::
   +$  effect
     $%  file-effect
         [%markdown @t]
-        ::  structured dumps: [%raw inner] (e.g. [%raw [%wbal-v1 …]], [%raw [%wnote-v1 …]])
-        [%raw *]
+        ::  TUI/API structured output: [%wallet kind [%v1 …]]
+        [%wallet wallet-effect-cell]
         [%grpc grpc-effect]
         [%nockchain-grpc nockchain-grpc-effect]
         [%exit code=@]

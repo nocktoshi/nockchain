@@ -1,14 +1,41 @@
+use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
-use nockapp::Bytes;
+use nockapp::noun::slab::{NockJammer, NounSlab};
+use nockapp::utils::bytes::Byts;
+use nockapp_grpc::private_nockapp;
+use nockapp_grpc::public_nockchain;
+use nockapp::utils::make_tas;
+use nockapp::{Bytes, CrownError, NockAppError, ToBytesExt};
+use nockapp::drivers::one_punch::OnePunchWire;
 use nockchain_math::noun_ext::NounMathExtHandle;
 use nockchain_math::zoon::zmap::ZMap;
+use nockchain_types::common::{Hash, Name, SchnorrPubkey};
 use nockchain_types::tx_engine::common::Signature;
-use nockvm::noun::NounSpace;
-use noun_serde::NounDecodeError;
-use wallet_tx_builder::types::CandidateNote;
+use nockchain_types::tx_engine::v1::tx::{LockPrimitive, Pkh, SpendCondition};
+use nockchain_types::tx_engine::v1;
+use nockvm::noun::{Cell, Noun, NounAllocator, NounSpace, D, SIG, T};
+use noun_serde::{NounDecode, NounDecodeError, NounEncode};
+use tokio::fs as tokio_fs;
+use tracing::{info, warn};
+use wallet_tx_builder::adapter::{
+    normalize_balance_pages, NormalizeSnapshotError, SnapshotConsistencyError,
+};
+use wallet_tx_builder::adapter::NormalizedSnapshot;
+use wallet_tx_builder::lock_resolver::LockMatcher;
+use wallet_tx_builder::planner::{plan_create_tx, PlanError};
+use wallet_tx_builder::types::{
+    CandidateNote, CandidateV0Note, CandidateV1Note, CandidateVersionPolicy, ChainContext,
+    PlanRequest, PlanningMode, RawNoteDataEntry, SelectionMode, SelectionOrder,
+};
 
-use super::*;
+use crate::command::{CommandNoun, NoteSelectionStrategyCli, Operation};
+use crate::connection;
+use nockapp_grpc::public_nockchain::v2::client::BalanceRequest;
+use crate::recipient::{
+    planner_recipient_outputs, planner_refund_output_template, RecipientSpec,
+};
+use crate::wallet::Wallet;
 
 pub(crate) fn ensure_manual_planner_parity(
     requested_names: &[Name],
@@ -172,7 +199,7 @@ struct TxFileSnapshot {
 }
 
 #[derive(Debug, Clone, Default)]
-pub(crate) struct WrittenTxSnapshot(BTreeMap<PathBuf, TxFileSnapshot>);
+pub struct WrittenTxSnapshot(BTreeMap<PathBuf, TxFileSnapshot>);
 
 #[derive(Debug, Clone)]
 pub(crate) struct CreateTxRequest {
@@ -189,11 +216,11 @@ pub(crate) struct CreateTxRequest {
 
 /// Planner output before the kernel `create-tx` poke (TUI review screen).
 #[derive(Debug, Clone)]
-pub(crate) struct PlannedCreateTx {
-    pub(crate) request: CreateTxRequest,
-    pub(crate) plan: wallet_tx_builder::types::PlanResult,
-    pub(crate) block_id_b58: String,
-    pub(crate) height: u64,
+pub struct PlannedCreateTx {
+    pub request: CreateTxRequest,
+    pub plan: wallet_tx_builder::types::PlanResult,
+    pub block_id_b58: String,
+    pub height: u64,
 }
 
 #[derive(Debug, Clone)]
@@ -640,7 +667,7 @@ impl Wallet {
         Ok(applied)
     }
 
-    pub(crate) async fn snapshot_written_txs(
+    pub async fn snapshot_written_txs(
         tx_dir: &Path,
     ) -> Result<WrittenTxSnapshot, NockAppError> {
         let mut snapshots = BTreeMap::new();
@@ -670,7 +697,7 @@ impl Wallet {
         Ok(WrittenTxSnapshot(snapshots))
     }
 
-    pub(crate) fn detect_written_tx_paths(
+    pub fn detect_written_tx_paths(
         before: &WrittenTxSnapshot,
         after: &WrittenTxSnapshot,
     ) -> Result<Vec<String>, NockAppError> {
@@ -808,7 +835,7 @@ impl Wallet {
     }
 
     /// Plans create-tx inputs/fee without dispatching the kernel poke.
-    pub(crate) async fn plan_create_tx_with_planner(
+    pub async fn plan_create_tx_with_planner(
         &mut self,
         synced_snapshot: Option<NormalizedSnapshot>,
         names: Option<String>,

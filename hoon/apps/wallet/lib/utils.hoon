@@ -1041,7 +1041,7 @@
       --  ::  +v1
     --  ::  +display
   ::
-  ::  structured kernel effects (see +effect:types); used by +show and wallet.hoon
+  ::  structured kernel effects (see +effect:wt); used by +show and wallet.hoon
   ++  balance-owned-totals
     |=  [=state:wt =balance:wt]
     ^-  [@ coins:transact]
@@ -1066,87 +1066,87 @@
     :-  +(len)
     (add acc assets.note)
   ::
-  ++  wallet-balance-v1-effect
+  ++  note-rows
+    |=  =state:wt
+    ^-  (list wallet-note-row:wt)
+    %+  turn  ~(tap z-by:zo notes.balance.state)
+    |=  [nam=nname:transact note=nnote:transact]
+    =/  nb=[f=@t l=@t]  (to-b58:nname:transact nam)
+    :*  f.nb
+        l.nb
+        ?^  -.note  0  1
+        assets.note
+    ==
+  ::
+  ++  balance-payload-v1
     |=  [=state:wt =balance:wt]
-    ^-  effect:wt
+    ^-  balance-payload-v1:wt
     =/  [note-count=@ total-assets=coins:transact]
       (balance-owned-totals state balance)
     =/  block-b58=@t
       (to-b58:hash:transact block-id.balance.state)
-    :-  %raw
-      :*  %wbal-v1
-          -.state
-          block-b58
-          height.balance.state
-          note-count
-          total-assets
-      ==
+    :*  %v1
+        -.state
+        block-b58
+        height.balance.state
+        note-count
+        total-assets
+    ==
   ::
-  ++  wallet-notes-v1-effect
+  ++  notes-payload-v1
+    |=  =state:wt
+    ^-  notes-payload-v1:wt
+    :*  %v1
+        height.balance.state
+        (to-b58:hash:transact block-id.balance.state)
+        (note-rows state)
+    ==
+  ::
+  ++  wallet-effect-balance
+    |=  [=state:wt =balance:wt]
+    ^-  effect:wt
+    :-  %wallet
+    :-  %balance
+    (balance-payload-v1 state balance)
+  ::
+  ++  wallet-effect-notes
     |=  =state:wt
     ^-  effect:wt
-    =/  rows=(list [name-first=@t name-last=@t version=@ assets=@])
-      %+  turn  ~(tap z-by:zo notes.balance.state)
-      |=  [nam=nname:transact note=nnote:transact]
-      =/  nb=[f=@t l=@t]  (to-b58:nname:transact nam)
-      :*  f.nb
-          l.nb
-          ?^  -.note  0  1
-          assets.note
-      ==
-    :-  %raw
-      :*  %wnote-v1
-          height.balance.state
-          (to-b58:hash:transact block-id.balance.state)
-          rows
-      ==
+    :-  %wallet
+    :-  %notes
+    (notes-payload-v1 state)
+  ::
+  ++  display-balance
+    |=  [=state:wt =balance:wt]
+    ^-  effect:wt
+    =/  [total-notes=@ total-nicks=coins:transact]
+      (balance-owned-totals state balance)
+    =/  nodes=markdown:m
+      =+  block-b58=(to-b58:hash:transact block-id.balance.state)
+      %-  need
+      %-  de:md
+      %-  crip
+      """
+      ## Wallet Balance
+      Wallet balance from block {(trip block-b58)} at height {<height.balance.state>}
+      - Wallet Version: {<-.state>}
+      - Number of Notes: {(trip (format-ui:common:display total-notes))}
+      - Balance: {(trip (format-ui:common:display total-nicks))} nicks
+      """
+    (make-markdown-effect nodes)
   ::
   ++  show
-      |=  [=state:wt =path]
-      ^-  [(list effect:wt) state:wt]
-      |^
-      ?+    path  !!
-          [%balance ~]
-        :-  :~  (wallet-balance-v1-effect state balance.state)
-                [%exit 0]
-                (display-balance balance.state)
-            ==
-        state
-      ::
-      ==
-      ++  display-balance
-        |=  =balance:wt
-        ^-  effect:wt
-        =/  [total-notes=@ total-nicks=coins:transact]
-          (balance-owned-totals state balance)
-        =/  nodes=markdown:m
-          =+  block-b58=(to-b58:hash:transact block-id.balance.state)
-          %-  need
-          %-  de:md
-          %-  crip
-          """
-          ## Wallet Balance
-          Wallet balance from block {(trip block-b58)} at height {<height.balance.state>}
-          - Wallet Version: {<-.state>}
-          - Number of Notes: {(trip (format-ui:common:display total-notes))}
-          - Balance: {(trip (format-ui:common:display total-nicks))} nicks
-          """
-        (make-markdown-effect nodes)
-      ::
-      ::++  display-state
-      ::  ^-  (list effect:wt)
-      ::  =/  nodes=markdown:m
-      ::  %-  need
-      ::  %-  de:md
-      ::  %-  crip
-      ::  """
-      ::  ## Wallet State
-      ::  - Wallet Version: -.state
-      ::  - Last Block: {<block-id.balance.state>}
-      ::  - Height: {<height.balance.state>}
-      ::  """
-      ::  ~[(make-markdown-effect nodes)]
-      --
+    |=  [=state:wt =path]
+    ^-  [(list effect:wt) state:wt]
+    ?+    path  !!
+        [%balance ~]
+      :-  :~  (wallet-effect-balance state balance.state)
+              [%exit 0]
+              (display-balance state balance.state)
+          ==
+      state
+    ::
+    ==
   ::
   ++  ui-to-tape
       |=  @

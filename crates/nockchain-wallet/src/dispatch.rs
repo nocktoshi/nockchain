@@ -40,27 +40,27 @@ use crate::wallet_outcome::{
     migrate_summary_event, WalletAddressRowV1, WalletCommandData, WalletCommandOutcome,
     WalletEvent, WalletKeyTreeNodeV1, WalletKeygenV1, WalletNoteRowV1,
 };
-use crate::{connection, normalize_watch_address, Wallet};
+use crate::wallet::{normalize_watch_address, Wallet};
 
 /// Optional progress hooks for callers. CLI uses [`DispatchHooks::cli`]; TUI/API use [`DispatchHooks::structured_with_markdown`].
 #[derive(Clone, Default)]
-pub(crate) struct DispatchHooks {
+pub struct DispatchHooks {
     /// Notified with `(attempt, max_attempts)` before each balance-sync RPC attempt.
     pub sync_attempt: Option<tokio::sync::watch::Sender<(usize, usize)>>,
     /// When set, `%markdown` effects are captured for CLI presentation (termimad during `app.run()`).
     pub markdown_capture: Option<Arc<Mutex<String>>>,
-    /// When set, `[%raw …]` effects are decoded into structured [`WalletEvent`]s (TUI/API).
+    /// When set, `[%wallet …]` effects are decoded into structured [`WalletEvent`]s (TUI/API).
     pub wallet_events: Option<Arc<Mutex<Vec<WalletEvent>>>>,
 }
 
 impl DispatchHooks {
     /// One-shot CLI: kernel `%markdown` → nockapp `markdown_driver` (stdout).
-    pub(crate) fn cli() -> Self {
+    pub fn cli() -> Self {
         Self::default()
     }
 
-    /// TUI / JSON API: structured `[%raw …]` plus captured `%markdown`.
-    pub(crate) fn structured_with_markdown(
+    /// TUI / JSON API: structured `[%wallet …]` plus captured `%markdown`.
+    pub fn structured_with_markdown(
         events: Arc<Mutex<Vec<WalletEvent>>>,
         markdown: Arc<Mutex<String>>,
     ) -> Self {
@@ -71,7 +71,7 @@ impl DispatchHooks {
         }
     }
 
-    pub(crate) fn with_sync_attempt(
+    pub fn with_sync_attempt(
         mut self,
         tx: tokio::sync::watch::Sender<(usize, usize)>,
     ) -> Self {
@@ -80,110 +80,151 @@ impl DispatchHooks {
     }
 }
 
-/// Decode additive `[%raw [tag …]]` kernel effects.
-fn try_wallet_structured_event(noun: Noun, space: &NounSpace) -> Option<WalletEvent> {
+/// Decode kernel `[%wallet kind [%v1 …]]` effects.
+fn try_wallet_effect_event(noun: Noun, space: &NounSpace) -> Option<WalletEvent> {
     let cell = noun.in_space(space).as_cell().ok()?;
     let head = cell.head().noun();
     let tail = cell.tail().noun();
-    if !unsafe { head.raw_equals(&D(tas!(b"raw"))) } {
+    if !unsafe { head.raw_equals(&D(tas!(b"wallet"))) } {
         return None;
     }
-    let inner = tail.in_space(space).as_cell().ok()?;
-    let inner_head = inner.head().noun();
-    let inner_tail = inner.tail().noun();
-    if unsafe { inner_head.raw_equals(&D(tas!(b"wbal-v1"))) } {
-        let (wallet_version, block_id_b58, height, note_count, total_assets) =
-            <(u64, String, u64, u64, u64)>::from_noun(&inner_tail, space).ok()?;
-        return Some(WalletEvent::BalanceSnapshotV1 {
-            wallet_version,
-            block_id_b58,
-            height,
-            note_count,
-            total_assets,
-        });
+    let kind_cell = tail.in_space(space).as_cell().ok()?;
+    let kind = kind_cell.head().noun();
+    let payload = kind_cell.tail().noun();
+    if unsafe { kind.raw_equals(&D(tas!(b"balance"))) } {
+        return decode_balance_v1(payload, space);
     }
-    if unsafe { inner_head.raw_equals(&D(tas!(b"wnote-v1"))) } {
-        let (height, block_id_b58, rows) =
-            <(u64, String, Vec<(String, String, u64, u64)>)>::from_noun(&inner_tail, space).ok()?;
-        let rows: Vec<WalletNoteRowV1> = rows
-            .into_iter()
-            .map(
-                |(name_first_b58, name_last_b58, version, assets)| WalletNoteRowV1 {
-                    name_first_b58,
-                    name_last_b58,
-                    version,
-                    assets,
-                },
-            )
-            .collect();
-        return Some(WalletEvent::NotesListV1 {
-            height,
-            block_id_b58,
-            filter_address: None,
-            rows,
-        });
+    if unsafe { kind.raw_equals(&D(tas!(b"notes"))) } {
+        return decode_notes_v1(payload, space, None);
     }
-    if unsafe { inner_head.raw_equals(&D(tas!(b"wnot-adv"))) } {
-        let (filter_address, height, block_id_b58, rows) =
-            <(String, u64, String, Vec<(String, String, u64, u64)>)>::from_noun(&inner_tail, space)
-                .ok()?;
-        let rows: Vec<WalletNoteRowV1> = rows
-            .into_iter()
-            .map(
-                |(name_first_b58, name_last_b58, version, assets)| WalletNoteRowV1 {
-                    name_first_b58,
-                    name_last_b58,
-                    version,
-                    assets,
-                },
-            )
-            .collect();
-        return Some(WalletEvent::NotesListV1 {
-            height,
-            block_id_b58,
-            filter_address: Some(filter_address),
-            rows,
-        });
+    if unsafe { kind.raw_equals(&D(tas!(b"not-adv"))) } {
+        return decode_notes_advanced_v1(payload, space);
     }
-    if unsafe { inner_head.raw_equals(&D(tas!(b"waddr-ls"))) } {
-        let (list_kind, rows) =
-            <(String, Vec<(String, u64)>)>::from_noun(&inner_tail, space).ok()?;
-        return Some(WalletEvent::AddressListV1 {
-            list_kind,
-            rows: rows
-                .into_iter()
-                .map(|(address_b58, version)| WalletAddressRowV1 {
-                    address_b58,
-                    version,
-                })
-                .collect(),
-        });
+    if unsafe { kind.raw_equals(&D(tas!(b"address"))) } {
+        return decode_addresses_v1(payload, space);
     }
-    if unsafe { inner_head.raw_equals(&D(tas!(b"wkey-tre"))) } {
-        let (include_values, nodes) =
-            <(u64, Vec<(String, String, Option<String>)>)>::from_noun(&inner_tail, space).ok()?;
-        return Some(WalletEvent::KeyTreeV1 {
-            include_values: include_values != 0,
-            nodes: nodes
-                .into_iter()
-                .map(|(path, label, pubkey_b58)| WalletKeyTreeNodeV1 {
-                    path,
-                    label,
-                    pubkey_b58,
-                })
-                .collect(),
-        });
+    if unsafe { kind.raw_equals(&D(tas!(b"key-tre"))) } {
+        return decode_key_tree_v1(payload, space);
     }
-    if unsafe { inner_head.raw_equals(&D(tas!(b"wkeygn1"))) } {
-        let (message, paths, pubkeys_b58) =
-            <(String, Vec<String>, Vec<String>)>::from_noun(&inner_tail, space).ok()?;
-        return Some(WalletEvent::KeygenV1(WalletKeygenV1 {
-            message,
-            paths,
-            pubkeys_b58,
-        }));
+    if unsafe { kind.raw_equals(&D(tas!(b"keygen"))) } {
+        return decode_keygen_v1(payload, space);
     }
     None
+}
+
+fn expect_v1_payload(noun: Noun, space: &NounSpace) -> Option<Noun> {
+    let cell = noun.in_space(space).as_cell().ok()?;
+    let head = cell.head().noun();
+    if !unsafe { head.raw_equals(&D(tas!(b"v1"))) } {
+        return None;
+    }
+    Some(cell.tail().noun())
+}
+
+fn decode_balance_v1(noun: Noun, space: &NounSpace) -> Option<WalletEvent> {
+    let tail = expect_v1_payload(noun, space)?;
+    let (wallet_version, block_id_b58, height, note_count, total_assets) =
+        <(u64, String, u64, u64, u64)>::from_noun(&tail, space).ok()?;
+    Some(WalletEvent::BalanceSnapshotV1 {
+        wallet_version,
+        block_id_b58,
+        height,
+        note_count,
+        total_assets,
+    })
+}
+
+fn decode_notes_v1(
+    noun: Noun,
+    space: &NounSpace,
+    filter_address: Option<String>,
+) -> Option<WalletEvent> {
+    let tail = expect_v1_payload(noun, space)?;
+    let (height, block_id_b58, rows) =
+        <(u64, String, Vec<(String, String, u64, u64)>)>::from_noun(&tail, space).ok()?;
+    let rows: Vec<WalletNoteRowV1> = rows
+        .into_iter()
+        .map(
+            |(name_first_b58, name_last_b58, version, assets)| WalletNoteRowV1 {
+                name_first_b58,
+                name_last_b58,
+                version,
+                assets,
+            },
+        )
+        .collect();
+    Some(WalletEvent::NotesListV1 {
+        height,
+        block_id_b58,
+        filter_address,
+        rows,
+    })
+}
+
+fn decode_notes_advanced_v1(noun: Noun, space: &NounSpace) -> Option<WalletEvent> {
+    let tail = expect_v1_payload(noun, space)?;
+    let (filter_address, height, block_id_b58, rows) =
+        <(String, u64, String, Vec<(String, String, u64, u64)>)>::from_noun(&tail, space).ok()?;
+    let rows: Vec<WalletNoteRowV1> = rows
+        .into_iter()
+        .map(
+            |(name_first_b58, name_last_b58, version, assets)| WalletNoteRowV1 {
+                name_first_b58,
+                name_last_b58,
+                version,
+                assets,
+            },
+        )
+        .collect();
+    Some(WalletEvent::NotesListV1 {
+        height,
+        block_id_b58,
+        filter_address: Some(filter_address),
+        rows,
+    })
+}
+
+fn decode_addresses_v1(noun: Noun, space: &NounSpace) -> Option<WalletEvent> {
+    let tail = expect_v1_payload(noun, space)?;
+    let (list_kind, rows) = <(String, Vec<(String, u64)>)>::from_noun(&tail, space).ok()?;
+    Some(WalletEvent::AddressListV1 {
+        list_kind,
+        rows: rows
+            .into_iter()
+            .map(|(address_b58, version)| WalletAddressRowV1 {
+                address_b58,
+                version,
+            })
+            .collect(),
+    })
+}
+
+fn decode_key_tree_v1(noun: Noun, space: &NounSpace) -> Option<WalletEvent> {
+    let tail = expect_v1_payload(noun, space)?;
+    let (include_values, nodes) =
+        <(u64, Vec<(String, String, Option<String>)>)>::from_noun(&tail, space).ok()?;
+    Some(WalletEvent::KeyTreeV1 {
+        include_values: include_values != 0,
+        nodes: nodes
+            .into_iter()
+            .map(|(path, label, pubkey_b58)| WalletKeyTreeNodeV1 {
+                path,
+                label,
+                pubkey_b58,
+            })
+            .collect(),
+    })
+}
+
+fn decode_keygen_v1(noun: Noun, space: &NounSpace) -> Option<WalletEvent> {
+    let tail = expect_v1_payload(noun, space)?;
+    let (message, paths, pubkeys_b58) =
+        <(String, Vec<String>, Vec<String>)>::from_noun(&tail, space).ok()?;
+    Some(WalletEvent::KeygenV1(WalletKeygenV1 {
+        message,
+        paths,
+        pubkeys_b58,
+    }))
 }
 
 fn wallet_data_from_hooks(hooks: &DispatchHooks) -> WalletCommandData {
@@ -214,8 +255,8 @@ fn present_migrate_summary(
     }
 }
 
-/// Capture `[%raw …]` into structured [`WalletEvent`]s (TUI / API). Ignores `%markdown`.
-pub(crate) fn structured_effect_driver(wallet_events: Arc<Mutex<Vec<WalletEvent>>>) -> IODriverFn {
+/// Capture `[%wallet …]` into structured [`WalletEvent`]s (TUI / API). Ignores `%markdown`.
+pub(crate) fn wallet_effect_driver(wallet_events: Arc<Mutex<Vec<WalletEvent>>>) -> IODriverFn {
     make_driver(move |handle| {
         let wallet_events = Arc::clone(&wallet_events);
         async move {
@@ -224,7 +265,7 @@ pub(crate) fn structured_effect_driver(wallet_events: Arc<Mutex<Vec<WalletEvent>
                     Ok(effect) => {
                         let space = effect.noun_space();
                         let root = unsafe { effect.root() };
-                        if let Some(structured) = try_wallet_structured_event(*root, &space) {
+                        if let Some(structured) = try_wallet_effect_event(*root, &space) {
                             wallet_events.lock().unwrap().push(structured);
                         }
                     }
@@ -281,7 +322,7 @@ async fn add_markdown_io_driver(wallet: &mut Wallet, hooks: &DispatchHooks) {
     if let Some(events) = hooks.wallet_events.clone() {
         wallet
             .app
-            .add_io_driver(structured_effect_driver(events))
+            .add_io_driver(wallet_effect_driver(events))
             .await;
         if let Some(sink) = hooks.markdown_capture.clone() {
             wallet
@@ -341,15 +382,14 @@ pub(crate) fn command_requires_sync(command: &Commands) -> bool {
         | Commands::ShowTx { .. }
         | Commands::SignMultisigTx { .. }
         | Commands::Watch { .. }
-        | Commands::TxAccepted { .. }
-        | Commands::Tui => false,
+        | Commands::TxAccepted { .. } => false,
         _ => true,
     }
 }
 
 fn build_initial_poke(command: &Commands) -> CommandNoun<NounSlab> {
     match command {
-        Commands::Tui | Commands::TxAccepted { .. } => Err(NockAppError::from(
+        Commands::TxAccepted { .. } => Err(NockAppError::from(
             CrownError::Unknown("internal: invalid command for poke builder".into()),
         )),
         Commands::Keygen => {
@@ -533,7 +573,7 @@ fn build_initial_poke(command: &Commands) -> CommandNoun<NounSlab> {
 }
 
 /// Run a single wallet command (sync, planner branches, kernel I/O).
-pub(crate) async fn execute_wallet_command(
+pub async fn execute_wallet_command(
     cli: &WalletCli,
     wallet: &mut Wallet,
     command: &Commands,
@@ -610,7 +650,7 @@ pub(crate) async fn execute_wallet_command(
                     attempt, MAX_SYNC_RETRIES
                 ));
             }
-            match connection::sync_wallet_balance(
+            match crate::connection::sync_wallet_balance(
                 wallet,
                 &connection_target,
                 pubkeys.clone(),

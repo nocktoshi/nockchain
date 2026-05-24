@@ -2,7 +2,7 @@ use std::str::FromStr;
 
 use clap::builder::BoolishValueParser;
 use clap::{ArgAction, Parser, Subcommand, ValueEnum};
-use nockapp::driver::Operation;
+pub use nockapp::driver::Operation;
 use nockapp::kernel::boot::Cli as BootCli;
 use nockapp::wire::{Wire, WireRepr};
 use nockapp::NockAppError;
@@ -185,7 +185,7 @@ pub struct WalletCli {
     #[command(flatten)]
     pub boot: BootCli,
 
-    /// More detailed logs (info/debug). When unset, `tui` uses a quiet default unless `RUST_LOG` is set.
+    /// More detailed logs (info/debug). When unset, the wallet TUI uses a quiet default unless `RUST_LOG` is set.
     #[arg(short, long, global = true)]
     pub verbose: bool,
 
@@ -671,8 +671,6 @@ pub enum Commands {
         pubkey_pos: Option<String>,
     },
 
-    /// Interactive wallet TUI. Type `help` or `/help`, `exit` or `/exit`. Use `--verbose` for more logs.
-    Tui,
 }
 
 impl Commands {
@@ -705,7 +703,6 @@ impl Commands {
             Commands::SignHash { .. } => "sign-hash",
             Commands::VerifyHash { .. } => "verify-hash",
             Commands::TxAccepted { .. } => "tx-accepted",
-            Commands::Tui => "tui",
             Commands::Watch { subcommand } => match subcommand {
                 WatchSubcommand::Address { .. } => "watch-address",
                 WatchSubcommand::Pubkey { .. } => "watch-address",

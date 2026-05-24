@@ -13,7 +13,7 @@ use crate::{CrownError, NockAppError};
 const MAX_BLOB_UTF8_BYTES: usize = 256 * 1024;
 
 /// Trims and checks size; `None` if absent or empty/whitespace-only.
-pub(crate) fn validate_blob_field(blob: Option<String>) -> Result<Option<Vec<u8>>, NockAppError> {
+pub fn validate_blob_field(blob: Option<String>) -> Result<Option<Vec<u8>>, NockAppError> {
     let Some(raw) = blob else {
         return Ok(None);
     };
@@ -33,7 +33,7 @@ pub(crate) fn validate_blob_field(blob: Option<String>) -> Result<Option<Vec<u8>
 }
 
 /// Validates optional UTF-8 memo text for per-recipient note-data (matches kernel limits).
-pub(crate) fn validate_memo_utf8(memo: Option<&str>) -> Result<Option<Vec<u8>>, NockAppError> {
+pub fn validate_memo_utf8(memo: Option<&str>) -> Result<Option<Vec<u8>>, NockAppError> {
     let Some(memo) = memo else {
         return Ok(None);
     };

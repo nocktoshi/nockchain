@@ -5891,12 +5891,8 @@ dependencies = [
 name = "nockchain-wallet"
 version = "0.1.0"
 dependencies = [
- "arboard",
- "axum",
  "bs58",
- "bytes",
  "clap",
- "crossterm 0.29.0",
  "dotenvy",
  "either",
  "getrandom 0.3.4",
@@ -5911,9 +5907,6 @@ dependencies = [
  "nockvm",
  "nockvm_macros",
  "noun-serde",
- "ratatui 0.29.0",
- "regex",
- "reqwest 0.12.28",
  "rustls",
  "serde",
  "serde_json",
@@ -5926,6 +5919,35 @@ dependencies = [
  "tracing-subscriber",
  "wallet-tx-builder",
  "zkvm-jetpack",
+]
+
+[[package]]
+name = "nockchain-wallet-tui"
+version = "0.1.0"
+dependencies = [
+ "arboard",
+ "axum",
+ "bs58",
+ "clap",
+ "crossterm 0.29.0",
+ "dotenvy",
+ "getrandom 0.3.4",
+ "hex",
+ "http",
+ "nockapp",
+ "nockapp-grpc",
+ "nockchain-types",
+ "nockchain-wallet",
+ "ratatui 0.29.0",
+ "regex",
+ "reqwest 0.12.28",
+ "rustls",
+ "serde",
+ "serde_json",
+ "tokio",
+ "tracing",
+ "tracing-subscriber",
+ "wallet-tx-builder",
 ]
 
 [[package]]

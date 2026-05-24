@@ -10,7 +10,7 @@ use crate::command::ClientType;
 use crate::Wallet;
 
 #[derive(Args, Debug, Clone)]
-pub(crate) struct ConnectionCli {
+pub struct ConnectionCli {
     /// Which client to connect to: public or private
     #[arg(long, value_enum, default_value = "public", global = true)]
     pub client: ClientType,
@@ -38,10 +38,10 @@ impl ConnectionCli {
 }
 
 #[derive(Debug, Clone)]
-pub(crate) struct GrpcEndpoint(String);
+pub struct GrpcEndpoint(String);
 
 impl GrpcEndpoint {
-    pub(crate) fn parse(raw: &str) -> Result<Self, String> {
+    pub fn parse(raw: &str) -> Result<Self, String> {
         let trimmed = raw.trim();
         if trimmed.is_empty() {
             return Err("gRPC server address cannot be empty".to_string());

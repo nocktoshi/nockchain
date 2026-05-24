@@ -1234,7 +1234,7 @@
     ?>  ?=(%list-notes -.cause)
     %-  (debug "list-notes")
     :_  state
-    :~  (wallet-notes-v1-effect:utils state)
+    :~  (wallet-effect-notes:utils state)
         :-  %markdown
       %-  crip
       %+  welp
