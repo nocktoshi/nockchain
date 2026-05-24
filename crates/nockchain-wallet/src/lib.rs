@@ -14,7 +14,7 @@ mod tests;
 
 pub use command::{CommandNoun, Commands, WalletCli};
 pub use connection::ConnectionCli;
-pub use dispatch::{execute_wallet_command, DispatchHooks};
+pub use dispatch::{DispatchHooks};
 pub use create_tx::{PlannedCreateTx, WrittenTxSnapshot};
 pub use recipient::RecipientSpec;
 pub use recipient::{validate_blob_field, validate_memo_utf8};

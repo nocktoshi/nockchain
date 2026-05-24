@@ -40,7 +40,7 @@ async fn main() -> Result<(), NockAppError> {
     let (mut wallet, mut synced_snapshot_for_planner, _data_dir) = boot_wallet(cli.boot.clone(), cli.fakenet).await?;
 
     execute_wallet_command(
-        &cli,
+        &cli.connection,
         &mut wallet,
         &cli.command,
         &mut synced_snapshot_for_planner,

@@ -41,6 +41,7 @@ use crate::wallet_outcome::{
     WalletEvent, WalletKeyTreeNodeV1, WalletKeygenV1, WalletNoteRowV1,
 };
 use crate::wallet::{normalize_watch_address, Wallet};
+use crate::connection::ConnectionCli;
 
 /// Optional progress hooks for callers. CLI uses [`DispatchHooks::cli`]; TUI/API use [`DispatchHooks::structured_with_markdown`].
 #[derive(Clone, Default)]
@@ -574,7 +575,7 @@ fn build_initial_poke(command: &Commands) -> CommandNoun<NounSlab> {
 
 /// Run a single wallet command (sync, planner branches, kernel I/O).
 pub async fn execute_wallet_command(
-    cli: &WalletCli,
+    connection: &ConnectionCli,
     wallet: &mut Wallet,
     command: &Commands,
     synced_snapshot_for_planner: &mut Option<NormalizedSnapshot>,
@@ -636,7 +637,7 @@ pub async fn execute_wallet_command(
             Vec::new()
         };
 
-        let connection_target = cli.connection.target();
+        let connection_target = connection.target();
         const MAX_SYNC_RETRIES: usize = 5;
         let mut attempt: usize = 0;
         let sync_result = loop {
