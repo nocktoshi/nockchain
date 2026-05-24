@@ -36,7 +36,7 @@ use zkvm_jetpack::hot::produce_prover_hot_state;
 
 /// Boot wallet kernel using only the minimal options needed (no WalletCli / Commands required).
 /// Intended for the TUI and other non-CLI consumers.
-pub async fn open_wallet_api(
+pub async fn boot_wallet(
     boot: nockapp::kernel::boot::Cli,
     fakenet: bool,
 ) -> Result<(Wallet, Option<NormalizedSnapshot>, PathBuf), NockAppError> {
@@ -47,7 +47,7 @@ pub async fn open_wallet_api(
         KERNEL,
         boot.clone(),
         prover_hot_state.as_slice(),
-        "wallet-api",
+        "wallet",
         Some(data_dir.clone()),
     )
     .await

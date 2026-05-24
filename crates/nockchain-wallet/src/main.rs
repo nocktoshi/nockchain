@@ -19,7 +19,7 @@ use nockapp_grpc::public_nockchain;
 use nockchain_types::common::Hash;
 use nockchain_wallet::command::{ClientType, Commands, WalletCli};
 use nockchain_wallet::dispatch::{execute_wallet_command, DispatchHooks};
-use nockchain_wallet::{open_wallet, tx_accepted_markdown};
+use nockchain_wallet::{boot_wallet, tx_accepted_markdown};
 use termimad::MadSkin;
 
 #[tokio::main]
@@ -37,7 +37,7 @@ async fn main() -> Result<(), NockAppError> {
         return run_transaction_accepted(&cli.connection, tx_id).await;
     }
 
-    let (mut wallet, mut synced_snapshot_for_planner, _data_dir) = open_wallet(&cli).await?;
+    let (mut wallet, mut synced_snapshot_for_planner, _data_dir) = boot_wallet(cli.boot.clone(), cli.fakenet).await?;
 
     execute_wallet_command(
         &cli,
