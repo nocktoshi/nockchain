@@ -32,18 +32,22 @@ use nockapp::kernel::boot::{self, NockStackSize};
 use nockapp::{CrownError, NockAppError};
 use zkvm_jetpack::hot::produce_prover_hot_state;
 
-/// Boot wallet kernel, apply fakenet mode, and return runtime + data directory.
-pub async fn open_wallet(
-    cli: &WalletCli,
+
+
+/// Boot wallet kernel using only the minimal options needed (no WalletCli / Commands required).
+/// Intended for the TUI and other non-CLI consumers.
+pub async fn open_wallet_api(
+    boot: nockapp::kernel::boot::Cli,
+    fakenet: bool,
 ) -> Result<(Wallet, Option<NormalizedSnapshot>, PathBuf), NockAppError> {
     let prover_hot_state = produce_prover_hot_state();
     let data_dir = wallet_data_dir().await?;
 
     let kernel = boot::setup(
         KERNEL,
-        cli.boot.clone(),
+        boot.clone(),
         prover_hot_state.as_slice(),
-        "wallet",
+        "wallet-api",
         Some(data_dir.clone()),
     )
     .await
@@ -52,7 +56,7 @@ pub async fn open_wallet(
     let mut wallet = Wallet::new(kernel);
     let synced_snapshot_for_planner: Option<NormalizedSnapshot> = None;
 
-    if cli.fakenet {
+    if fakenet {
         wallet.set_fakenet().await?;
     } else if wallet.is_fakenet().await? {
         return Err(NockAppError::OtherError(
