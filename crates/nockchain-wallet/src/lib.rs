@@ -39,6 +39,8 @@ use zkvm_jetpack::hot::produce_prover_hot_state;
 pub async fn boot_wallet(
     boot: nockapp::kernel::boot::Cli,
     fakenet: bool,
+    fakenet_v1_phase: Option<u64>,
+    fakenet_bythos_phase: Option<u64>,
 ) -> Result<(Wallet, Option<NormalizedSnapshot>, PathBuf), NockAppError> {
     let prover_hot_state = produce_prover_hot_state();
     let data_dir = wallet_data_dir().await?;
@@ -57,7 +59,9 @@ pub async fn boot_wallet(
     let synced_snapshot_for_planner: Option<NormalizedSnapshot> = None;
 
     if fakenet {
-        wallet.set_fakenet().await?;
+        wallet
+            .set_fakenet_with_overrides(fakenet_v1_phase, fakenet_bythos_phase)
+            .await?;
     } else if wallet.is_fakenet().await? {
         return Err(NockAppError::OtherError(
             "Attempted to boot the wallet in mainnet mode, but the loaded state is in fakenet mode. Please use the --fakenet flag to boot the wallet or boot the wallet with the --new flag to create a new mainnet wallet".to_string(),

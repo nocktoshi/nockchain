@@ -19,7 +19,8 @@ fn is_transient_sync_error(err: &NockAppError) -> bool {
 }
 
 use indicatif::ProgressBar;
-use nockapp::driver::{make_driver, IODriverFn};
+use nockapp::driver::{make_driver, IODriverFn, PokeResult};
+use nockapp::drivers::one_punch::OnePunchWire;
 use nockapp::noun::slab::NounSlab;
 use nockapp::utils::make_tas as make_tas_util;
 use nockapp::wire::{SystemWire, Wire};
@@ -40,8 +41,29 @@ use crate::wallet_outcome::{
     migrate_summary_event, WalletAddressRowV1, WalletCommandData, WalletCommandOutcome,
     WalletEvent, WalletKeyTreeNodeV1, WalletKeygenV1, WalletNoteRowV1,
 };
+
+fn empty_command_outcome() -> WalletCommandOutcome {
+    Ok(WalletCommandData { events: vec![] })
+}
 use crate::wallet::{normalize_watch_address, Wallet};
 use crate::connection::ConnectionCli;
+
+fn multisig_batch_driver(pokes: Vec<NounSlab>) -> IODriverFn {
+    make_driver(|handle| async move {
+        for poke in pokes {
+            match handle.poke(OnePunchWire::Poke.to_wire(), poke).await? {
+                PokeResult::Ack => {}
+                PokeResult::Nack => {
+                    let _ = handle.exit.exit(1).await;
+                    return Err(NockAppError::PokeFailed);
+                }
+            }
+        }
+
+        handle.exit.exit(0).await?;
+        Ok(())
+    })
+}
 
 /// Optional progress hooks for callers. CLI uses [`DispatchHooks::cli`]; TUI/API use [`DispatchHooks::structured_with_markdown`].
 #[derive(Clone, Default)]
@@ -365,6 +387,7 @@ pub(crate) fn command_requires_sync(command: &Commands) -> bool {
     match command {
         Commands::Keygen
         | Commands::DeriveChild { .. }
+        | Commands::DeriveChildBatch { .. }
         | Commands::ImportKeys { .. }
         | Commands::ExportKeys
         | Commands::SignMessage { .. }
@@ -539,7 +562,13 @@ fn build_initial_poke(command: &Commands) -> CommandNoun<NounSlab> {
                 threshold,
                 participants,
             } => Wallet::watch_multisig(*threshold, participants),
+            WatchSubcommand::MultisigBatch { .. } => {
+                unreachable!("multisig batch watch handled earlier")
+            }
         },
+        Commands::DeriveChildBatch { .. } => {
+            unreachable!("derive-child-batch handled earlier")
+        }
         Commands::ExportKeys => Wallet::export_keys(),
         Commands::ListNotes => Wallet::list_notes(),
         Commands::ListNotesByAddress { address } => {
@@ -582,6 +611,70 @@ pub async fn execute_wallet_command(
     use_spinner: bool,
     hooks: DispatchHooks,
 ) -> WalletCommandOutcome {
+    if let Commands::Watch {
+        subcommand:
+            WatchSubcommand::MultisigBatch {
+                threshold,
+                manifest,
+            },
+    } = command
+    {
+        let pokes = Wallet::load_multisig_watch_manifest_pokes(*threshold, manifest)?;
+        let imported_count = pokes.len();
+        wallet.app.add_io_driver(multisig_batch_driver(pokes)).await;
+
+        match wallet.app.run().await {
+            Ok(_) => {
+                println!(
+                    "Imported {} multisig watch entries from {}",
+                    imported_count, manifest
+                );
+                info!("Command executed successfully");
+                return empty_command_outcome();
+            }
+            Err(e) => {
+                error!("Command failed: {}", e);
+                return Err(e);
+            }
+        }
+    }
+
+    if let Commands::DeriveChildBatch {
+        start_index,
+        count,
+        hardened,
+        label_prefix,
+        out,
+    } = command
+    {
+        let derived = wallet
+            .derive_child_batch(*start_index, *count, *hardened, label_prefix)
+            .await?;
+        let csv = derived
+            .iter()
+            .map(|(index, address)| format!("{index},{address}\n"))
+            .collect::<String>();
+
+        if let Some(out_path) = out {
+            fs::write(out_path, &csv).map_err(|e| {
+                CrownError::Unknown(format!(
+                    "Failed to write derived child address CSV to {}: {}",
+                    out_path, e
+                ))
+            })?;
+            println!(
+                "Derived {} child addresses into {}",
+                derived.len(),
+                out_path
+            );
+        } else {
+            print!("{csv}");
+        }
+
+        info!("Command executed successfully");
+        return empty_command_outcome();
+    }
+
     let mut poke = build_initial_poke(command)?;
 
     if command_requires_sync(command) {
