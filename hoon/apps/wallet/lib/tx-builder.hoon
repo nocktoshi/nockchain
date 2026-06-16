@@ -426,17 +426,19 @@
     ==
   =/  memo=(unit blob-data:wt)
     ?-    -.spec
-      %pkh           memo.spec
-      %multisig      memo.spec
-      %lock-root     ~
-      %bridge-deposit  ~
+      %pkh                memo.spec
+      %multisig           memo.spec
+      %lock-root          ~
+      %bridge-deposit     ~
+      %bridge-withdrawal  ~
     ==
   =/  blob=(unit blob-data:wt)
     ?-    -.spec
-      %pkh           blob.spec
-      %multisig      blob.spec
-      %lock-root     ~
-      %bridge-deposit  ~
+      %pkh                blob.spec
+      %multisig           blob.spec
+      %lock-root          ~
+      %bridge-deposit     ~
+      %bridge-withdrawal  ~
     ==
   =.  nd  ?~(memo nd (~(put z-by:zo nd) %memo u.memo))
   =.  nd  ?~(blob nd (~(put z-by:zo nd) %blob u.blob))
