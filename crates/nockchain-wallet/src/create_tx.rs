@@ -2,7 +2,6 @@ use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
 use nockapp::noun::slab::{NockJammer, NounSlab};
-use nockapp::utils::bytes::Byts;
 use nockapp_grpc::private_nockapp;
 use nockapp_grpc::public_nockchain;
 use nockapp::utils::make_tas;
@@ -13,7 +12,7 @@ use nockchain_math::noun_ext::NounMathExtHandle;
 use nockchain_math::zoon::zmap::ZMap;
 use nockchain_types::common::{Hash, Name, SchnorrPubkey};
 use nockchain_types::tx_engine::common::Signature;
-use nockchain_types::tx_engine::v1::tx::{LockPrimitive, Pkh, SpendCondition};
+use nockchain_types::tx_engine::v1::tx::{LockPrimitive, SpendCondition};
 use nockchain_types::tx_engine::v1;
 use nockvm::noun::{Cell, Noun, NounAllocator, NounSpace, D, SIG, T};
 use noun_serde::{NounDecode, NounDecodeError, NounEncode};
@@ -28,8 +27,8 @@ use wallet_tx_builder::lock_resolver::{
 };
 use wallet_tx_builder::planner::{plan_create_tx, PlanError};
 use wallet_tx_builder::types::{
-    CandidateNote, CandidateV0Note, CandidateV1Note, CandidateVersionPolicy, ChainContext,
-    PlanRequest, PlanningMode, RawNoteDataEntry, SelectionMode, SelectionOrder,
+    CandidateNote, CandidateVersionPolicy, ChainContext, CreateTxPlanningMode, PlanRequest,
+    SelectionMode, SelectionOrder,
 };
 
 use crate::command::{CommandNoun, NoteSelectionStrategyCli, Operation};
@@ -172,7 +171,7 @@ pub(crate) struct MigrateV0SignerSummary {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct MigrateV0NotesSummary {
+pub struct MigrateV0NotesSummary {
     pub(crate) destination: String,
     pub(crate) block_id: String,
     pub(crate) height: u64,
@@ -205,7 +204,7 @@ struct TxFileSnapshot {
 pub struct WrittenTxSnapshot(BTreeMap<PathBuf, TxFileSnapshot>);
 
 #[derive(Debug, Clone)]
-pub(crate) struct CreateTxRequest {
+pub struct CreateTxRequest {
     names: String,
     recipients: Vec<RecipientSpec>,
     fee: u64,
@@ -1323,7 +1322,7 @@ impl Wallet {
         let order_direction = Self::planner_order_direction(note_selection);
 
         let request = PlanRequest {
-            planning_mode: PlanningMode::Standard,
+            planning_mode: CreateTxPlanningMode::Standard,
             selection_mode: selection_mode.clone(),
             order_direction,
             include_data,
@@ -1612,7 +1611,7 @@ impl Wallet {
 
         for signer in active_signers {
             let request = PlanRequest {
-                planning_mode: PlanningMode::V0MigrationSweep {
+                planning_mode: CreateTxPlanningMode::V0MigrationSweep {
                     destination_output: destination_output.clone(),
                 },
                 selection_mode: SelectionMode::Auto,

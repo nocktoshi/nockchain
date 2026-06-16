@@ -28,7 +28,7 @@ pub use wallet_tx_builder::adapter::NormalizedSnapshot;
 use std::path::PathBuf;
 
 use kernels_open_wallet::KERNEL;
-use nockapp::kernel::boot::{self, NockStackSize};
+use nockapp::kernel::boot;
 use nockapp::{CrownError, NockAppError};
 use zkvm_jetpack::hot::produce_prover_hot_state;
 

@@ -463,7 +463,8 @@
     $%  [%pkh recipient=hash:transact gift=coins:transact memo=(unit blob-data) blob=(unit blob-data)]
         [%multisig threshold=@ participants=(list hash:transact) gift=coins:transact memo=(unit blob-data) blob=(unit blob-data)]
         [%lock-root root=hash:transact gift=coins:transact]
-        [%bridge-deposit address=evm-address:bridge gift=coins:transact]
+        [%bridge-deposit root=hash:transact evm-addr=@ux gift=coins:transact]
+        [%bridge-withdrawal base-event-id=@ base-hash=hash:transact root=hash:transact base-batch-end=@ gift=coins:transact]
     ==
   ++  gift
     |=  =form
@@ -473,6 +474,7 @@
         %multisig   gift.form
         %lock-root  gift.form
         %bridge-deposit  gift.form
+        %bridge-withdrawal  gift.form
     ==
   --
 ::
@@ -527,6 +529,7 @@
         [%show-seed-phrase ~]
         [%show-master-zpub ~]
         [%show-master-zprv ~]
+        [%show-master-prv ~]
         [%show =path]
         [%import-seed-phrase seed-phrase=@t version=key-version]
         [%update-balance-grpc balance=*]
@@ -576,7 +579,7 @@
   ::
   +$  preinput  [name=@t (pair input:transact input-mask)]
   ::
-  +$  input-display
+  +$  input-metadata
     $%  [%0 p=(z-map:zo nname:transact =sig:v0:transact)]
         [%1 p=(z-map:zo nname:transact sc=spend-condition:transact)]
     ==
@@ -586,7 +589,8 @@
     $:  %1
       $%  [%lock =lock:transact include-data=?]
           [%lock-root root=hash:transact]
-          [%bridge-deposit root=hash:transact addr=evm-address:bridge]
+          [%bridge-deposit root=hash:transact evm-addr=@ux]
+          [%bridge-withdrawal root=hash:transact beid=(list @) base-hash=hash:transact base-batch-end=@]
       ==
     ==
   +$  lock-metadata
@@ -595,8 +599,8 @@
   ::
   +$  output-lock-map  (z-map:zo hash:transact lock-metadata)
   ::
-  +$  transaction-display
-    $:  inputs=input-display
+  +$  metadata
+    $:  inputs=input-metadata
         outputs=output-lock-map
     ==
   ::
@@ -604,7 +608,7 @@
     $:  =spends:v1:transact
         fee=@
         orders=(list order)
-        display=transaction-display
+        metadata=metadata
         wd=witness-data
     ==
   ::
@@ -642,7 +646,7 @@
     $:  %1
         name=@t
         =spends:transact
-        display=transaction-display
+        metadata=metadata
         =witness-data
     ==
   ::
@@ -650,7 +654,15 @@
     $+  versioned-transaction
     $^(transaction-0 transaction-1)
   ::
-+$  transaction  transaction-1
+  ++  transaction
+    =<  form
+    |%
+    +$  form  $%(transaction-1)
+    ++  apply
+      |=  =form
+      ^-  spends:v1:transact
+      (apply:witness-data witness-data.form spends.form)
+    --
   ::
   ::
   +$  active-signer-info

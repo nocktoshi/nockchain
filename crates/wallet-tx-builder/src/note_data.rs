@@ -4,7 +4,10 @@ use nockapp::utils::NOCK_STACK_SIZE;
 use nockapp::{Noun, NounExt};
 use nockchain_math::belt::Belt;
 use nockchain_types::tx_engine::common::Hash;
-use nockchain_types::tx_engine::v1::note::{NoteData, NoteDataEntry};
+use nockchain_types::tx_engine::v1::note::{
+    BridgeDepositNoteData, BridgeWithdrawalNoteData, NoteData, NoteDataEntry, NoteDataValue,
+    NOTE_DATA_KEY_BRIDGE_DEPOSIT, NOTE_DATA_KEY_BRIDGE_WITHDRAWAL, NOTE_DATA_KEY_LOCK,
+};
 use nockchain_types::tx_engine::v1::tx::{Lock, SpendCondition};
 use nockvm::mem::NockStack;
 use nockvm::noun::{NounAllocator, NounSpace};
@@ -13,12 +16,8 @@ use thiserror::Error;
 
 use crate::types::RawNoteDataEntry;
 
-/// Canonical note-data key for lock payloads.
-pub const NOTE_DATA_KEY_LOCK: &str = "lock";
-/// Canonical note-data key for bridge deposit payloads.
-pub const NOTE_DATA_KEY_BRIDGE_DEPOSIT: &str = "bridge";
-/// Canonical note-data key for bridge withdrawal payloads.
-pub const NOTE_DATA_KEY_BRIDGE_WITHDRAWAL: &str = "bridge-w";
+// NOTE_DATA_KEY_LOCK / _BRIDGE_DEPOSIT / _BRIDGE_WITHDRAWAL are imported from
+// nockchain_types::tx_engine::v1::note (upstream moved the canonical keys there).
 /// Canonical note-data key for UTF-8 transaction memo
 pub const NOTE_DATA_KEY_MEMO: &str = "memo";
 /// Canonical note-data key for optional opaque UTF-8 blob (`%blob` in note-data; `blob-data:wt` in Hoon).
@@ -27,6 +26,14 @@ pub const NOTE_DATA_KEY_BLOB: &str = "blob";
 pub const MAX_MEMO_UTF8_BYTES: usize = 2048;
 
 pub const MAX_BLOB_PAYLOAD_BYTES: usize = 256 * 1024;
+
+/// Jams a `NounEncode` payload value into canonical note-data blob bytes.
+fn jam_payload<T: NounEncode>(value: &T) -> Bytes {
+    let mut slab: NounSlab<NockJammer> = NounSlab::new();
+    let noun = value.to_noun(&mut slab);
+    slab.set_root(noun);
+    slab.jam()
+}
 
 /// Encodes blob payload as `[byte-len belt …]` — byte-length atom plus little-endian `u32` chunks per [`Belt`].
 fn encode_blob_belts(bytes: &[u8]) -> Vec<Belt> {
@@ -211,23 +218,32 @@ impl TypedNoteDataEntry {
 impl RawNoteDataEntry {
     /// Encodes a typed `%lock` note-data entry.
     pub fn from_lock(lock: Lock) -> Self {
-        TypedNoteDataEntry::lock(lock).to_raw_entry()
+        Self::from_note_data_entry(NoteDataEntry::lock(lock))
     }
 
     /// Encodes a typed `%bridge` note-data entry for Base deposits.
     pub fn from_bridge_deposit(evm_address_based: [u64; 3]) -> Self {
-        TypedNoteDataEntry::bridge_deposit(evm_address_based).to_raw_entry()
+        Self::from_note_data_entry(NoteDataEntry::bridge_deposit(evm_address_based))
     }
 
     /// Encodes a typed `%bridge-w` note-data entry for bridge withdrawals.
     pub fn from_bridge_withdrawal(
-        base_event_id: Vec<u64>,
+        beid: Vec<Belt>,
         base_hash: Hash,
         lock_root: Hash,
         base_batch_end: u64,
     ) -> Self {
-        TypedNoteDataEntry::bridge_withdrawal(base_event_id, base_hash, lock_root, base_batch_end)
-            .to_raw_entry()
+        Self::from_note_data_entry(NoteDataEntry::bridge_withdrawal(
+            beid, base_hash, lock_root, base_batch_end,
+        ))
+    }
+
+    fn from_note_data_entry(entry: NoteDataEntry) -> Self {
+        let blob = entry.raw_blob();
+        Self {
+            key: entry.key,
+            blob,
+        }
     }
 
     /// Encodes a `%memo` note-data entry (canonical blob).
@@ -278,16 +294,27 @@ pub struct LockDataPayload {
 }
 
 impl LockDataPayload {
+    /// Builds a `%lock` payload view directly from a typed tx-engine lock.
+    pub fn from_lock(lock: &Lock) -> Self {
+        Self {
+            version: 0,
+            spend_conditions: lock.flatten_spend_conditions(),
+        }
+    }
+
     /// Parses a `%lock` payload noun with shape `[version lock]`.
     pub fn from_noun(noun: &Noun, space: &NounSpace) -> Result<Self, NoteDataDecodeError> {
-        let spend_conditions =
-            match LockPayloadNoun::from_noun(noun, space).map_err(NoteDataDecodeError::from)? {
-                LockPayloadNoun::V0(lock) => lock.flatten_spend_conditions(),
-            };
-        Ok(Self {
-            version: 0,
-            spend_conditions,
-        })
+        let lock = match NoteData::from_noun_entry_value(noun, NOTE_DATA_KEY_LOCK, space)? {
+            NoteDataValue::Lock { lock } => lock,
+            NoteDataValue::Noun(_)
+            | NoteDataValue::BridgeDeposit(_)
+            | NoteDataValue::BridgeWithdrawal(_) => {
+                return Err(NoteDataDecodeError::UnexpectedTypedPayload(
+                    NOTE_DATA_KEY_LOCK.to_string(),
+                ))
+            }
+        };
+        Ok(Self::from_lock(&lock))
     }
 
     /// Cues and parses a `%lock` payload blob.
@@ -340,23 +367,28 @@ pub struct BridgeDepositDataPayload {
 }
 
 impl BridgeDepositDataPayload {
-    /// Parses a `%bridge` payload noun with shape `[version network evm-address-based]`.
-    pub fn from_noun(noun: &Noun, space: &NounSpace) -> Result<Self, NoteDataDecodeError> {
-        let (network, evm_address_based) = match BridgeDepositPayloadNoun::from_noun(noun, space)
-            .map_err(NoteDataDecodeError::from)?
-        {
-            BridgeDepositPayloadNoun::V0(network, evm_address_based) => {
-                (network, evm_address_based)
-            }
-        };
-        if network != "base" {
-            return Err(NoteDataDecodeError::UnsupportedBridgeNetwork(network));
-        }
-        Ok(Self {
+    /// Builds a `%bridge` payload view directly from typed tx-engine note-data.
+    pub fn from_typed(bridge: &BridgeDepositNoteData) -> Self {
+        Self {
             version: 0,
             network: BridgeNetwork::Base,
-            evm_address_based,
-        })
+            evm_address_based: bridge.evm_address_based,
+        }
+    }
+
+    /// Parses a `%bridge` payload noun with shape `[version network evm-address-based]`.
+    pub fn from_noun(noun: &Noun, space: &NounSpace) -> Result<Self, NoteDataDecodeError> {
+        match NoteData::from_noun_entry_value(noun, NOTE_DATA_KEY_BRIDGE_DEPOSIT, space)? {
+            NoteDataValue::BridgeDeposit(bridge) => Ok(Self::from_typed(&bridge)),
+            NoteDataValue::Noun(_) => Err(NoteDataDecodeError::UnexpectedTypedPayload(
+                NOTE_DATA_KEY_BRIDGE_DEPOSIT.to_string(),
+            )),
+            NoteDataValue::Lock { .. } | NoteDataValue::BridgeWithdrawal(_) => {
+                Err(NoteDataDecodeError::UnexpectedTypedPayload(
+                    NOTE_DATA_KEY_BRIDGE_DEPOSIT.to_string(),
+                ))
+            }
+        }
     }
 
     /// Cues and parses a `%bridge` payload blob.
@@ -375,8 +407,8 @@ impl BridgeDepositDataPayload {
 pub struct BridgeWithdrawalDataPayload {
     /// Payload schema version.
     pub version: u64,
-    /// Source bridge event identifier segments.
-    pub base_event_id: Vec<u64>,
+    /// Source bridge event identifier encoded as canonical beid digits.
+    pub beid: Vec<Belt>,
     /// Source bridge batch hash.
     pub base_hash: Hash,
     /// Destination lock root used for withdrawal output.
@@ -386,27 +418,28 @@ pub struct BridgeWithdrawalDataPayload {
 }
 
 impl BridgeWithdrawalDataPayload {
-    /// Parses a `%bridge-w` payload noun with shape
-    /// `[version base-event-id base-hash lock-root base-batch-end]`.
-    pub fn from_noun(noun: &Noun, space: &NounSpace) -> Result<Self, NoteDataDecodeError> {
-        let (base_event_id, base_hash, lock_root, base_batch_end) =
-            match BridgeWithdrawalPayloadNoun::from_noun(noun, space)
-                .map_err(NoteDataDecodeError::from)?
-            {
-                BridgeWithdrawalPayloadNoun::V0(
-                    base_event_id,
-                    base_hash,
-                    lock_root,
-                    base_batch_end,
-                ) => (base_event_id, base_hash, lock_root, base_batch_end),
-            };
-        Ok(Self {
+    /// Builds a `%bridge-w` payload view directly from typed tx-engine note-data.
+    pub fn from_typed(bridge: &BridgeWithdrawalNoteData) -> Self {
+        Self {
             version: 0,
-            base_event_id,
-            base_hash,
-            lock_root,
-            base_batch_end,
-        })
+            beid: bridge.beid.clone(),
+            base_hash: bridge.base_hash.clone(),
+            lock_root: bridge.lock_root.clone(),
+            base_batch_end: bridge.base_batch_end,
+        }
+    }
+
+    /// Parses a `%bridge-w` payload noun with shape
+    /// `[version beid base-hash lock-root base-batch-end]`.
+    pub fn from_noun(noun: &Noun, space: &NounSpace) -> Result<Self, NoteDataDecodeError> {
+        match NoteData::from_noun_entry_value(noun, NOTE_DATA_KEY_BRIDGE_WITHDRAWAL, space)? {
+            NoteDataValue::BridgeWithdrawal(bridge) => Ok(Self::from_typed(&bridge)),
+            NoteDataValue::Noun(_)
+            | NoteDataValue::Lock { .. }
+            | NoteDataValue::BridgeDeposit(_) => Err(NoteDataDecodeError::UnexpectedTypedPayload(
+                NOTE_DATA_KEY_BRIDGE_WITHDRAWAL.to_string(),
+            )),
+        }
     }
 
     /// Cues and parses a `%bridge-w` payload blob.
@@ -555,10 +588,38 @@ impl DecodedNoteDataEntry {
 
     /// Decodes one tx-engine note-data entry by key and preserves payload on failures.
     pub fn from_entry(entry: &NoteDataEntry) -> Self {
-        Self::from_raw_entry(&RawNoteDataEntry {
-            key: entry.key.clone(),
-            blob: entry.blob.clone(),
-        })
+        let normalized_key = NormalizedNoteDataKey::from_raw(&entry.key);
+        match &entry.value {
+            NoteDataValue::Lock { lock } => Self {
+                raw_key: entry.key.clone(),
+                normalized_key,
+                raw_blob: entry.raw_blob(),
+                payload: DecodedNoteDataPayload::Lock(LockDataPayload::from_lock(lock)),
+                decode_error: None,
+            },
+            NoteDataValue::BridgeDeposit(bridge) => Self {
+                raw_key: entry.key.clone(),
+                normalized_key,
+                raw_blob: entry.raw_blob(),
+                payload: DecodedNoteDataPayload::BridgeDeposit(
+                    BridgeDepositDataPayload::from_typed(bridge),
+                ),
+                decode_error: None,
+            },
+            NoteDataValue::BridgeWithdrawal(bridge) => Self {
+                raw_key: entry.key.clone(),
+                normalized_key,
+                raw_blob: entry.raw_blob(),
+                payload: DecodedNoteDataPayload::BridgeWithdrawal(
+                    BridgeWithdrawalDataPayload::from_typed(bridge),
+                ),
+                decode_error: None,
+            },
+            NoteDataValue::Noun(_) => Self::from_raw_entry(&RawNoteDataEntry {
+                key: entry.key.clone(),
+                blob: entry.raw_blob(),
+            }),
+        }
     }
 }
 
@@ -571,6 +632,8 @@ pub enum NoteDataDecodeError {
     NounDecode(String),
     #[error("unsupported bridge network tag: {0}")]
     UnsupportedBridgeNetwork(String),
+    #[error("unexpected typed note-data payload for key {0}")]
+    UnexpectedTypedPayload(String),
 }
 
 impl From<NounDecodeError> for NoteDataDecodeError {
@@ -580,25 +643,19 @@ impl From<NounDecodeError> for NoteDataDecodeError {
     }
 }
 
-/// TODO(grpc): Extend balance note-data messages to include decoded/typed
-/// `DecodedNoteData` alongside raw blobs so wallet/planner paths can consume
-/// typed note-data without re-decoding jam payloads per consumer.
-/// Jams a noun-encodable value into a byte payload suitable for note-data blobs.
-fn jam_payload<T: NounEncode>(value: &T) -> Bytes {
-    let mut slab: NounSlab<NockJammer> = NounSlab::new();
-    let noun = value.to_noun(&mut slab);
-    slab.set_root(noun);
-    slab.jam()
-}
+// TODO(grpc): Extend balance note-data messages to include decoded/typed
+// `DecodedNoteData` alongside raw blobs so wallet/planner paths can consume
+// typed note-data without re-decoding jam payloads per consumer.
 
 #[cfg(test)]
 mod tests {
     use std::collections::BTreeSet;
 
+    use nockapp::noun::NounEncodeJamExt;
     use nockchain_types::tx_engine::v1::tx::{Lock, LockPrimitive, Pkh};
     use nockvm::ext::NounExt;
     use nockvm::mem::NockStack;
-    use nockvm::noun::{Noun, NounAllocator, D, T};
+    use nockvm::noun::{Noun, D, T};
     use noun_serde::{NounDecode, NounEncode};
 
     use super::*;
@@ -617,11 +674,24 @@ mod tests {
         Hash::from_limbs(&[a, b, c, d, e])
     }
 
-    fn jam<T: NounEncode>(value: &T) -> Bytes {
-        let mut slab: NounSlab<NockJammer> = NounSlab::new();
-        let noun = value.to_noun(&mut slab);
-        slab.set_root(noun);
-        slab.jam()
+    fn canonical_beid(start: u64) -> Vec<Belt> {
+        match start {
+            1 => vec![
+                578_437_696_156_539_417, 10_923_933_468_832_943_055, 14_755_409_445_788_166_057,
+                2_314_601_845_482_878_064,
+            ]
+            .into_iter()
+            .map(Belt)
+            .collect(),
+            101 => vec![
+                7_812_454_979_964_206_717, 14_902_642_970_632_192_776, 10_053_298_209_039_376_093,
+                9_548_619_134_343_448_067,
+            ]
+            .into_iter()
+            .map(Belt)
+            .collect(),
+            other => panic!("unsupported canonical beid fixture start: {other}"),
+        }
     }
 
     fn decode_fixtures() -> Vec<FixtureEntry> {
@@ -664,9 +734,11 @@ mod tests {
     fn lock_payload_noun_decodes_tagged_zero_atom() {
         let spend = SpendCondition::new(vec![LockPrimitive::Burn]);
         let mut slab: NounSlab<NockJammer> = NounSlab::new();
-        let noun = LockPayloadNoun::V0(Lock::SpendCondition(spend.clone())).to_noun(&mut slab);
-        let space = slab.noun_space();
+        let noun = slab
+            .cue_into(NoteDataEntry::lock(Lock::SpendCondition(spend.clone())).raw_blob())
+            .expect("typed lock blob should cue");
 
+        let space = slab.noun_space();
         let version = noun
             .in_space(&space)
             .as_cell()
@@ -680,8 +752,10 @@ mod tests {
         );
 
         assert_eq!(
-            LockPayloadNoun::from_noun(&noun, &space).expect("tagged zero atom should decode"),
-            LockPayloadNoun::V0(Lock::SpendCondition(spend))
+            LockDataPayload::from_noun(&noun, &space)
+                .expect("tagged zero atom should decode")
+                .spend_conditions,
+            vec![spend]
         );
     }
 
@@ -722,7 +796,7 @@ mod tests {
     #[test]
     fn typed_bridge_withdrawal_note_data_entry_encodes_and_decodes() {
         let entry = RawNoteDataEntry::from_bridge_withdrawal(
-            vec![1, 2, 3, 4],
+            vec![Belt(1), Belt(2), Belt(3), Belt(4)],
             hash_from_limbs(1, 2, 3, 4, 5),
             hash_from_limbs(6, 7, 8, 9, 10),
             57_600,
@@ -733,7 +807,10 @@ mod tests {
         match decoded.payload {
             DecodedNoteDataPayload::BridgeWithdrawal(bridge_payload) => {
                 assert_eq!(bridge_payload.version, 0);
-                assert_eq!(bridge_payload.base_event_id, vec![1, 2, 3, 4]);
+                assert_eq!(
+                    bridge_payload.beid,
+                    vec![Belt(1), Belt(2), Belt(3), Belt(4)]
+                );
                 assert_eq!(bridge_payload.base_hash, hash_from_limbs(1, 2, 3, 4, 5));
                 assert_eq!(bridge_payload.lock_root, hash_from_limbs(6, 7, 8, 9, 10));
                 assert_eq!(bridge_payload.base_batch_end, 57_600);
@@ -890,8 +967,8 @@ mod tests {
         let v2_right_pair = T(&mut slab, &[sc3_n, sc4_n]);
         let v4_pair = T(&mut slab, &[v2_left_pair, v2_right_pair]);
         let v4_lock = T(&mut slab, &[D(4), v4_pair]);
-        let space = slab.noun_space();
 
+        let space = slab.noun_space();
         let parsed = ParsedLockForm::from_noun(&v4_lock, &space).expect("decode lock form");
         assert_eq!(parsed.spend_condition_count, 4);
         assert_eq!(parsed.spend_conditions, vec![sc1, sc2, sc3, sc4]);
@@ -899,8 +976,12 @@ mod tests {
 
     #[test]
     fn recognized_keys_fallback_to_raw_on_decode_errors() {
-        let malformed = jam(&42_u64);
-        let note_data = NoteData::new(vec![NoteDataEntry::new("bridge".to_string(), malformed)]);
+        let malformed = 42_u64.jam_bytes();
+        let note_data = NoteData::new(vec![NoteDataEntry::from_raw_blob(
+            "bridge".to_string(),
+            malformed,
+        )
+        .expect("based malformed bridge payload should decode")]);
 
         let decoded = DecodedNoteData::from(&note_data).0;
         let entry = &decoded[0];
@@ -955,7 +1036,7 @@ mod tests {
         match &entry.payload {
             DecodedNoteDataPayload::BridgeWithdrawal(bridge_w) => {
                 assert_eq!(bridge_w.version, 0);
-                assert_eq!(bridge_w.base_event_id, vec![1, 2, 3, 4]);
+                assert_eq!(bridge_w.beid, canonical_beid(1));
                 assert_eq!(bridge_w.base_hash, hash_from_limbs(1, 2, 3, 4, 5));
                 assert_eq!(bridge_w.lock_root, hash_from_limbs(6, 7, 8, 9, 10));
                 assert_eq!(bridge_w.base_batch_end, 57_600);
@@ -975,7 +1056,7 @@ mod tests {
         match &entry.payload {
             DecodedNoteDataPayload::BridgeWithdrawal(bridge_w) => {
                 assert_eq!(bridge_w.version, 0);
-                assert_eq!(bridge_w.base_event_id, vec![10, 20, 30, 40, 50, 60, 70]);
+                assert_eq!(bridge_w.beid, canonical_beid(101));
                 assert_eq!(bridge_w.base_hash, hash_from_limbs(90, 80, 70, 60, 50));
                 assert_eq!(bridge_w.lock_root, hash_from_limbs(15, 25, 35, 45, 55));
                 assert_eq!(bridge_w.base_batch_end, 88_001);

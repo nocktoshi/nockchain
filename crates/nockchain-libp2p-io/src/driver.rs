@@ -197,32 +197,23 @@ fn request_effect_trace_summary(noun_slab: &NounSlab) -> String {
     format!("request block {block_head}")
 }
 
-fn should_redial_initial_peers(
-    connected_peer_count: usize,
-    initial_peers: &[Multiaddr],
-    initial_peer_retries_remaining: u32,
-) -> bool {
-    connected_peer_count == 0 && !initial_peers.is_empty() && initial_peer_retries_remaining > 0
+fn should_redial_initial_peers(connected_peer_count: usize, initial_peers: &[Multiaddr]) -> bool {
+    connected_peer_count == 0 && !initial_peers.is_empty()
 }
 
 fn redial_initial_peers(
     swarm: &mut Swarm<NockchainBehaviour>,
     initial_peers: &[Multiaddr],
-    initial_peer_retries_remaining: &mut u32,
     reason: &'static str,
 ) -> Result<bool, NockAppError> {
     let connected_peer_count = swarm.connected_peers().count();
-    if !should_redial_initial_peers(
-        connected_peer_count, initial_peers, *initial_peer_retries_remaining,
-    ) {
+    if !should_redial_initial_peers(connected_peer_count, initial_peers) {
         return Ok(false);
     }
 
-    *initial_peer_retries_remaining -= 1;
     info!(
         reason,
         connected_peer_count,
-        retries_remaining = *initial_peer_retries_remaining,
         initial_peer_count = initial_peers.len(),
         "Redialing initial peers while disconnected"
     );
@@ -231,6 +222,10 @@ fn redial_initial_peers(
 }
 
 const INITIAL_PEER_REDIAL_INTERVAL: Duration = Duration::from_secs(5);
+/// Upper bound for the exponential backoff between initial-peer redial attempts.
+/// We never give up: once the backoff reaches this value we keep redialing at
+/// this cadence (hourly) for as long as we have zero connected peers.
+const INITIAL_PEER_REDIAL_MAX_INTERVAL: Duration = Duration::from_secs(3600);
 const PREFETCH_TARGET_RESPONSE_NUMERATOR: usize = 31;
 const PREFETCH_TARGET_RESPONSE_DENOMINATOR: usize = 32;
 const PREFETCH_COLD_BLOCK_BUNDLE_ESTIMATE_BYTES: usize = 128 * 1024;
@@ -474,7 +469,6 @@ pub fn make_libp2p_driver(
             let kademlia_bootstrap_interval = libp2p_config.kademlia_bootstrap_interval();
             let force_peer_dial_interval = libp2p_config.force_peer_dial_interval();
             let request_high_reset = libp2p_config.request_high_reset();
-            let initial_peer_retries = libp2p_config.initial_peer_retries;
             let request_high_threshold = libp2p_config.request_high_threshold;
             let gen2_batch_coalesce_window = libp2p_config.gen2_batch_coalesce_window();
             let req_res_limits = gen2::ReqResRuntimeLimits {
@@ -499,7 +493,6 @@ pub fn make_libp2p_driver(
             let peer_status_interval = libp2p_config.peer_status_interval_secs();
             let seen_tx_clear_interval = libp2p_config.seen_tx_clear_interval();
             let min_peers = libp2p_config.min_peers();
-            let poke_timeout = libp2p_config.poke_timeout();
             let low_priority_peek_timeout = libp2p_config.low_priority_peek_timeout();
             let failed_pings_before_close = libp2p_config.failed_pings_before_close();
             let req_res_gen2_send_enabled = libp2p_config.req_res_gen2_send_enabled;
@@ -581,10 +574,10 @@ pub fn make_libp2p_driver(
             let nockchain_timer_mutex = Arc::new(Mutex::new(()));
             let (traffic_handle, effect_handle) = handle.dup();
             let traffic_cop = traffic_cop::TrafficCop::new_with_peek_timeout(
-                traffic_handle, &mut join_set, poke_timeout, low_priority_peek_timeout,
+                traffic_handle, &mut join_set, low_priority_peek_timeout,
             );
 
-            let mut initial_peer_retries_remaining = initial_peer_retries;
+            let mut initial_peer_redial_backoff = INITIAL_PEER_REDIAL_INTERVAL;
             let mut pending_gen2_batches = BTreeMap::<PeerId, gen2::PendingGen2Batch>::new();
             let mut peer_gen2_inbound = BTreeMap::<PeerId, bool>::new();
             gen2::update_pending_batch_metrics(&metrics, &pending_gen2_batches);
@@ -908,12 +901,9 @@ pub fn make_libp2p_driver(
                             if redial_initial_peers(
                                 &mut swarm,
                                 &initial_peers,
-                                &mut initial_peer_retries_remaining,
                                 "kademlia_bootstrap_no_known_peers",
                             )? {
                                 info!("Failed to bootstrap: {}", NoKnownPeers());
-                            } else if !initial_peers.is_empty() && initial_peer_retries_remaining == 0 {
-                                warn!("Failed to bootstrap after {} retries, will not attempt to redial initial peers.", initial_peer_retries);
                             }
                         }
                     },
@@ -921,10 +911,24 @@ pub fn make_libp2p_driver(
                         if redial_initial_peers(
                             &mut swarm,
                             &initial_peers,
-                            &mut initial_peer_retries_remaining,
                             "startup_zero_peer_window",
                         )? {
-                            debug!("Initial peer redial tick fired while disconnected");
+                            // Still disconnected: grow the backoff up to the cap and keep
+                            // retrying forever. reset_after must be called every tick to
+                            // hold the backoff cadence (the interval's own period would
+                            // otherwise resume at INITIAL_PEER_REDIAL_INTERVAL).
+                            initial_peer_redial_backoff =
+                                (initial_peer_redial_backoff * 2).min(INITIAL_PEER_REDIAL_MAX_INTERVAL);
+                            initial_peer_redial.reset_after(initial_peer_redial_backoff);
+                            debug!(
+                                backoff_secs = initial_peer_redial_backoff.as_secs(),
+                                "Initial peer redial tick fired while disconnected"
+                            );
+                        } else if initial_peer_redial_backoff != INITIAL_PEER_REDIAL_INTERVAL {
+                            // Connected (or nothing to dial): reset the backoff so a future
+                            // disconnect starts retrying promptly again.
+                            initial_peer_redial_backoff = INITIAL_PEER_REDIAL_INTERVAL;
+                            initial_peer_redial.reset_after(INITIAL_PEER_REDIAL_INTERVAL);
                         }
                     },
                     _ = force_peer_dial.tick() => {
@@ -1187,37 +1191,68 @@ async fn handle_effect_with_dispatcher(
         EffectType::Gossip => {
             let tail_slab = extract_gossip_effect_payload(&noun_slab)?;
 
-            let is_heard_block_gossip = {
+            let gossip_kind = {
                 let gossip_space = tail_slab.noun_space();
                 let gossip_noun = unsafe { *tail_slab.root() };
                 gossip_noun
                     .in_space(&gossip_space)
                     .as_cell()
-                    .map(|data_cell| data_cell.head().eq_bytes(b"heard-block"))
-                    .unwrap_or(false)
-            };
-            if is_heard_block_gossip {
-                trace!("Gossip effect for heard-block, clearing block and elders cache");
-                let mut state_guard = driver_state.lock().await;
-                state_guard.block_cache.clear();
-                state_guard.elders_cache.clear();
-                state_guard.clear_elders_negative_cache();
-            }
-
-            let gossip_request = NockchainRequest::new_gossip(&tail_slab);
-            debug!("Gossiping to {} peers", connected_peers.len());
-            for peer_id in connected_peers.clone() {
-                let gossip_request_clone = gossip_request.clone();
-                swarm_actions
-                    .dispatch(SwarmAction::SendRequest {
-                        peer_id,
-                        request: gossip_request_clone,
-                        request_context: None,
+                    .map(|data_cell| {
+                        if data_cell.head().eq_bytes(b"heard-block") {
+                            "heard-block"
+                        } else if data_cell.head().eq_bytes(b"heard-tx") {
+                            "heard-tx"
+                        } else {
+                            "unknown"
+                        }
                     })
-                    .await
-                    .map_err(|_e| {
-                        NockAppError::OtherError(String::from("Failed to send gossip request"))
-                    })?;
+                    .unwrap_or("unknown")
+            };
+            let is_heard_block_gossip = gossip_kind == "heard-block";
+            // Clear the serve caches on a new heaviest block (local-state
+            // bookkeeping, independent of whether we re-broadcast) and, while
+            // holding the lock, read whether we should suppress the outgoing
+            // gossip because we are behind tip.
+            let (suppress_outgoing_gossip, behind_tip_estimate) = {
+                let mut state_guard = driver_state.lock().await;
+                if is_heard_block_gossip {
+                    trace!("Gossip effect for heard-block, clearing block and elders cache");
+                    state_guard.block_cache.clear();
+                    state_guard.elders_cache.clear();
+                    state_guard.clear_elders_negative_cache();
+                }
+                (
+                    state_guard.should_suppress_outgoing_gossip(),
+                    state_guard.catch_up_signal().behind_tip_estimate(),
+                )
+            };
+
+            if suppress_outgoing_gossip {
+                // We are demonstrably behind tip (SyncMode::CatchingUp). The
+                // node is intentionally quiet: no historic block rebroadcasts,
+                // local tx submission gossip, or mining output until catch-up
+                // exits.
+                trace!(
+                    behind_tip_estimate, gossip_kind,
+                    "Suppressing outgoing gossip while catching up"
+                );
+                metrics.gossip_suppressed_behind_tip_total.increment();
+            } else {
+                let gossip_request = NockchainRequest::new_gossip(&tail_slab);
+                debug!("Gossiping to {} peers", connected_peers.len());
+                for peer_id in connected_peers.clone() {
+                    let gossip_request_clone = gossip_request.clone();
+                    swarm_actions
+                        .dispatch(SwarmAction::SendRequest {
+                            peer_id,
+                            request: gossip_request_clone,
+                            request_context: None,
+                        })
+                        .await
+                        .map_err(|_e| {
+                            NockAppError::OtherError(String::from("Failed to send gossip request"))
+                        })?;
+                }
             }
         }
         EffectType::Request => {
@@ -1231,6 +1266,7 @@ async fn handle_effect_with_dispatcher(
             let mut preferred_peers = Vec::new();
             let mut requested_block_height = None;
             let mut raw_tx_reopen_id = None;
+            let mut elders_cooldown_key = None;
             let mut request_desc: String;
 
             let target_peers = {
@@ -1254,9 +1290,16 @@ async fn handle_effect_with_dispatcher(
                         request_desc = String::from("block/elders");
                         // Extract peer ID from elders request
                         let elders_cell = block_cell.tail().as_cell()?;
+                        let elders_block_id_noun = elders_cell.head().noun();
                         let peer_id_atom = elders_cell.tail().as_atom()?;
                         if let Ok(bytes) = peer_id_atom.to_bytes_until_nul() {
                             if let Ok(peer_id) = PeerId::from_bytes(&bytes) {
+                                if let Ok(block_id) = tip5_hash_to_base58_stack(
+                                    &mut noun_slab, elders_block_id_noun, &space,
+                                ) {
+                                    elders_cooldown_key =
+                                        Some(format!("{block_id}:{}", peer_id.to_base58()));
+                                }
                                 vec![peer_id]
                             } else {
                                 is_limited_request = true;
@@ -1301,6 +1344,22 @@ async fn handle_effect_with_dispatcher(
                 }
                 target_peers
             };
+
+            if let Some(cooldown_key) = elders_cooldown_key.as_deref() {
+                let mut state_guard = driver_state.lock().await;
+                if !state_guard.should_send_elders_request(
+                    cooldown_key,
+                    std::time::Instant::now(),
+                    crate::p2p_state::ELDERS_REQUEST_COOLDOWN,
+                ) {
+                    drop(state_guard);
+                    debug!(
+                        cooldown_key,
+                        "Suppressing duplicate elders request inside cooldown window"
+                    );
+                    return Ok(());
+                }
+            }
 
             if let Some(tx_id) = raw_tx_reopen_id {
                 let mut state_guard = driver_state.clone().lock_owned().await;
@@ -1889,7 +1948,6 @@ async fn log_peer_status(
         .swap(peer_exclusions.active_address_cooldown_count() as f64);
 
     let connected_peer_count = {
-        info!("Logging current peer status...");
         let connected_peers: Vec<_> = swarm.connected_peers().cloned().collect();
         let peer_count = connected_peers.len();
 

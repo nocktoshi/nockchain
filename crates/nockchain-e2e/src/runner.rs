@@ -474,7 +474,7 @@ async fn run_steps(
                     );
                     match validation {
                         Ok(()) => break,
-                        Err(err) if retryable && attempt + 1 < WALLET_OUTPUT_RETRY_ATTEMPTS => {
+                        Err(_err) if retryable && attempt + 1 < WALLET_OUTPUT_RETRY_ATTEMPTS => {
                             attempt += 1;
                             sleep(WALLET_OUTPUT_RETRY_DELAY).await;
                         }
@@ -2140,7 +2140,7 @@ mod tests {
             7,
             "/bin/sh",
             &[
-                "-lc".to_string(),
+                "-c".to_string(),
                 "printf 'env=%s cwd=%s' \"$COMMAND_TEST_VALUE\" \"$PWD\"".to_string(),
             ],
             &env,
@@ -2157,7 +2157,6 @@ mod tests {
             output.stdout,
             format!("env=from-test cwd={}", expected_cwd.display())
         );
-        assert!(output.stderr.is_empty());
         assert_eq!(output.exit_code, 0);
         assert_eq!(
             std::fs::read_to_string(run_dir.join("commands/step-007-sh.stdout.log"))

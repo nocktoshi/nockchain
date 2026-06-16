@@ -16,3 +16,5 @@ tracing.workspace = true
 
 [dev-dependencies]
 base64 = "0.22"
+[lints]
+workspace = true

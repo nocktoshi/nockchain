@@ -1,30 +1,28 @@
 # Bridge Contract Deployment Guide
 
+Status: Active
+Owner: Nockchain Maintainers
+Last Reviewed: 2026-02-20
+Canonical/Legacy: Legacy (bridge contracts deployment guide; canonical docs spine starts at [`START_HERE.md`](../../../START_HERE.md))
+
 This guide covers deploying, upgrading, and managing the bridge contracts
 (`MessageInbox` behind an ERC-1967 proxy plus the `Nock` ERC-20) on Tenderly
 networks (devnets, simulations, or proxied mainnets).
 
 ## Quick Start
 
-For a quick deployment to a new Tenderly devnet:
+For a quick deployment to a new Tenderly Base Sepolia virtual testnet:
 
 ```bash
-cd open/crates/bridge/contracts
+cd crates/bridge/contracts
 
-# 1. Install dependencies
-make install
+# Required environment variables:
+#   TENDERLY_ACCESS_KEY, TENDERLY_ACCOUNT_ID, TENDERLY_PROJECT_SLUG,
+#   TENDERLY_TEST_PRIVATE_KEY, BRIDGE_NODE_0..BRIDGE_NODE_4
+./scripts/tenderly-vnet-deploy.sh --cleanup-old --cleanup-prefix bridge-vnet --cleanup-keep 3
 
-# 2. Configure environment
-cp .env.template .env
-# Edit .env with your values
-
-# 3. Spawn Tenderly devnet
-tenderly devnet spawn --network base-sepolia --project bridge-contracts
-
-# 4. Update .env with RPC URL from above
-
-# 5. Deploy
-make deploy
+# Load generated RPC + contract addresses for bridge runtime scripts
+source scripts/environments/virtual-testnet.generated.env
 ```
 
 ## Table of Contents
@@ -44,7 +42,7 @@ make deploy
 ### Install Tools
 
 ```bash
-cd open/crates/bridge/contracts
+cd crates/bridge/contracts
 make install
 ```
 
@@ -60,7 +58,7 @@ One-time setup per machine:
 
 ```bash
 tenderly login
-tenderly project link littel_wolfur/bridge-contracts
+tenderly project link <your-account>/<your-project>
 ```
 
 ## 2. Environment Configuration
@@ -91,7 +89,7 @@ source environments/base-sepolia.example
 
 ```bash
 export TENDERLY_RPC_URL="<rpc-url>"
-export TENDERLY_PRIVATE_KEY="0x..."
+export TENDERLY_TEST_PRIVATE_KEY="0x..."
 export BRIDGE_NODE_0="0x..."
 # ... etc
 ```
@@ -99,7 +97,7 @@ export BRIDGE_NODE_0="0x..."
 ### Required Variables
 
 - `TENDERLY_RPC_URL` - RPC endpoint from Tenderly
-- `TENDERLY_PRIVATE_KEY` - Deployer account private key (hex, with 0x)
+- `TENDERLY_TEST_PRIVATE_KEY` - Test deployer account private key (hex, with 0x)
 - `BRIDGE_NODE_0` through `BRIDGE_NODE_4` - Five bridge node addresses
 - `NOCK_NAME` - Token name (e.g., "Nock")
 - `NOCK_SYMBOL` - Token symbol (e.g., "NOCK")
@@ -117,21 +115,37 @@ export BRIDGE_NODE_0="0x..."
 
 ## 3. Deployment
 
-### Spawn or Select Tenderly Network
+### Provision Tenderly Network (Recommended)
 
-For a devnet fork:
+Use the bridge provisioning script from the repository root:
 
 ```bash
-tenderly devnet spawn --network base-sepolia --project bridge-contracts
+cd open/crates/bridge
+./scripts/tenderly-vnet-deploy.sh
 ```
 
-Copy the returned `rpc_url`. For live networks proxied through Tenderly, use
-the RPC URL shown in the Tenderly dashboard.
+This script:
 
-### Fund Test Accounts (Devnets Only)
+- Creates a fresh Base Sepolia virtual testnet via Tenderly API
+- Funds deployer + bridge node accounts with `tenderly_setBalance`
+- Deploys `MessageInbox` and `Nock` via `contracts/scripts/deploy_tenderly.sh`
+- Writes `scripts/environments/virtual-testnet.generated.env`
 
-Tenderly devnets start with zero balances. Before running integration tests,
-fund the bridge node and test accounts using the `tenderly_setBalance` RPC:
+The generated env file includes `TENDERLY_RPC_URL`, `BASE_WS_URL`,
+`INBOX_CONTRACT_ADDRESS`, and `NOCK_CONTRACT_ADDRESS` for downstream bridge
+scripts.
+
+To cleanup old or current bridge VNETs without provisioning a new one:
+
+```bash
+./scripts/tenderly-vnet-cleanup.sh
+./scripts/tenderly-vnet-cleanup.sh --current
+```
+
+### Manual Network/Funding Path (Fallback)
+
+If you are bypassing `tenderly-vnet-deploy.sh`, you can provision and fund
+manually:
 
 ```bash
 # Fund bridge node 0 and test account with 10 ETH each
@@ -148,10 +162,8 @@ curl -X POST "$TENDERLY_RPC_URL" \
   }'
 ```
 
-The hex value `0x8AC7230489E80000` equals 10 ETH (10 × 10^18 wei). You can
-fund multiple addresses in a single call by adding them to the array.
-
-**Note:** This is only needed for devnets. Mainnet forks inherit real balances.
+The hex value `0x8AC7230489E80000` equals 10 ETH (10 × 10^18 wei). Mainnet
+forks inherit real balances and usually do not require this step.
 
 ### Preview Deployment (Dry Run)
 
@@ -193,7 +205,7 @@ make deploy
 ### Additional Forge Flags
 
 ```bash
-make deploy EXTRA_FLAGS="--skip-simulation --gas-price 1000000"
+make deploy EXTRA_FLAGS="--skip-simulation"
 ```
 
 ### Manual Deployment
@@ -203,7 +215,7 @@ For full control, call forge directly:
 ```bash
   forge script forge/Deploy.s.sol:Deploy \
   --rpc-url "$TENDERLY_RPC_URL" \
-  --private-key "$TENDERLY_PRIVATE_KEY" \
+  --private-key "$TENDERLY_TEST_PRIVATE_KEY" \
   --broadcast \
   --slow
 ```
@@ -225,10 +237,11 @@ make validate DEPLOYMENTS_PATH=deployments/base-sepolia.json
 The validation script checks:
 
 - Proxy points to correct implementation
-- Bridge nodes are configured
-- Nock token connected to inbox
-- Ownership is set
-- Initial state is correct (withdrawals enabled, zero burns)
+- Nock token points to the inbox proxy (`nock.inbox()`)
+- All five bridge nodes are non-zero and unique
+- Threshold is `3`
+- Withdrawals are enabled
+- Owner is set (non-zero)
 
 ### Inspect Deployment
 
@@ -277,14 +290,17 @@ The MessageInbox uses UUPS (Universal Upgradeable Proxy Standard) for upgrades.
 - [ ] Gas usage acceptable (<200k for deposits)
 - [ ] Owner key secure and accessible
 
-See [UPGRADE_GUIDE.md](docs/UPGRADE_GUIDE.md) for detailed upgrade procedures.
+See [UPGRADE_GUIDE.md](UPGRADE_GUIDE.md) for detailed upgrade procedures.
 
 ### Quick Upgrade
 
 ```bash
 # Set INBOX_PRIVATE_KEY in .env (must be owner)
+# Set DEPLOYMENTS_PATH if not using deployments.json
 make upgrade
 ```
+
+`make upgrade` prompts for interactive confirmation (`yes`).
 
 ### Upgrade Steps
 
@@ -308,6 +324,8 @@ make upgrade
 
 3. **Validate upgrade**:
    ```bash
+   # make validate compares on-chain impl against messageInboxImplementation in DEPLOYMENTS_PATH.
+   # If your deployment file was not updated, validation will fail.
    make validate
    make integration-test
    ```
@@ -591,6 +609,6 @@ cast send $PROXY_ADDRESS "updateBridgeNode(uint256,address)" 0 0xNewAddress \
 
 ## Additional Resources
 
-- [UPGRADE_GUIDE.md](docs/UPGRADE_GUIDE.md) - Detailed upgrade procedures
+- [UPGRADE_GUIDE.md](UPGRADE_GUIDE.md) - Detailed upgrade procedures
 - [tenderly.env.example](tenderly.env.example) - Legacy env example
 - [environments/](environments/) - Pre-configured environment examples

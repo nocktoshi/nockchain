@@ -370,6 +370,7 @@
         %show-seed-phrase       (do-show-seed-phrase cause)
         %show-master-zpub    (do-show-master-zpub cause)
         %show-master-zprv  (do-show-master-zprv cause)
+        %show-master-prv  (do-show-master-prv cause)
         %list-master-addresses  (do-list-master-addresses cause)
         %set-active-master-address  (do-set-active-master-address cause)
         %fakenet               [[%exit 0]~ state(bc constants.cause)]
@@ -621,9 +622,11 @@
   ++  do-import-extended
     |=  =cause:wt
     ?>  ?=(%import-extended -.cause)
-    %-  (debug "import-extended: {<extended-key.cause>}")
+    ::  log only non-secret metadata (key type, protocol version, depth, public
+    ::  fingerprint), never the raw extended key.
     =/  core  (from-extended-key:s10 extended-key.cause)
     =/  is-private=?  !=(0 prv:core)
+    %-  (debug "import-extended: type={<?:(is-private %prv %pub)>} v={<protocol-version:core>} dep={<dep:core>} pub={<(en:base58:wrap public-key:core)>}")
     =/  key-type=?(%pub %prv)  ?:(is-private %prv %pub)
     =/  coil-key=key:wt
       ?:  is-private
@@ -814,7 +817,24 @@
     ::  We do not need to reverse the endian-ness of the seed phrase
     ::  because the bip39 code expects a tape.
     ::  TODO: move this conversion into s10
-    =/  seed=byts  [64 (to-seed:bip39 (trip seed-phrase.cause) "")]
+    =/  mnem=tape  (trip seed-phrase.cause)
+    ::  Reject phrases that are not valid BIP39 mnemonics
+    ::  (word count, wordlist membership, checksum) so a mistyped or invalid
+    ::  phrase cannot silently import a different wallet than intended.
+    ?~  (from-mnemonic:bip39 mnem)
+      :_  state
+      :~  :-  %markdown
+          %-  crip
+          """
+          ## Invalid Seed Phrase
+
+          The provided phrase is not a valid BIP39 mnemonic. Check the word
+          count (12/15/18/21/24), the spelling of each word against the BIP39
+          English wordlist, and the checksum. No wallet was imported.
+          """
+          [%exit 1]
+      ==
+    =/  seed=byts  [64 (to-seed:bip39 mnem "")]
     =/  cor  (from-seed:s10 seed version.cause)
     =/  [master-pubkey-coil=coil:wt master-privkey-coil=coil:wt]
       ?-    version.cause
@@ -854,7 +874,7 @@
     =/  =transaction:wt  dat.cause
     =/  transaction-name=@t  name.transaction
     =/  =spends:transact  spends.transaction
-    =/  display=transaction-display:wt  display.transaction
+    =/  metadata=metadata:wt  metadata.transaction
     =/  =witness-data:wt  witness-data.transaction
     =/  signed-spends=spends:v1:transact
       (apply:witness-data:wt witness-data spends)
@@ -866,7 +886,7 @@
           transaction-name
           outputs.tx
           fees
-          display.transaction
+          metadata
           get-note:v
           `witness-data
       ==
@@ -924,7 +944,7 @@
     =/  =transaction:wt  dat.cause
     =/  transaction-name=@t  name.transaction
     =/  =spends:transact  spends.transaction
-    =/  display=transaction-display:wt  display.transaction
+    =/  metadata=metadata:wt  metadata.transaction
     =/  fees=@  (roll-fees:spends:v1:transact spends)
     =/  =raw-tx:v1:transact  (new:raw-tx:v1:transact spends)
     =/  =tx:v1:transact  (new:tx:v1:transact raw-tx height.balance.state)
@@ -933,7 +953,7 @@
           transaction-name
           outputs.tx
           fees
-          display.transaction
+          metadata
           get-note:v
           `witness-data.transaction
       ==
@@ -1243,6 +1263,34 @@
         [%exit 0]
     ==
   ::
+  ++  do-show-master-prv
+    |=  =cause:wt
+    ?>  ?=(%show-master-prv -.cause)
+    %-  (debug "show-master-prv")
+    ?~  active-master.state
+      :_  state
+      :~  :-  %markdown
+          %-  crip
+          """
+          Cannot show master private key without active master address set. Please import a master key / seed phrase or generate a new one.
+          """
+          [%exit 0]
+      ==
+    =/  =coil:wt  ~(master get:v %prv)
+    =/  version=@  -.coil
+    =/  private-key-b58=@t  (crip (en:base58:wrap p.key.coil))
+    :_  state
+    :~  :-  %markdown
+        %-  crip
+        """
+        ## Master Private Key (base58)
+
+        - Private Key: {(trip private-key-b58)}
+        - Version: {<version>}
+        """
+        [%exit 0]
+    ==
+  ::
   ++  do-list-notes
     |=  =cause:wt
     ?>  ?=(%list-notes -.cause)
@@ -1461,7 +1509,7 @@
       %+  turn  u.sign-keys.cause
       |=  key-info=[child-index=@ud hardened=?]
       (sign-key:get:v [~ key-info])
-    =/  [=spends:v1:transact =witness-data:wt display=transaction-display:wt]
+    =/  =transaction:wt
       %:  ~(build tx-builder bc.state)
         names
         orders
@@ -1470,22 +1518,13 @@
         sign-keys
         refund-pkh.cause
         get-note:v
+        ~
         include-data.cause
         selection-strategy.cause
         height.balance.state
       ==
     =/  lock-roots-to-watch=(z-set:zo [hash:transact (unit lock:transact)])
       (gather-watch-roots orders)
-    =/  transaction-name=@t
-      %-  to-b58:hash:transact
-      id:(new:raw-tx:v1:transact spends)
-    =/  =transaction:wt
-      %*  .  *transaction:wt
-        name     transaction-name
-        spends   spends
-        display  display
-        witness-data  witness-data
-      ==
     [transaction lock-roots-to-watch]
   ::
   ++  parse-create-tx-names
@@ -1532,7 +1571,7 @@
           name.tx-ser
           outputs.tx
           fees
-          display.tx-ser
+          metadata.tx-ser
           get-note:v
           `witness-data
       ==
@@ -1583,7 +1622,10 @@
       `[root.ord ~]
     ::
         %bridge-deposit
-      `[bridge-lock-root-default:bridge ~]
+      `[root.ord ~]
+    ::
+        %bridge-withdrawal
+      `[root.ord ~]
     ==
   ::
   ++  watch-root-locks
@@ -1604,7 +1646,8 @@
     =/  old-active  active-master.state
     =.  active-master.state  (some master-public-coil)
     %-  (debug "keygen: public key: {<(en:base58:wrap public-key:cor)>}")
-    %-  (debug "keygen: private key: {<(en:base58:wrap private-key:cor)>}")
+    ::  log only the public key; the seed phrase / zprv are revealed only by the
+    ::  explicit show-seed-phrase / show-master-zprv commands.
     =/  pub-label  `(crip "master-public-{<(end [3 4] public-key:cor)>}")
     =/  prv-label  `(crip "master-public-{<(end [3 4] public-key:cor)>}")
     =.  keys.state  (key:put:v master-public-coil ~ pub-label)
@@ -1793,6 +1836,9 @@
   ++  do-sign-hash
     |=  =cause:wt
     ?>  ?=(%sign-hash -.cause)
+    ::  sign-hash signs a caller-supplied opaque Tip5 digest with the spend key,
+    ::  which is not bound to a human-readable purpose; emit a warning and prefer
+    ::  sign-message for human-readable payloads.
     =/  sk=schnorr-seckey:transact  (sign-key:get:v sign-key.cause)
     =/  digest=hash:transact  (from-b58:hash:transact hash-b58.cause)
     =/  sig=schnorr-signature:transact
@@ -1803,7 +1849,16 @@
     =/  path=@t  'hash.sig'
     :_  state
     :~  [%file %write path sig-jam]
-        [%markdown '## Hash signed, signature saved to hash.sig']
+        :-  %markdown
+        %-  crip
+        """
+        ## Hash signed, signature saved to hash.sig
+
+        > **WARNING:** you signed an opaque hash with your spend key. If this
+        > hash was a transaction sig-hash, this signature can authorize a spend
+        > of your funds. Only sign hashes you produced yourself. For
+        > human-readable payloads use `sign-message` instead.
+        """
         [%exit 0]
     ==
   ::
@@ -1889,7 +1944,7 @@
     =/  =transaction:wt  dat.cause
     =/  =witness-data:wt  witness-data.transaction
     ?>  ?&  ?=(%1 -.witness-data)
-            ?=(%1 -.inputs.display.transaction)
+            ?=(%1 -.inputs.metadata.transaction)
         ==
     =/  =spends:v1:transact  spends.transaction
     ::  get sign-keys from wallet
@@ -1911,7 +1966,7 @@
     ::
     ::  we assume that there is at most one pkh in a single-spend condition
     =/  pkh-lps=(z-map:zo nname:transact pkh:v1:transact)
-      %-  ~(rep z-by:zo p.inputs.display.transaction)
+      %-  ~(rep z-by:zo p.inputs.metadata.transaction)
       |=  $:  [k=nname:transact v=spend-condition:transact]
               acc=(z-map:zo nname:transact pkh:v1:transact)
           ==
@@ -2032,7 +2087,7 @@
   ::  %-  (debug "show-multisig-tx: {<name.dat.cause>}")
   ::  =/  =transaction:wt  dat.cause
   ::  =/  =spends:transact  spends.transaction
-  ::  =/  display=transaction-display:wt  display.transaction
+  ::  =/  metadata=metadata:wt  metadata.transaction
   ::  =/  fees=@  (roll-fees:spends:v1:transact spends)
   ::  =/  =raw-tx:v1:transact  (new:raw-tx:v1:transact spends)
   ::  =/  =tx:v1:transact  (new:tx:v1:transact raw-tx height.balance.state)
@@ -2076,7 +2131,7 @@
 
   ::    ## Outputs
 
-  ::    {(trip (transaction:v1:display:utils name.transaction outputs.tx fees display.transaction))}
+  ::    {(trip (transaction:v1:display:utils name.transaction outputs.tx fees metadata.transaction))}
   ::    """
   ::  :_  state
   ::  :~  [%markdown markdown-text]

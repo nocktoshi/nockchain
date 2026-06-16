@@ -1583,8 +1583,8 @@ mod tests {
     use std::path::PathBuf;
     use std::time::{SystemTime, UNIX_EPOCH};
 
-    use anyhow::Result;
-    use tokio::time::{sleep, Duration};
+    use anyhow::{Context, Result};
+    use tokio::time::{timeout, Duration};
 
     #[test]
     fn persist_log_bytes_writes_stdout_and_stderr() {
@@ -1885,10 +1885,17 @@ mod tests {
         let mut config = dummy_node_config();
         config.grpc_private_port = busy_private.local_addr()?.port();
         config.grpc_private_addr = format!("127.0.0.1:{}", config.grpc_private_port);
-        let child = tokio::process::Command::new("sh")
+        let mut child = tokio::process::Command::new("sh")
             .arg("-c")
             .arg("exit 0")
             .spawn()?;
+        let status = timeout(Duration::from_secs(2), child.wait())
+            .await
+            .context("dead-process test child did not exit")??;
+        assert!(
+            status.success(),
+            "dead-process test child should exit cleanly"
+        );
         let mut manager = crate::node::NodeManager {
             mode: crate::node::NodeMode::Process,
             configs: HashMap::from([(String::from("node-a"), config)]),
@@ -1897,8 +1904,6 @@ mod tests {
                 crate::node::NodeHandle::Process(crate::node::ProcessHandle { child }),
             )]),
         };
-
-        sleep(Duration::from_millis(25)).await;
 
         let head = manager.fetch_private_head_if_current("node-a").await?;
         assert!(

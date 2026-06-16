@@ -4,7 +4,7 @@ use std::fs;
 use std::io::{self, Write};
 use std::path::PathBuf;
 
-use nockapp::driver::{make_driver, PokeResult, *};
+use nockapp::driver::{make_driver, PokeResult};
 use nockapp::drivers::one_punch::OnePunchWire;
 use nockapp::noun::slab::{NockJammer, NounSlab};
 use nockapp::utils::bytes::Byts;
@@ -51,6 +51,7 @@ impl Wallet {
     }
 
     /// Applies the shared Rust fakenet constants so wallet state matches node fakenet defaults.
+    #[allow(dead_code)]
     pub(crate) async fn set_fakenet(&mut self) -> Result<(), NockAppError> {
         self.set_fakenet_with_overrides(None, None).await
     }
@@ -872,6 +873,12 @@ impl Wallet {
     pub(crate) fn show_master_privkey() -> CommandNoun<NounSlab> {
         let mut slab = NounSlab::new();
         Self::wallet("show-master-zprv", &[], Operation::Poke, &mut slab)
+    }
+
+    /// Shows the raw master private key as base58.
+    pub(crate) fn show_master_prv() -> CommandNoun<NounSlab> {
+        let mut slab = NounSlab::new();
+        Self::wallet("show-master-prv", &[], Operation::Poke, &mut slab)
     }
 
     /// Shows the key tree structure.

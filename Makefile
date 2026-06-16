@@ -11,7 +11,24 @@ export MINIMAL_LOG_FORMAT ?= true
 export MINING_PKH ?= 9yPePjfWAdUnzaQKyxcRXKRa5PpUzKKEwtpECBZsUYt9Jd7egSDEWoV
 export
 
+# ---------------------------------------------------------------------------
+# Cross-compilation (cargo-zigbuild) configuration.
+# See the "zig-build targets for cross-compilation" section near the bottom.
+# ---------------------------------------------------------------------------
+# Linux x86_64 release target. The .2.39 suffix is the glibc floor (modern
+# Ubuntu/Debian); override ZIGBUILD_TARGET for a different arch or glibc floor.
 ZIGBUILD_TARGET ?= x86_64-unknown-linux-gnu.2.39
+
+# aws-lc-sys and jemalloc cross-compile through these zig wrappers. aws-lc-sys
+# honors AWS_LC_SYS_CC; tikv-jemalloc-sys builds via its own autotools configure
+# which reads plain AR/RANLIB, so without the wrappers it falls back to the host
+# (e.g. macOS) ar and silently drops cross-compiled ELF objects -> empty
+# libjemalloc.a -> undefined mallocx/rallocx/sdallocx at link time.
+ZIGBUILD_AWS_LC_CC ?= $(CURDIR)/tools/zig/zig_cc_linker.sh
+ZIGBUILD_AR ?= $(CURDIR)/tools/zig/zig_ar.sh
+ZIGBUILD_RANLIB ?= $(CURDIR)/tools/zig/zig_ranlib.sh
+zigbuild_aws_lc_env = ZIG_TARGET=$(1) AWS_LC_SYS_CC=$(ZIGBUILD_AWS_LC_CC) AR=$(ZIGBUILD_AR) RANLIB=$(ZIGBUILD_RANLIB)
+
 DOCKER_IMAGE ?= nockchain-local
 DOCKER_MEM ?= 32g
 # DOCKER_MEM_SWAP ?= 32g
@@ -19,7 +36,7 @@ DOCKER_P2P_PORT ?= 30000
 DOCKER_DATA_DIR ?= $(CURDIR)/.data.nockchain
 DOCKER_NOCKCHAIN_ENVS ?=
 DOCKER_NOCKCHAIN_ARGS ?=
-DOCKER_METRICS_COMPOSE ?= docker-compose.metrics.yml
+DOCKER_METRICS_COMPOSE ?= docker/docker-compose.metrics.yml
 DOCKER_METRICS_NETWORK ?= nockchain-metrics
 INFLUXDB_VERSION ?= 2.7
 TELEGRAF_VERSION ?= 1.30
@@ -49,14 +66,6 @@ build-rust:
 contracts-deps: ## Install Solidity dependencies for bridge crate
 		$(MAKE) -C crates/bridge/contracts deps
 
-.PHONY: install-cargo-zigbuild
-install-cargo-zigbuild:
-	cargo install --locked cargo-zigbuild
-
-.PHONY: zig-build-bridge
-zig-build-bridge:
-	cargo zigbuild --release --target $(ZIGBUILD_TARGET) --bin bridge
-
 .PHONY: build-nockchain-jemalloc
 build-nockchain-jemalloc:
 	cargo build --release --features jemalloc --bin nockchain
@@ -69,6 +78,20 @@ build-nockchain-bridge-tui:
 .PHONY: test
 test:
 	cargo test --release
+
+## Build the full workspace with Bazel. Run from the repository root, where
+## MODULE.bazel and Cargo.toml live; bazelisk reads the pinned version from
+## .bazelversion and rules_rust downloads the Rust toolchain.
+.PHONY: bazel-build
+bazel-build:
+	@test -f Cargo.toml || { echo "bazel-build must run at the workspace root (Cargo.toml not found here)." >&2; exit 1; }
+	bazel build //...
+
+## Run the full Bazel test suite (see bazel-build).
+.PHONY: bazel-test
+bazel-test:
+	@test -f Cargo.toml || { echo "bazel-test must run at the workspace root (Cargo.toml not found here)." >&2; exit 1; }
+	bazel test //...
 
 .PHONY: bench-nockchain-kernel
 bench-nockchain-kernel:
@@ -89,7 +112,7 @@ docker-nockchain-pma-persist: docker-nockchain-build
 
 .PHONY: docker-nockchain-build
 docker-nockchain-build:
-	docker build -t $(DOCKER_IMAGE) .
+	docker build -f docker/Dockerfile -t $(DOCKER_IMAGE) .
 # --checkpoint-mode stream \
 .PHONY: docker-nockchain-run
 docker-nockchain-run:
@@ -139,6 +162,19 @@ run-genesis-sync-fsync-off:
 .PHONY: fmt
 fmt:
 	cargo fmt
+
+.PHONY: check-cargo-fmt
+check-cargo-fmt:
+	@cargo fmt --check || (echo "Hint: run 'make fmt' to format Rust code." >&2; exit 1)
+
+.PHONY: clippy
+clippy: contracts-deps ## Run clippy with the same flags as the upstream repo
+	@echo "Running clippy..."
+	@cargo clippy --all-targets -- -Dclippy::unwrap_used -Aclippy::missing_safety_doc
+
+.PHONY: lint-local
+lint-local: contracts-deps ## Run local cargo clippy with warnings denied
+	cargo clippy --all-targets -- -Dclippy::unwrap_used -Aclippy::missing_safety_doc -Dwarnings
 
 .PHONY: docs-check
 docs-check:
@@ -190,6 +226,14 @@ install-nockchain-peek: assets/peek.jam
 HOONC ?= hoonc
 HOONC_FLAGS ?=
 
+# Optional root for per-kernel data/PMA directories. When set, each kernel build
+# is handed its own `--data-dir $(HOONC_PMA_ROOT)/<name>` so several hoonc runs
+# can proceed in parallel without sharing (or clobbering) PMA/checkpoint state.
+# Left empty for local builds so the default shared ~/.nockapp/hoonc cache is
+# reused across kernels. See the `build-kernels-ci` target below.
+HOONC_PMA_ROOT ?=
+hoonc_data_flag = $(if $(HOONC_PMA_ROOT),--data-dir $(HOONC_PMA_ROOT)/$(1))
+
 .PHONY: ensure-dirs
 ensure-dirs:
 	mkdir -p hoon
@@ -201,7 +245,7 @@ build-trivial: ensure-dirs
 	echo '%trivial' > hoon/trivial.hoon
 	$(HOONC) $(HOONC_FLAGS) --arbitrary hoon/trivial.hoon
 
-HOON_TARGETS=assets/dumb.jam assets/wal.jam assets/miner.jam assets/peek.jam assets/bridge.jam
+HOON_TARGETS=assets/dumb.jam assets/wal.jam assets/miner.jam assets/peek.jam assets/bridge.jam assets/roswell.jam
 
 .PHONY: nuke-hoonc-data
 nuke-hoonc-data:
@@ -224,39 +268,110 @@ build-hoon: ensure-dirs update-hoonc $(HOON_TARGETS)
 build-assets: ensure-dirs $(HOON_TARGETS)
 	$(call show_env_vars)
 
+# Number of kernel builds to run concurrently in `build-kernels-ci`.
+KERNEL_JOBS ?= 2
+
+# Build every kernel in parallel, each in its own ephemeral PMA dir. Used by CI
+# to cut the previously-serial kernel build time. Each hoonc run is `--ephemeral`
+# (no PMA/event-log/checkpoint writes) and gets a unique `--data-dir` plus a
+# unique output filename, so KERNEL_JOBS builds can run at once without sharing
+# state or clobbering each other's output. Override concurrency with KERNEL_JOBS.
+.PHONY: build-kernels-ci
+build-kernels-ci: ensure-dirs
+	$(call show_env_vars)
+	$(MAKE) -j$(KERNEL_JOBS) \
+		HOONC_FLAGS="$(HOONC_FLAGS) --ephemeral" \
+		HOONC_PMA_ROOT="$(CURDIR)/.hoonc-pma" \
+		$(HOON_TARGETS)
+
 HOON_SRCS := $(find hoon -type file -name '*.hoon')
 
 ## Build dumb.jam with hoonc
 assets/dumb.jam: ensure-dirs hoon/apps/dumbnet/outer.hoon $(HOON_SRCS)
 	$(call show_env_vars)
 	rm -f assets/dumb.jam
-	$(HOONC) $(HOONC_FLAGS) hoon/apps/dumbnet/outer.hoon hoon
-	mv out.jam assets/dumb.jam
+	$(HOONC) $(HOONC_FLAGS) $(call hoonc_data_flag,dumb) --output $(@F) hoon/apps/dumbnet/outer.hoon hoon
+	mv $(@F) $@
 
 ## Build wal.jam with hoonc
 assets/wal.jam: ensure-dirs hoon/apps/wallet/wallet.hoon $(HOON_SRCS)
 	$(call show_env_vars)
 	rm -f assets/wal.jam
-	$(HOONC) $(HOONC_FLAGS) hoon/apps/wallet/wallet.hoon hoon
-	mv out.jam assets/wal.jam
+	$(HOONC) $(HOONC_FLAGS) $(call hoonc_data_flag,wal) --output $(@F) hoon/apps/wallet/wallet.hoon hoon
+	mv $(@F) $@
 
 ## Build mining.jam with hoonc
 assets/miner.jam: ensure-dirs hoon/apps/dumbnet/miner.hoon $(HOON_SRCS)
 	$(call show_env_vars)
 	rm -f assets/miner.jam
-	$(HOONC) $(HOONC_FLAGS) hoon/apps/dumbnet/miner.hoon hoon
-	mv out.jam assets/miner.jam
+	$(HOONC) $(HOONC_FLAGS) $(call hoonc_data_flag,miner) --output $(@F) hoon/apps/dumbnet/miner.hoon hoon
+	mv $(@F) $@
 
 ## Build peek.jam with hoonc
 assets/peek.jam: ensure-dirs hoon/apps/peek/peek.hoon $(HOON_SRCS)
 	$(call show_env_vars)
 	rm -f assets/peek.jam
-	$(HOONC) $(HOONC_FLAGS) hoon/apps/peek/peek.hoon hoon
-	mv out.jam assets/peek.jam
+	$(HOONC) $(HOONC_FLAGS) $(call hoonc_data_flag,peek) --output $(@F) hoon/apps/peek/peek.hoon hoon
+	mv $(@F) $@
 
 ## Build bridge.jam
 assets/bridge.jam: ensure-dirs hoon/apps/bridge/bridge.hoon $(HOON_SRCS)
 	$(call show_env_vars)
 	rm -f assets/bridge.jam
-	$(HOONC) $(HOONC_FLAGS) hoon/apps/bridge/bridge.hoon hoon
-	mv out.jam assets/bridge.jam
+	$(HOONC) $(HOONC_FLAGS) $(call hoonc_data_flag,bridge) --output $(@F) hoon/apps/bridge/bridge.hoon hoon
+	mv $(@F) $@
+
+## Build roswell.jam
+assets/roswell.jam: ensure-dirs hoon/apps/roswell/roswell.hoon $(HOON_SRCS)
+	$(call show_env_vars)
+	rm -f assets/roswell.jam
+	$(HOONC) $(HOONC_FLAGS) $(call hoonc_data_flag,roswell) --output $(@F) hoon/apps/roswell/roswell.hoon hoon
+	mv $(@F) $@
+
+# ---------------------------------------------------------------------------
+# zig-build targets for cross-compilation
+# ---------------------------------------------------------------------------
+# Cross-compile Linux x86_64 release binaries from any host (notably macOS)
+# with cargo-zigbuild: https://github.com/rust-cross/cargo-zigbuild
+#
+# Install the toolchain once with `make install-cargo-zigbuild`. The zig
+# wrappers under tools/zig/ are wired in via zigbuild_aws_lc_env (defined near
+# the top of this file) so aws-lc-sys and jemalloc cross-compile correctly. The
+# wrappers resolve a Zig executable from $ZIG_EXE, then a Bazel-staged
+# hermetic Zig, then `zig` on PATH; cargo-zigbuild otherwise fetches its own.
+#
+# All targets build against ZIGBUILD_TARGET (glibc 2.39, the floor Ubuntu 24.04
+# LTS ships, matching the ubuntu:24.04 runtime Dockerfile).
+
+.PHONY: install-cargo-zigbuild
+install-cargo-zigbuild: ## Install cargo-zigbuild for cross-compilation
+	cargo install --locked cargo-zigbuild
+
+## Cross-compile the main release binaries (node, wallet, peek) for Linux x86_64.
+## nockchain is built with jemalloc.
+.PHONY: zig-build
+zig-build: ## Cross-compile nockchain (jemalloc), nockchain-wallet and nockchain-peek for Linux x86_64
+	$(call zigbuild_aws_lc_env,$(ZIGBUILD_TARGET)) cargo zigbuild --release --features jemalloc --target $(ZIGBUILD_TARGET) --bin nockchain
+	$(call zigbuild_aws_lc_env,$(ZIGBUILD_TARGET)) cargo zigbuild --release --target $(ZIGBUILD_TARGET) --bin nockchain-wallet
+	$(call zigbuild_aws_lc_env,$(ZIGBUILD_TARGET)) cargo zigbuild --release --target $(ZIGBUILD_TARGET) --bin nockchain-peek
+
+# nockchain-api uses jemalloc as its default global allocator on Linux: there is
+# no `jemalloc` feature to pass, it is only disabled by the `malloc`/
+# `tracing-heap` features or on Apple/Miri. So this plain cross-build is already
+# a jemalloc build.
+.PHONY: zig-build-nockchain-api
+zig-build-nockchain-api: ## Cross-compile nockchain-api (jemalloc) for Linux x86_64
+	$(call zigbuild_aws_lc_env,$(ZIGBUILD_TARGET)) cargo zigbuild --release -p nockchain-api --target $(ZIGBUILD_TARGET) --bin nockchain-api
+
+.PHONY: zig-build-nockchain-bridge-sequencer
+zig-build-nockchain-bridge-sequencer: ## Cross-compile the bridge sequencer binaries for Linux x86_64
+	$(call zigbuild_aws_lc_env,$(ZIGBUILD_TARGET)) cargo zigbuild --release -p nockchain-bridge-sequencer --target $(ZIGBUILD_TARGET) --bin nockchain-bridge-sequencer
+	$(call zigbuild_aws_lc_env,$(ZIGBUILD_TARGET)) cargo zigbuild --release -p nockchain-bridge-sequencer --target $(ZIGBUILD_TARGET) --bin nockchain-bridge-sequencer-ctl
+
+.PHONY: zig-build-bridge
+zig-build-bridge: ## Cross-compile the bridge for Linux x86_64
+	$(call zigbuild_aws_lc_env,$(ZIGBUILD_TARGET)) cargo zigbuild --release --target $(ZIGBUILD_TARGET) --bin bridge
+
+.PHONY: zig-build-roswell
+zig-build-roswell: ## Cross-compile roswell for Linux x86_64
+	$(call zigbuild_aws_lc_env,$(ZIGBUILD_TARGET)) cargo zigbuild --release --target $(ZIGBUILD_TARGET) --bin roswell

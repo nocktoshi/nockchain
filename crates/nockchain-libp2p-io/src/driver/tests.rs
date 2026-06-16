@@ -116,20 +116,23 @@ fn should_redial_initial_peers_requires_zero_connected_peers() {
             .expect("valid multiaddr"),
     ];
 
-    assert!(should_redial_initial_peers(0, &initial_peers, 3));
-    assert!(!should_redial_initial_peers(1, &initial_peers, 3));
+    assert!(should_redial_initial_peers(0, &initial_peers));
+    assert!(!should_redial_initial_peers(1, &initial_peers));
 }
 
 #[test]
-fn should_redial_initial_peers_requires_seed_peers_and_retry_budget() {
+fn should_redial_initial_peers_requires_seed_peers() {
     let initial_peers: Vec<Multiaddr> = vec![
         "/ip4/127.0.0.1/udp/30001/quic-v1/p2p/12D3KooWQb2uWwR7C3yFqKf4LxQ7s7rC5QZr9dA4zD4m6J7QfJ6A"
             .parse()
             .expect("valid multiaddr"),
     ];
 
-    assert!(!should_redial_initial_peers(0, &[], 3));
-    assert!(!should_redial_initial_peers(0, &initial_peers, 0));
+    // No seed peers: nothing to redial.
+    assert!(!should_redial_initial_peers(0, &[]));
+    // With seed peers and zero connected peers we redial regardless of how
+    // many attempts have already been made — we never give up.
+    assert!(should_redial_initial_peers(0, &initial_peers));
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -1116,10 +1119,7 @@ async fn build_scripted_traffic_cop_with_dropped_peek_reply(
     }
 }
 
-fn build_live_traffic_cop(
-    checkpoint_app: CheckpointApp,
-    poke_timeout: Duration,
-) -> LiveTrafficCopHarness {
+fn build_live_traffic_cop(checkpoint_app: CheckpointApp) -> LiveTrafficCopHarness {
     let CheckpointApp { _home, mut app } = checkpoint_app;
     let handle = app.get_handle();
     let (traffic_handle, effect_handle) = handle.dup();
@@ -1130,7 +1130,6 @@ fn build_live_traffic_cop(
     let traffic = traffic_cop::TrafficCop::new_with_peek_timeout(
         traffic_handle,
         &mut join_set,
-        poke_timeout,
         Duration::from_secs(30),
     );
     LiveTrafficCopHarness {
@@ -1142,7 +1141,7 @@ fn build_live_traffic_cop(
     }
 }
 
-async fn build_live_traffic_cop_with_test_kernel(poke_timeout: Duration) -> LiveTrafficCopHarness {
+async fn build_live_traffic_cop_with_test_kernel() -> LiveTrafficCopHarness {
     let (_home, mut app) = setup_nockapp("test-ker.jam").await;
     let handle = app.get_handle();
     let (traffic_handle, effect_handle) = handle.dup();
@@ -1153,7 +1152,6 @@ async fn build_live_traffic_cop_with_test_kernel(poke_timeout: Duration) -> Live
     let traffic = traffic_cop::TrafficCop::new_with_peek_timeout(
         traffic_handle,
         &mut join_set,
-        poke_timeout,
         Duration::from_secs(30),
     );
     LiveTrafficCopHarness {
@@ -1482,20 +1480,20 @@ where
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn req_res_driver_gen2_like_high_priority_timeout_storm_does_not_starve_followup_peek_or_timer(
-) {
+async fn req_res_driver_gen2_like_high_priority_backlog_does_not_starve_followup_peek_or_timer() {
     use nockapp::drivers::timer::TimerWire;
     use nockapp::wire::{SystemWire, Wire};
 
     let transcript = DriverTranscript::default();
     transcript.record(
-        "scenario", "gen2-like multi-peer timeout storm should not starve follow-up peek or timer",
+        "scenario",
+        "gen2-like multi-peer high-priority backlog should not starve follow-up peek or timer",
     );
 
     // Pre-nous already had TrafficCop. The regression shape here is the
     // nous-era workload, many peers feeding high-priority timeout pokes
     // into one serialized dispatcher, not TrafficCop existing at all.
-    let live_traffic = build_live_traffic_cop_with_test_kernel(Duration::from_nanos(1)).await;
+    let live_traffic = build_live_traffic_cop_with_test_kernel().await;
     let burst = 16_384usize;
     let probe_deadline = Duration::from_secs(5);
 
@@ -1561,7 +1559,7 @@ async fn req_res_driver_gen2_like_high_priority_timeout_storm_does_not_starve_fo
     let followup_peek = followup_peek.expect("peek timeout already checked");
     let followup_timer = followup_timer.expect("timer timeout already checked");
 
-    followup_peek.expect("follow-up peek should complete while timeout storm is active");
+    followup_peek.expect("follow-up peek should complete while high-priority backlog is active");
     let (timer_result, timing_result) = followup_timer;
     timing_result.expect("follow-up timer should still report elapsed timing");
     assert!(
@@ -1569,22 +1567,24 @@ async fn req_res_driver_gen2_like_high_priority_timeout_storm_does_not_starve_fo
             timer_result,
             Ok(nockapp::driver::PokeResult::Ack) | Ok(nockapp::driver::PokeResult::Nack)
         ),
-        "follow-up timer poke should complete while timeout storm is active: {timer_result:?}",
+        "follow-up timer poke should complete while high-priority backlog is active: {timer_result:?}",
     );
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn req_res_driver_route_response_fact_timeout_storm_does_not_starve_followup_peek_or_timer() {
+async fn req_res_driver_route_response_fact_high_priority_backlog_does_not_starve_followup_peek_or_timer(
+) {
     use nockapp::drivers::timer::TimerWire;
     use nockapp::wire::Wire;
     use nockvm::noun::Atom;
 
     let transcript = DriverTranscript::default();
     transcript.record(
-        "scenario", "route_response_fact timeout storm should not starve follow-up peek or timer",
+        "scenario",
+        "route_response_fact high-priority backlog should not starve follow-up peek or timer",
     );
 
-    let live_traffic = build_live_traffic_cop(start_nockchain_app().await, Duration::from_nanos(1));
+    let live_traffic = build_live_traffic_cop(start_nockchain_app().await);
     let metrics = isolated_test_metrics();
     let driver_state = Arc::new(Mutex::new(P2PState::new(
         metrics.clone(),
@@ -1654,19 +1654,19 @@ async fn req_res_driver_route_response_fact_timeout_storm_does_not_starve_follow
 
     assert!(
         followup_peek.is_ok(),
-        "follow-up peek timed out behind route_response_fact timeout storm; timer_completed={}",
+        "follow-up peek timed out behind route_response_fact high-priority backlog; timer_completed={}",
         followup_timer.is_ok(),
     );
     assert!(
         followup_timer.is_ok(),
-        "follow-up timer poke timed out behind route_response_fact timeout storm; peek_completed={}",
+        "follow-up timer poke timed out behind route_response_fact high-priority backlog; peek_completed={}",
         followup_peek.is_ok(),
     );
 
     let followup_peek = followup_peek.expect("peek timeout already checked");
     let followup_timer = followup_timer.expect("timer timeout already checked");
 
-    followup_peek.expect("follow-up peek should complete while timeout storm is active");
+    followup_peek.expect("follow-up peek should complete while high-priority backlog is active");
     let (timer_result, timing_result) = followup_timer;
     timing_result.expect("follow-up timer should still report elapsed timing");
     assert!(
@@ -1674,7 +1674,7 @@ async fn req_res_driver_route_response_fact_timeout_storm_does_not_starve_follow
             timer_result,
             Ok(nockapp::driver::PokeResult::Ack) | Ok(nockapp::driver::PokeResult::Nack)
         ),
-        "follow-up timer poke should complete while timeout storm is active: {timer_result:?}",
+        "follow-up timer poke should complete while high-priority backlog is active: {timer_result:?}",
     );
 }
 
@@ -1714,11 +1714,14 @@ async fn test_route_response_fact_tracks_tx_source_hints_from_heard_block() {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn route_response_fact_duplicate_current_heard_block_gates_while_processing_then_seen_releases(
-) {
+async fn route_response_fact_heard_block_ack_without_seen_releases_processing_for_replay() {
     let transcript = DriverTranscript::default();
-    let scripted_traffic =
-        build_scripted_traffic_cop(transcript, Vec::new(), vec![PokeResult::Ack]).await;
+    let scripted_traffic = build_scripted_traffic_cop(
+        transcript,
+        Vec::new(),
+        vec![PokeResult::Ack, PokeResult::Ack],
+    )
+    .await;
     let metrics = isolated_test_metrics();
     let state_arc = Arc::new(Mutex::new(P2PState::new(
         metrics.clone(),
@@ -1731,7 +1734,6 @@ async fn route_response_fact_duplicate_current_heard_block_gates_while_processin
     }
     let peer = PeerId::random();
     let height = 42u64;
-    let block_seed = 10_000 + height;
     let (response, _) = heard_block_fact_with_tx_ids(height, &[]);
     let block_id = match &response {
         NockchainFact::HeardBlock(block_id, _) => block_id.clone(),
@@ -1748,53 +1750,241 @@ async fn route_response_fact_duplicate_current_heard_block_gates_while_processin
     )
     .await
     .expect("first heard-block should route");
+    {
+        let state_guard = state_arc.lock().await;
+        assert!(
+            !state_guard.is_processing_block(&block_id),
+            "acked heard-block should release its processing claim"
+        );
+        assert!(
+            !state_guard.seen_blocks.contains(&block_id),
+            "ack without %seen must leave seen-block dedupe untouched"
+        );
+    }
+
     route_response_fact(
         peer, response, &scripted_traffic.traffic, &metrics, &state_arc, &swarm_tx,
     )
     .await
-    .expect("duplicate heard-block should gate cleanly");
+    .expect("replay after ack without %seen should route");
 
     assert_eq!(
         scripted_traffic.poke_count.load(Ordering::SeqCst),
-        1,
-        "duplicate current heard-block should not repoke before %seen arrives"
+        2,
+        "ack without %seen should not permanently gate a replay"
     );
     assert_eq!(
         metrics.block_seen_cache_hits.fetch_add(0),
-        1,
-        "duplicate current heard-block should be counted as a gate hit"
+        0,
+        "ack-released replay should not count as a cache gate hit"
+    );
+    assert_eq!(
+        metrics.block_seen_cache_misses.fetch_add(0),
+        2,
+        "both heard-block responses should reach the kernel gate"
     );
     {
         let state_guard = state_arc.lock().await;
         assert!(
-            state_guard.is_processing_block(&block_id),
-            "successful first poke should retain an in-flight processing claim until %seen"
+            !state_guard.is_processing_block(&block_id),
+            "second ack should also release the processing claim"
         );
         assert!(
             !state_guard.seen_blocks.contains(&block_id),
-            "driver must not treat an acked poke as seen before the kernel emits %seen"
+            "driver must not mark a block seen without the kernel %seen effect"
         );
     }
+}
 
-    handle_effect(
-        seen_block_payload_only_effect_slab(block_seed),
-        swarm_tx,
-        vec![],
-        false,
-        state_arc.clone(),
-        metrics,
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn route_response_fact_seen_block_without_kernel_request_stays_gated() {
+    let transcript = DriverTranscript::default();
+    let scripted_traffic =
+        build_scripted_traffic_cop(transcript, Vec::new(), vec![PokeResult::Ack]).await;
+    let metrics = isolated_test_metrics();
+    let state_arc = Arc::new(Mutex::new(P2PState::new(
+        metrics.clone(),
+        LIBP2P_CONFIG.seen_tx_clear_interval,
+    )));
+    let (swarm_tx, _swarm_rx) = tokio::sync::mpsc::channel(8);
+    let peer = PeerId::random();
+    let height = 42u64;
+    let (response, _) = heard_block_fact_with_tx_ids(height, &[]);
+    let block_id = match &response {
+        NockchainFact::HeardBlock(block_id, _) => block_id.clone(),
+        other => panic!("expected heard-block fact, got {other:?}"),
+    };
+    {
+        let mut state_guard = state_arc.lock().await;
+        // Place the block below the frontier (already validated). The
+        // frontier block itself always replays; see
+        // `route_response_fact_seen_block_at_frontier_replays_to_kernel`.
+        state_guard.first_negative = height + 1;
+        state_guard.finish_processing_block_seen(&block_id);
+    }
+
+    route_response_fact(
+        peer, response, &scripted_traffic.traffic, &metrics, &state_arc, &swarm_tx,
     )
     .await
-    .expect("payload-only seen effect should release block processing");
+    .expect("seen heard-block duplicate should gate cleanly");
 
+    assert_eq!(
+        scripted_traffic.poke_count.load(Ordering::SeqCst),
+        0,
+        "seen block below the frontier without kernel demand should not reach the kernel"
+    );
+    assert_eq!(
+        metrics.block_seen_cache_hits.fetch_add(0),
+        1,
+        "seen block duplicate should be counted as a gate hit"
+    );
     let state_guard = state_arc.lock().await;
     assert!(
         !state_guard.is_processing_block(&block_id),
-        "%seen should release the block processing claim"
+        "gated seen block should not acquire a processing claim"
     );
     assert!(
         state_guard.seen_blocks.contains(&block_id),
-        "%seen should still mark the block as seen"
+        "gated seen block should remain in seen-block dedupe"
+    );
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn route_response_fact_seen_block_at_frontier_replays_to_kernel() {
+    let transcript = DriverTranscript::default();
+    let scripted_traffic =
+        build_scripted_traffic_cop(transcript, Vec::new(), vec![PokeResult::Ack]).await;
+    let metrics = isolated_test_metrics();
+    let state_arc = Arc::new(Mutex::new(P2PState::new(
+        metrics.clone(),
+        LIBP2P_CONFIG.seen_tx_clear_interval,
+    )));
+    let (swarm_tx, _swarm_rx) = tokio::sync::mpsc::channel(8);
+    let peer = PeerId::random();
+    let height = 42u64;
+    let (response, _) = heard_block_fact_with_tx_ids(height, &[]);
+    let block_id = match &response {
+        NockchainFact::HeardBlock(block_id, _) => block_id.clone(),
+        other => panic!("expected heard-block fact, got {other:?}"),
+    };
+    {
+        let mut state_guard = state_arc.lock().await;
+        // The block sits exactly at the frontier: it is the next block the
+        // kernel needs but it was marked seen by a null-height `%seen
+        // %block` (pending on missing txs). Gating it here with no kernel
+        // by-height request armed freezes the frontier permanently.
+        state_guard.first_negative = height;
+        state_guard.finish_processing_block_seen(&block_id);
+    }
+
+    route_response_fact(
+        peer, response, &scripted_traffic.traffic, &metrics, &state_arc, &swarm_tx,
+    )
+    .await
+    .expect("frontier-height seen block should replay");
+
+    assert_eq!(
+        scripted_traffic.poke_count.load(Ordering::SeqCst),
+        1,
+        "seen block at the frontier must replay to the kernel even without a kernel request"
+    );
+    assert_eq!(
+        metrics.block_seen_cache_hits.fetch_add(0),
+        0,
+        "frontier replay should bypass the seen gate"
+    );
+    let state_guard = state_arc.lock().await;
+    assert!(
+        !state_guard.is_processing_block(&block_id),
+        "acked frontier replay should release its processing claim"
+    );
+    assert!(
+        state_guard.seen_blocks.contains(&block_id),
+        "frontier replay should keep seen-block dedupe intact"
+    );
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn route_response_fact_kernel_requested_seen_block_ack_releases_for_next_replay() {
+    let transcript = DriverTranscript::default();
+    let scripted_traffic = build_scripted_traffic_cop(
+        transcript,
+        Vec::new(),
+        vec![PokeResult::Ack, PokeResult::Ack],
+    )
+    .await;
+    let metrics = isolated_test_metrics();
+    let state_arc = Arc::new(Mutex::new(P2PState::new(
+        metrics.clone(),
+        LIBP2P_CONFIG.seen_tx_clear_interval,
+    )));
+    let (swarm_tx, _swarm_rx) = tokio::sync::mpsc::channel(8);
+    let peer = PeerId::random();
+    let height = 42u64;
+    let (response, _) = heard_block_fact_with_tx_ids(height, &[]);
+    let block_id = match &response {
+        NockchainFact::HeardBlock(block_id, _) => block_id.clone(),
+        other => panic!("expected heard-block fact, got {other:?}"),
+    };
+    {
+        let mut state_guard = state_arc.lock().await;
+        state_guard.first_negative = height;
+        state_guard.finish_processing_block_seen(&block_id);
+        state_guard.note_kernel_block_height_requested(height);
+    }
+
+    route_response_fact(
+        peer,
+        response.clone(),
+        &scripted_traffic.traffic,
+        &metrics,
+        &state_arc,
+        &swarm_tx,
+    )
+    .await
+    .expect("kernel-requested seen block should replay");
+    {
+        let state_guard = state_arc.lock().await;
+        assert!(
+            !state_guard.is_processing_block(&block_id),
+            "acked seen-block replay should release its processing claim"
+        );
+        assert!(
+            state_guard.seen_blocks.contains(&block_id),
+            "acked replay must keep seen-block dedupe intact"
+        );
+    }
+
+    route_response_fact(
+        peer, response, &scripted_traffic.traffic, &metrics, &state_arc, &swarm_tx,
+    )
+    .await
+    .expect("second kernel-requested seen block replay should also route");
+
+    assert_eq!(
+        scripted_traffic.poke_count.load(Ordering::SeqCst),
+        2,
+        "acked seen-block replay should not leave a stale processing claim"
+    );
+    assert_eq!(
+        metrics.block_seen_cache_hits.fetch_add(0),
+        0,
+        "kernel-requested seen-block replay should bypass the seen gate"
+    );
+    assert_eq!(
+        metrics.block_seen_cache_misses.fetch_add(0),
+        2,
+        "both kernel-requested replays should reach the kernel gate"
+    );
+    let state_guard = state_arc.lock().await;
+    assert!(
+        !state_guard.is_processing_block(&block_id),
+        "second ack should release the seen-block replay claim"
+    );
+    assert!(
+        state_guard.seen_blocks.contains(&block_id),
+        "seen-block replay should not clear seen-block dedupe"
     );
 }
 
@@ -1855,11 +2045,14 @@ async fn route_response_fact_block_nack_releases_processing_for_retry() {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn route_response_fact_duplicate_current_heard_tx_gates_while_processing_then_seen_releases()
-{
+async fn route_response_fact_heard_tx_ack_without_seen_releases_processing_for_replay() {
     let transcript = DriverTranscript::default();
-    let scripted_traffic =
-        build_scripted_traffic_cop(transcript, Vec::new(), vec![PokeResult::Ack]).await;
+    let scripted_traffic = build_scripted_traffic_cop(
+        transcript,
+        Vec::new(),
+        vec![PokeResult::Ack, PokeResult::Ack],
+    )
+    .await;
     let metrics = isolated_test_metrics();
     let state_arc = Arc::new(Mutex::new(P2PState::new(
         metrics.clone(),
@@ -1884,31 +2077,52 @@ async fn route_response_fact_duplicate_current_heard_tx_gates_while_processing_t
     )
     .await
     .expect("first heard-tx should route");
+    {
+        let state_guard = state_arc.lock().await;
+        // The kernel acks a heard-tx with no `%seen %tx` when it discards
+        // the tx (inputs not in heaviest balance, inputs spent,
+        // context-invalid). Holding the claim past the ack would gate the
+        // tx forever and starve any pending block that later needs it.
+        assert!(
+            !state_guard.is_processing_tx(&tx_id),
+            "acked heard-tx should release its processing claim"
+        );
+        assert!(
+            !state_guard.seen_txs.contains(&tx_id),
+            "ack without %seen must leave seen-tx dedupe untouched"
+        );
+    }
+
     route_response_fact(
-        peer, response, &scripted_traffic.traffic, &metrics, &state_arc, &swarm_tx,
+        peer,
+        response.clone(),
+        &scripted_traffic.traffic,
+        &metrics,
+        &state_arc,
+        &swarm_tx,
     )
     .await
-    .expect("duplicate heard-tx should gate cleanly");
+    .expect("replay after ack without %seen should route");
 
     assert_eq!(
         scripted_traffic.poke_count.load(Ordering::SeqCst),
-        1,
-        "duplicate heard-tx should not repoke before %seen arrives"
+        2,
+        "ack without %seen should not permanently gate a tx replay"
     );
     assert_eq!(
         metrics.tx_seen_cache_hits.fetch_add(0),
-        1,
-        "duplicate heard-tx should be counted as a gate hit"
+        0,
+        "ack-released tx replay should not count as a cache gate hit"
     );
     {
         let state_guard = state_arc.lock().await;
         assert!(
-            state_guard.is_processing_tx(&tx_id),
-            "successful first poke should retain an in-flight tx processing claim until %seen"
+            !state_guard.is_processing_tx(&tx_id),
+            "second ack should also release the tx processing claim"
         );
         assert!(
             !state_guard.seen_txs.contains(&tx_id),
-            "driver must not treat an acked tx poke as seen before the kernel emits %seen"
+            "driver must not mark a tx seen without the kernel %seen effect"
         );
     }
 
@@ -1921,12 +2135,12 @@ async fn route_response_fact_duplicate_current_heard_tx_gates_while_processing_t
         metrics,
     )
     .await
-    .expect("seen tx effect should release tx processing");
+    .expect("seen tx effect should mark the tx seen");
 
     let state_guard = state_arc.lock().await;
     assert!(
         !state_guard.is_processing_tx(&tx_id),
-        "%seen should release the tx processing claim"
+        "%seen should leave no tx processing claim"
     );
     assert!(
         state_guard.seen_txs.contains(&tx_id),
@@ -2023,9 +2237,10 @@ async fn raw_tx_request_replay_clears_processing_without_seen_effect() {
     {
         let state_guard = state_arc.lock().await;
         assert!(
-                state_guard.is_processing_tx(&tx_id),
-                "acked heard-tx should retain its processing claim until the kernel confirms completion"
-            );
+            !state_guard.is_processing_tx(&tx_id),
+            "acked heard-tx should release its processing claim; the kernel may have discarded \
+             the tx without emitting %seen and it must stay redeliverable"
+        );
         assert!(
             !state_guard.seen_txs.contains(&tx_id),
             "driver must not mark the tx seen before a %seen effect arrives"
@@ -3786,7 +4001,7 @@ async fn heard_elders_re_emits_same_recovery_window_until_progress() {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn route_response_fact_repeated_heard_elders_re_emits_recovery_window_until_progress() {
-    let live_traffic = build_live_traffic_cop(start_nockchain_app().await, Duration::from_secs(1));
+    let live_traffic = build_live_traffic_cop(start_nockchain_app().await);
     drain_effects(&live_traffic.effect_handle).await;
     seed_fakenet_pre_genesis(&live_traffic.effect_handle).await;
     send_born(&live_traffic.effect_handle).await;
@@ -5203,7 +5418,7 @@ async fn run_tx_live_response_sample(
                 "live tx replay sample {label} unique_count={unique_count} wave_count={wave_count} payload_len={payload_len}"
             ),
         );
-    let live_traffic = build_live_traffic_cop(start_nockchain_app().await, Duration::from_secs(1));
+    let live_traffic = build_live_traffic_cop(start_nockchain_app().await);
     drain_effects(&live_traffic.effect_handle).await;
 
     let metrics = isolated_test_metrics();
@@ -6368,7 +6583,7 @@ async fn run_checkpoint_prefetch_cost_sample(
     );
 
     let checkpoint_app = start_checkpoint_app(chkjam_path).await;
-    let live_traffic = build_live_traffic_cop(checkpoint_app, Duration::from_secs(timeout_seconds));
+    let live_traffic = build_live_traffic_cop(checkpoint_app);
     let (swarm_tx, mut swarm_rx) = tokio::sync::mpsc::channel(4);
     let mut equix_builder = equix::EquiXBuilder::new();
 
@@ -6526,7 +6741,7 @@ async fn run_checkpoint_requester_cost_sample(
         ),
     );
     let checkpoint_app = start_checkpoint_app(chkjam_path).await;
-    let live_traffic = build_live_traffic_cop(checkpoint_app, Duration::from_secs(timeout_seconds));
+    let live_traffic = build_live_traffic_cop(checkpoint_app);
     let (swarm_tx, mut swarm_rx) = tokio::sync::mpsc::channel(4);
     let mut equix_builder = equix::EquiXBuilder::new();
 
@@ -7559,15 +7774,23 @@ fn test_equix_pow_verification() {
     );
 }
 
-fn build_gossip_effect(version: u64, page_words: &[u64]) -> (NounSlab, ByteBuf) {
+fn build_gossip_effect_with_tag(
+    version: u64,
+    tag: &'static str,
+    page_words: &[u64],
+) -> (NounSlab, ByteBuf) {
     let mut effect_slab = NounSlab::new();
-    let heard_block = Atom::from_value(&mut effect_slab, "heard-block")
-        .expect("Failed to create heard-block atom");
-    let page = T(
-        &mut effect_slab,
-        &page_words.iter().copied().map(D).collect::<Vec<_>>(),
-    );
-    let payload = T(&mut effect_slab, &[heard_block.as_noun(), page]);
+    let gossip_tag =
+        Atom::from_value(&mut effect_slab, tag).expect("Failed to create gossip tag atom");
+    let page = match page_words {
+        [] => D(0),
+        [word] => D(*word),
+        words => T(
+            &mut effect_slab,
+            &words.iter().copied().map(D).collect::<Vec<_>>(),
+        ),
+    };
+    let payload = T(&mut effect_slab, &[gossip_tag.as_noun(), page]);
     let effect = T(&mut effect_slab, &[D(tas!(b"gossip")), D(version), payload]);
     effect_slab.set_root(effect);
 
@@ -7578,6 +7801,10 @@ fn build_gossip_effect(version: u64, page_words: &[u64]) -> (NounSlab, ByteBuf) 
         effect_slab,
         ByteBuf::from(payload_slab.jam().as_ref().to_vec()),
     )
+}
+
+fn build_gossip_effect(version: u64, page_words: &[u64]) -> (NounSlab, ByteBuf) {
+    build_gossip_effect_with_tag(version, "heard-block", page_words)
 }
 
 #[test]
@@ -8155,6 +8382,62 @@ async fn test_gossip_effect_current_version_forwards_payload_and_clears_caches()
     assert!(state_guard.block_cache.is_empty());
     assert!(state_guard.elders_cache.is_empty());
     assert!(state_guard.elders_negative_cache.is_empty());
+}
+
+#[tokio::test]
+#[cfg_attr(miri, ignore)] // ibig has a memory leak so miri fails this test
+async fn test_gossip_effect_suppresses_all_outbound_gossip_while_catching_up() {
+    use tokio::sync::mpsc;
+
+    let peer_a = PeerId::random();
+    let peer_b = PeerId::random();
+    let peers = vec![peer_a, peer_b];
+    let metrics = isolated_test_metrics();
+    let state_arc = Arc::new(Mutex::new(P2PState::new(
+        metrics.clone(),
+        LIBP2P_CONFIG.seen_tx_clear_interval,
+    )));
+
+    {
+        let source_peer = PeerId::random();
+        let mut state_guard = state_arc.lock().await;
+        for height in 100..110u64 {
+            let (fact, _) = heard_block_fact_with_tx_ids(height, &[]);
+            let block_id = match &fact {
+                NockchainFact::HeardBlock(block_id, _) => block_id.clone(),
+                other => panic!("expected heard-block fact, got {other:?}"),
+            };
+            assert!(
+                state_guard.defer_heard_block(source_peer, height, block_id, fact),
+                "test setup should build a catch-up backlog",
+            );
+        }
+        assert_eq!(
+            state_guard.catch_up_signal().mode(),
+            crate::catch_up::SyncMode::CatchingUp
+        );
+    }
+
+    let (swarm_tx, mut swarm_rx) = mpsc::channel(4);
+    for (tag, seed) in [("heard-block", 10), ("heard-tx", 20)] {
+        let (effect_slab, _) = build_gossip_effect_with_tag(FACT_POKE_VERSION, tag, &[seed]);
+        handle_effect(
+            effect_slab,
+            swarm_tx.clone(),
+            peers.clone(),
+            false,
+            state_arc.clone(),
+            metrics.clone(),
+        )
+        .await
+        .expect("catch-up gossip suppression should not error");
+    }
+
+    assert!(
+        swarm_rx.try_recv().is_err(),
+        "catching-up nodes must not fan out block, tx, or mining gossip",
+    );
+    assert_eq!(metrics.gossip_suppressed_behind_tip_total.fetch_add(0), 2);
 }
 
 #[tokio::test]
@@ -13087,7 +13370,7 @@ async fn req_res_gen2_checkpoint_range_scry_latency_report() {
             return;
         }
     };
-    let live_traffic = build_live_traffic_cop(checkpoint_app, Duration::from_secs(60));
+    let live_traffic = build_live_traffic_cop(checkpoint_app);
     let peer = PeerId::random();
 
     println!("req-res gen2 checkpoint range scry latency report");

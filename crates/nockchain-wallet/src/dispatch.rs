@@ -35,7 +35,7 @@ use termimad::MadSkin;
 use tracing::{error, info};
 use wallet_tx_builder::adapter::NormalizedSnapshot;
 
-use crate::command::{CommandNoun, Commands, WalletCli, WatchSubcommand};
+use crate::command::{CommandNoun, Commands, WatchSubcommand};
 use crate::recipient::recipient_tokens_to_specs;
 use crate::wallet_outcome::{
     migrate_summary_event, WalletAddressRowV1, WalletCommandData, WalletCommandOutcome,
@@ -402,6 +402,7 @@ pub(crate) fn command_requires_sync(command: &Commands) -> bool {
         | Commands::ShowSeedphrase
         | Commands::ShowMasterZPub
         | Commands::ShowMasterZPrv
+        | Commands::ShowMasterPrv
         | Commands::ShowKeyTree { .. }
         | Commands::ShowTx { .. }
         | Commands::SignMultisigTx { .. }
@@ -598,6 +599,7 @@ fn build_initial_poke(command: &Commands) -> CommandNoun<NounSlab> {
         Commands::ShowSeedphrase => Wallet::show_seed_phrase(),
         Commands::ShowMasterZPub => Wallet::show_master_pubkey(),
         Commands::ShowMasterZPrv => Wallet::show_master_privkey(),
+        Commands::ShowMasterPrv => Wallet::show_master_prv(),
         Commands::ShowKeyTree { include_values } => Wallet::show_key_tree(*include_values),
     }
 }

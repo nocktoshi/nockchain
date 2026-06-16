@@ -18,9 +18,13 @@ num-traits.workspace = true
 once_cell.workspace = true
 quickcheck.workspace = true
 rkyv.workspace = true
-serde = { workspace = true, features = ["derive"], default-features = false }
+serde = { workspace = true, features = ["derive"] }
+smallvec.workspace = true
 thiserror.workspace = true
 tracing.workspace = true
 
 [dev-dependencies]
 quickcheck.workspace = true
+
+[lints]
+workspace = true
