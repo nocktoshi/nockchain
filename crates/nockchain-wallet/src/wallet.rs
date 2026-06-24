@@ -847,6 +847,38 @@ impl Wallet {
         )
     }
 
+    /// Lists notes in an already-watched multisig in CSV format.
+    ///
+    /// # Arguments
+    ///
+    /// * `first_name` - Base58 first-name of the watched multisig.
+    pub(crate) fn list_notes_by_multisig_csv(first_name: &str) -> CommandNoun<NounSlab> {
+        let mut slab = NounSlab::new();
+        let first_name_noun = make_tas(&mut slab, first_name).as_noun();
+        Self::wallet(
+            "list-notes-by-multisig-csv",
+            &[first_name_noun],
+            Operation::Poke,
+            &mut slab,
+        )
+    }
+
+    /// Shows the aggregate balance of an already-watched multisig.
+    ///
+    /// # Arguments
+    ///
+    /// * `first_name` - Base58 first-name of the watched multisig.
+    pub(crate) fn show_balance_multisig(first_name: &str) -> CommandNoun<NounSlab> {
+        let mut slab = NounSlab::new();
+        let first_name_noun = make_tas(&mut slab, first_name).as_noun();
+        Self::wallet(
+            "show-balance-multisig",
+            &[first_name_noun],
+            Operation::Poke,
+            &mut slab,
+        )
+    }
+
     /// Shows the aggregate wallet balance summary.
     pub(crate) fn show_balance() -> CommandNoun<NounSlab> {
         let mut slab = NounSlab::new();

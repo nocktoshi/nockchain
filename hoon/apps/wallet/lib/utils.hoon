@@ -195,6 +195,16 @@
   ++  pull
     |=  [nd=note-data:v1:transact nn=nname:transact pkh=(unit hash:transact)]
     ^-  (unit spend-condition:transact)
+    ::  Protocol-fund coinbase notes (014-aletheia) wrap an unsatisfiable %pkh
+    ::  lock; their spend-condition cannot be recovered from the first-name by
+    ::  the normal path below, because the real 3-of-4 multisig hashes to
+    ::  fund-address whose first-name (3SnB...) differs from the note's wrapped
+    ::  first-name (+fund-note-firstname). Resolve them directly to the multisig
+    ::  so the wallet builds an LMP revealing it and signs with the participant
+    ::  keys; the kernel's +check-multisig-lock binds that revealed
+    ::  spend-condition back to fund-address. See tx-engine-1.
+    ?:  =(-.nn fund-note-firstname:t)
+      (some fund-multisig-lock:t)
     ?~  lok=(pull-inner [nd nn pkh])
       ~
     ?:  =((first:nname:transact (hash:lock:transact u.lok)) -.nn)
@@ -376,6 +386,17 @@
         ~
       %-  some
       [name.meta lock.meta]
+    ::
+    ::  Resolve a base58 first-name to its watched first-name entry (a multisig
+    ::  lock imported via `watch multisig`). Returns ~ if not currently watched.
+    ++  watch-first-name-by-b58
+      |=  first-name-b58=@t
+      ^-  (unit [name=hash:transact lock=(unit lock:transact)])
+      =/  =trek  (welp watch-path ~[t/first-name-b58])
+      =/  meta=(unit meta:wt)  (~(get of keys.state) trek)
+      ?~  meta  ~
+      ?.  ?=(%first-name -.u.meta)  ~
+      `[name.u.meta lock.u.meta]
     ::
     ++  watch-first-names
       ^-  (list @t)

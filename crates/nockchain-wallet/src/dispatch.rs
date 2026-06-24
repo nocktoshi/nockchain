@@ -36,7 +36,7 @@ use tracing::{error, info};
 use wallet_tx_builder::adapter::NormalizedSnapshot;
 
 use crate::command::{CommandNoun, Commands, WatchSubcommand};
-use crate::recipient::recipient_tokens_to_specs;
+use crate::recipient::{multisig_lock_from_participants, recipient_tokens_to_specs};
 use crate::wallet_outcome::{
     migrate_summary_event, WalletAddressRowV1, WalletCommandData, WalletCommandOutcome,
     WalletEvent, WalletKeyTreeNodeV1, WalletKeygenV1, WalletNoteRowV1,
@@ -581,6 +581,11 @@ fn build_initial_poke(command: &Commands) -> CommandNoun<NounSlab> {
         }
         Commands::ListNotesByAddressCsv { address } => Wallet::list_notes_by_address_csv(address),
         Commands::CreateTx { .. } => Wallet::show_balance(),
+        Commands::CreateMultisigTx { .. } => Wallet::show_balance(),
+        Commands::ListNotesByMultisigCsv { first_name } => {
+            Wallet::list_notes_by_multisig_csv(first_name)
+        }
+        Commands::ShowBalanceMultisig { first_name } => Wallet::show_balance_multisig(first_name),
         Commands::MigrateV0Notes { .. } => Wallet::show_balance(),
         Commands::SignMultisigTx {
             transaction,
@@ -875,6 +880,89 @@ pub async fn execute_wallet_command(
                 *include_data,
                 *save_raw_tx,
                 *note_selection_strategy,
+                None,
+            )
+            .await?;
+        if let Some(pb) = pb {
+            pb.finish_and_clear();
+        }
+
+        wallet
+            .app
+            .add_io_driver(one_punch_driver(poke.0, poke.1))
+            .await;
+        add_kernel_io_drivers(wallet, &hooks).await;
+
+        let pb_run = if use_spinner {
+            let pb = ProgressBar::new_spinner();
+            pb.enable_steady_tick(Duration::from_millis(100));
+            pb.set_message("Executing wallet…");
+            Some(pb)
+        } else {
+            None
+        };
+        let run_result = wallet.app.run().await;
+        if let Some(pb) = pb_run {
+            pb.finish_and_clear();
+        }
+        match run_result {
+            Ok(_) => {
+                *synced_snapshot_for_planner = None;
+                info!("Command executed successfully");
+                Ok(wallet_data_from_hooks(&hooks))
+            }
+            Err(e) => {
+                error!("Command failed: {}", e);
+                Err(e)
+            }
+        }
+    } else if let Commands::CreateMultisigTx {
+        threshold,
+        participants,
+        names,
+        recipients,
+        fee,
+        allow_low_fee,
+        refund_pkh,
+        index,
+        hardened,
+        include_data,
+        sign_keys,
+        save_raw_tx,
+        note_selection_strategy,
+    } = command
+    {
+        let multisig_lock = multisig_lock_from_participants(*threshold, participants)?;
+        info!(
+            "create-multisig-tx reconstructed multisig lock-root={} ({}-of-{})",
+            multisig_lock.lock_root.to_base58(),
+            multisig_lock.threshold,
+            multisig_lock.participants.len()
+        );
+        let recipient_specs = recipient_tokens_to_specs(recipients.clone())?;
+        let signing_keys = Wallet::collect_signing_keys(*index, *hardened, sign_keys)?;
+        let pb = if use_spinner {
+            let pb = ProgressBar::new_spinner();
+            pb.enable_steady_tick(Duration::from_millis(100));
+            pb.set_message("Planning transaction…");
+            Some(pb)
+        } else {
+            None
+        };
+        let snap_for_planner = synced_snapshot_for_planner.as_ref().cloned();
+        poke = wallet
+            .create_tx_with_planner(
+                snap_for_planner,
+                names.clone(),
+                *fee,
+                recipient_specs,
+                *allow_low_fee,
+                refund_pkh.clone(),
+                signing_keys,
+                *include_data,
+                *save_raw_tx,
+                *note_selection_strategy,
+                Some(multisig_lock),
             )
             .await?;
         if let Some(pb) = pb {

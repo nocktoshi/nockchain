@@ -498,6 +498,9 @@
         save-raw-tx=?                                 ::  if %.y, saves jams of the raw-tx and its hashable into a txs-debug folder
                                                       ::  in the current working directory
         =selection-strategy
+        multisig=(unit [m=@ participants=(list @t)])  ::  when present, reconstruct the m-of-n input lock from
+                                                      ::  these participants and supply it as the input lock so
+                                                      ::  multisig notes (whose note-data omits the lock) are spendable
     ==
   ::
   +$  cause
@@ -520,6 +523,8 @@
         [%verify-hash hash-b58=@t sig=@ pk-b58=@t]
         [%list-notes-by-address address=@t]                 ::  base58-encoded address
         [%list-notes-by-address-csv address=@t]             ::  base58-encoded address, CSV format
+        [%list-notes-by-multisig-csv first-name=@t]  ::  base58 first-name of a watched multisig, CSV format
+        [%show-balance-multisig first-name=@t]        ::  base58 first-name of a watched multisig
         [%create-tx =create-tx-cause]
         [%create-tx-batch requests=(list create-tx-cause)]
         [%list-active-addresses ~]

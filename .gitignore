@@ -16,3 +16,6 @@ assets/*.jam
 keys.export
 replay-checkpoints-51094
 nockchain-api-checkpoints-backup
+**/.DS_Store
+notes-*.csv
+/txs
