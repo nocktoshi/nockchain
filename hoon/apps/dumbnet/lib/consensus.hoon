@@ -221,8 +221,77 @@
   ~>  %slog.[0 (cat 3 'compute-target: New target: ' (rsh [3 2] (scot %ui next-target-atom)))]
   next-target-bn
 ::
+:::
++$  asert-anchor  [activation-height=@ target=@ min-timestamp=(unit @)]
+:::
+::  Rows are [first child height, target, fixed anchor timestamp or ~].
+::  The predecessor is the anchor; add future rows newest first.
+++  asert-target-for-rate
+  |=  proofs-per-second=@
+  ^-  @
+  (div max-target-atom:t (mul proofs-per-second asert-ideal-block-time.blockchain-constants))
+:::
+++  asert-anchor-schedule
+  ^-  (list asert-anchor)
+  :~  [112.500 (asert-target-for-rate 3.000.000) ~]
+      [asert-phase.blockchain-constants asert-anchor-target-atom.blockchain-constants `asert-anchor-min-timestamp.blockchain-constants]
+  ==
+:::
+++  asert-anchor-schedules
+  ^-  (map @tas (list asert-anchor))
+  (~(put by *(map @tas (list asert-anchor))) %zk asert-anchor-schedule)
+:::
+++  active-asert-anchor
+  |=  [puzzle-type=@tas child-height=@]
+  ^-  (unit asert-anchor)
+  =/  schedule=(unit (list asert-anchor))
+    (~(get by asert-anchor-schedules) puzzle-type)
+  ?~  schedule  ~
+  =/  anchors=(list asert-anchor)  u.schedule
+  |-
+  ?~  anchors  ~
+  =/  anchor=asert-anchor  i.anchors
+  ?:  (gte child-height activation-height.anchor)
+    `anchor
+  $(anchors t.anchors)
+:::
+++  get-asert-anchor-min-timestamp
+  |=  [puzzle-type=@tas anchor-height=@ block-id=block-id:t]
+  ^-  @
+  =/  timestamps=(unit (h-map block-id:t @))
+    (~(get by asert-anchor-min-timestamps.c) puzzle-type)
+  ?~  timestamps
+    (find-asert-anchor-min-timestamp anchor-height block-id)
+  =/  timestamp=(unit @)  (~(get h-by u.timestamps) block-id)
+  ?~  timestamp
+    (find-asert-anchor-min-timestamp anchor-height block-id)
+  u.timestamp
+:::
+::  The anchor timestamp remains derivable from a validated branch.
+++  find-asert-anchor-min-timestamp
+  |=  [anchor-height=@ block-id=block-id:t]
+  ^-  @
+  =/  local=(unit local-page:t)  (~(get h-by blocks.c) block-id)
+  ?~  local
+    ~|  %missing-asert-anchor-block  !!
+  =/  pag=page:t  (to-page:local-page:t u.local)
+  =/  height=@  ~(height get:page:t pag)
+  ?:  =(height anchor-height)
+    (~(got h-by min-timestamps.c) block-id)
+  ?.  (gth height anchor-height)
+    ~|  %asert-anchor-after-tip  !!
+  $(block-id ~(parent get:page:t pag))
+:::
+++  delete-asert-anchor-min-timestamps
+  |=  [block-id=block-id:t timestamps=(map @tas (h-map block-id:t @))]
+  ^-  (map @tas (h-map block-id:t @))
+  %+  roll  ~(tap by timestamps)
+  |=  [[puzzle-type=@tas timestamp-map=(h-map block-id:t @)] updated=_timestamps]
+  (~(put by updated) puzzle-type (~(del h-by timestamp-map) block-id))
+:::
 ::  +compute-target-asert: aserti3-2d target for a post-asert-activation block
-::
+:::
+::    .puzzle-type selects one independently anchored puzzle schedule.
 ::    .child-height is the height the block is (or will be) at;
 ::    .parent-digest identifies its parent so we can read the parent's
 ::    median-of-11 from .min-timestamps (written during parent acceptance).
@@ -232,29 +301,55 @@
 ::    target for a candidate block still being constructed.
 ++  compute-target-asert
   ~/  %compute-target-asert
-  |=  [child-height=@ parent-digest=block-id:t]
+  |=  [puzzle-type=@tas child-height=@ parent-digest=block-id:t]
   ^-  bignum:bignum:t
   =/  parent-min-ts=@
     (~(got h-by min-timestamps.c) parent-digest)
-  ::  phase 2 of 014-aletheia: the anchor's median-of-11 is a hardcoded
-  ::  protocol constant captured at the canonical anchor block (height
-  ::  65,499). paired with the [%65.499 ...] checkpoint in
-  ::  +checkpointed-digests, only one block at the anchor height is
-  ::  admissible network-wide, so reading the constant is consensus-
-  ::  identical to walking ancestry.
+  =/  anchor=(unit asert-anchor)
+    (active-asert-anchor puzzle-type child-height)
+  ?~  anchor
+    ~|  %missing-asert-anchor  !!
+  =/  anchor-height=@  (dec activation-height.u.anchor)
   =/  anchor-min-ts=@
-    asert-anchor-min-timestamp.blockchain-constants
+    ?:  =(child-height +(anchor-height))
+      (~(got h-by min-timestamps.c) parent-digest)
+    (get-asert-anchor-min-timestamp puzzle-type anchor-height parent-digest)
   %-  chunk:bignum:t
   %-  compute-target:asert
-  :*  asert-anchor-target-atom.blockchain-constants
+  :*  target.u.anchor
       anchor-min-ts
-      asert-anchor-height.blockchain-constants
+      anchor-height
       parent-min-ts
       child-height
       asert-ideal-block-time.blockchain-constants
       asert-half-life.blockchain-constants
       max-target-atom:t
   ==
+:::
+::  Dynamic anchors are retained in an independent block map per puzzle type.
+++  update-asert-anchor-min-timestamps
+  |=  [puzzle-type=@tas pag=page:t]
+  ^-  consensus-state:dk
+  =/  height=@  ~(height get:page:t pag)
+  =/  child-anchor=(unit asert-anchor)
+    (active-asert-anchor puzzle-type +(height))
+  ?~  child-anchor
+    c
+  ?^  min-timestamp.u.child-anchor
+    c
+  =/  anchor-height=@  (dec activation-height.u.child-anchor)
+  =/  block-id=block-id:t  ~(digest get:page:t pag)
+  =/  anchor-min-ts=@
+    ?:  =(height anchor-height)
+      (~(got h-by min-timestamps.c) block-id)
+    ?:  =(height +(anchor-height))
+      (~(got h-by min-timestamps.c) ~(parent get:page:t pag))
+    (get-asert-anchor-min-timestamp puzzle-type anchor-height ~(parent get:page:t pag))
+  =/  timestamp-map=(h-map block-id:t @)
+    ?~  existing=(~(get by asert-anchor-min-timestamps.c) puzzle-type)
+      *(h-map block-id:t @)
+    u.existing
+  c(asert-anchor-min-timestamps (~(put by asert-anchor-min-timestamps.c) puzzle-type (~(put h-by timestamp-map) block-id anchor-min-ts)))
 ::
 ::  +compute-epoch-duration: computes the duration of an epoch in seconds
 ::
@@ -345,6 +440,7 @@
     :-  ~(digest get:page:t pag)
     (~(got h-by epoch-start.c) ~(parent get:page:t pag))
   =.  min-timestamps.c  (update-min-timestamps now pag)
+  =.  c  (update-asert-anchor-min-timestamps %zk pag)
   ::
   =.  targets.c
     ?:  (post-asert-activation:t ~(height get:page:t pag))
@@ -354,7 +450,7 @@
       ::  keep the map shape consistent across the activation boundary.
       %-  ~(put h-by targets.c)
       :-  ~(digest get:page:t pag)
-      (compute-target-asert ~(height get:page:t pag) ~(parent get:page:t pag))
+      (compute-target-asert %zk ~(height get:page:t pag) ~(parent get:page:t pag))
     ?:  =(+(~(epoch-counter get:page:t pag)) blocks-per-epoch:t)
       ::  last block of an epoch means update to target
       %-  ~(put h-by targets.c)
@@ -444,7 +540,7 @@
   ::  check target
   =/  expected-target
     ?:  (post-asert-activation:t ~(height get:page:t pag))
-      (compute-target-asert ~(height get:page:t pag) ~(parent get:page:t pag))
+      (compute-target-asert %zk ~(height get:page:t pag) ~(parent get:page:t pag))
     (~(got h-by targets.c) ~(parent get:page:t pag))
   ?.  =(~(target get:page:t pag) expected-target)
     [%.n %page-target-invalid]
@@ -825,6 +921,236 @@
   =.  c  con
   (reject-pending-block block-id)
 ::
+::  Orphaned blocks: a block that is in .blocks (fully validated and accepted)
+::  but is not the block the heaviest chain holds at its height.
+::
+::  +accept-block claims every tx in a block: blocks-needed-by += block, and
+::  the tx leaves excluded-txs (the mempool). +reject-pending-block releases
+::  those claims for a PENDING block, but nothing ever released them for an
+::  ACCEPTED one. So when an accepted block lost a chain race its txs were
+::  stranded forever: invisible to the miner (whose candidate set is
+::  excluded-txs plus pending-block txs), never re-gossiped (that walks
+::  excluded-txs), never dropped (+drop-tx refuses anything still in
+::  blocks-needed-by), and with their inputs pinned in spent-by, so not even a
+::  replacement tx could spend those notes.
+::
+::  +release-orphaned-branch below is the release path. It runs on every reorg
+::  and walks ONLY the abandoned branch (O(reorg depth)), so no event ever pays
+::  for the size of the chain.
+::
+::  NOTE: this frees the transactions, but deliberately does NOT delete the
+::  orphaned block itself -- .blocks / .balance / .txs still hold it, exactly as
+::  they always have. Reclaiming that memory would mean deleting a block only
+::  once no plausible reorg can restore it (~14 days), and so remembering WHICH
+::  blocks were orphaned and WHEN. There is nowhere to keep that: .blocks is
+::  keyed by block-id with no height or orphaned-at index, so finding those
+::  blocks later would mean walking every block inside an event -- which we will
+::  not do at any cadence. Doing it properly needs a new index in consensus
+::  state; until then the memory is left alone rather than paid for with a
+::  chain-sized walk.
+::
+::  +release-orphan-claims: give a block's txs back to the mempool.
+::
+::    INVARIANT (types.hoon): every key of .raw-txs is in EXACTLY ONE of
+::    .blocks-needed-by / .excluded-txs. So a tx that no block claims any more,
+::    and that we still hold, MUST go back into excluded-txs -- the same restore
+::    +reject-pending-block performs. A tx also carried by another block (the
+::    common reorg case, where the winning block includes the very same tx)
+::    keeps that block's claim and correctly stays out of the mempool.
+++  release-orphan-claims
+  ~/  %release-orphan-claims
+  |=  =block-id:t
+  ^-  consensus-state:dk
+  =/  lp  (~(get h-by blocks.c) block-id)
+  ?~  lp  c
+  =/  pag=page:t  (to-page:local-page:t u.lp)
+  =/  cur-height=page-number:t  get-cur-height
+  %-  ~(rep z-in ~(tx-ids get:page:t pag))
+  |=  [=tx-id:t c=_c]
+  =.  ^c  c
+  =.  blocks-needed-by.c  (~(del h-ju blocks-needed-by.c) tx-id block-id)
+  ::  another block still carries it: it stays claimed, and out of the mempool
+  ?:  (~(has h-by blocks-needed-by.c) tx-id)  c
+  ::  we no longer hold the tx, so there is nothing to give back
+  ?.  (~(has h-by raw-txs.c) tx-id)  c
+  ::  Refresh heard-at. The tx was first heard before the block that carried it
+  ::  was mined, so a deep reorg can return it with an already-expired original
+  ::  lease. Giving it the current height restores it with a full retention
+  ::  window, so it is re-gossiped and re-offered to the miner. It gets this
+  ::  lease once: it is now in excluded-txs, so no later release can refresh it
+  ::  again, and it ages out normally if it stays unmined.
+  =/  [=raw-tx:t heard-at=@]  (~(got h-by raw-txs.c) tx-id)
+  =.  raw-txs.c  (~(put h-by raw-txs.c) tx-id [raw-tx cur-height])
+  =.  excluded-txs.c  (~(put h-in excluded-txs.c) tx-id)
+  c
+::
+::  +release-orphaned-branch: on a reorg, hand back the txs of every block on
+::  the branch we just abandoned.
+::
+::    Walks parents from the OLD heaviest block until it reaches a block the
+::    (already updated) heaviest chain agrees with -- the common ancestor. That
+::    is O(reorg depth), not O(chain), so no event ever pays for the size of the
+::    chain, and it needs no extra state. The orphaned blocks themselves stay in
+::    .blocks, exactly as they always have, so a chain that later reorgs back
+::    onto this branch is unaffected.
+++  release-orphaned-branch
+  ~/  %release-orphaned-branch
+  |=  [old-heavy=block-id:t heaviest-chain=(z-map page-number:t block-id:t)]
+  ^-  consensus-state:dk
+  ::  loop-invariant: the release mutates .c but not .heaviest-block or .blocks
+  =/  tip-height=page-number:t  get-cur-height
+  ::  .heaviest-chain must already describe the tip in .c. Absence above the tip
+  ::  is read below as proof of an orphan, which holds only for an index +update
+  ::  has revised and pruned for this tip; an index still describing the chain we
+  ::  just left names old-heavy at its own height, and the walk stops on the spot
+  ::  having released nothing.
+  ~|  %release-orphaned-branch-stale-heaviest-chain
+  ?>  =(`(need heaviest-block.c) (~(get z-by heaviest-chain) tip-height))
+  =/  cur=block-id:t  old-heavy
+  |-
+  ^-  consensus-state:dk
+  =/  lp  (~(get h-by blocks.c) cur)
+  ::  ran off the end of what we know: nothing further to release
+  ?~  lp  c
+  =/  block-height=page-number:t  ~(height get:local-page:t u.lp)
+  =/  canonical=(unit block-id:t)  (~(get z-by heaviest-chain) block-height)
+  ::  reached the common ancestor: this block is on the new chain too
+  ?:  &(?=(^ canonical) =(u.canonical cur))  c
+  ::  heaviest-chain's keys are exactly 0..tip (+prune-above), so absence above
+  ::  the tip proves this block is not on the heaviest chain. At or below the
+  ::  tip absence proves nothing: stop rather than release a tx that is really
+  ::  mined.
+  ?:  &(?=(~ canonical) !(gth block-height tip-height))  c
+  ::  orphaned: release its txs, then continue up the abandoned branch
+  =.  c  (release-orphan-claims cur)
+  =/  parent=block-id:t  ~(parent get:local-page:t u.lp)
+  ::  genesis has no parent to walk to
+  ?:  =(*page-number:t block-height)  c
+  $(cur parent)
+::
+::  +canonical-block-ids: the tip and its ancestors, walked through .blocks.
+::  ~ if the walk cannot reach genesis, ie .blocks is missing an ancestor of the
+::  tip and no block here can be called orphaned.
+::
+::    Walks parents rather than reading heaviest-chain.d, which cannot answer
+::    this: that index is never pruned above the tip, and heaviness is
+::    accumulated-work rather than height, so a reorg onto a shorter heavier
+::    chain leaves entries there naming blocks that are now orphans.
+::
+::    The result is closed under parent by construction. Callers deleting its
+::    complement depend on that.
+++  canonical-block-ids
+  ^-  (unit (h-set block-id:t))
+  ?:  =(~ heaviest-block.c)  `*(h-set block-id:t)
+  =/  cur=block-id:t  (need heaviest-block.c)
+  =|  acc=(h-set block-id:t)
+  |-
+  ^-  (unit (h-set block-id:t))
+  =/  lp  (~(get h-by blocks.c) cur)
+  ::  ran off the end of what we know before reaching genesis
+  ?~  lp  ~
+  =.  acc  (~(put h-in acc) cur)
+  ?:  =(*page-number:t ~(height get:local-page:t u.lp))  `acc
+  $(cur ~(parent get:local-page:t u.lp))
+::
+::  +delete-orphan-blocks: drop every map entry keyed by an orphaned block.
+::
+::    .orphans must be exactly the complement of +canonical-block-ids, so that
+::    what remains is closed under parent. .epoch-start reaches back up to
+::    blocks-per-epoch and +update-min-timestamps walks parents 11 deep, both
+::    with `got`, so any retained block naming a deleted one crashes the kernel
+::    as soon as a child of it arrives.
+::
+:::    All seven maps or none. A partial delete of .balance alone would not crash:
+::    +validate-page-with-txs reads balance[parent] with `get`, so the block's
+::    children validate against an empty utxo set and are silently rejected.
+::
+::    Requires the claims already released (+release-orphan-claims): a block-id
+::    left in .blocks-needed-by strands its tx (+apt: %txs-fell-through-cracks),
+::    and the release reads .blocks to find the txs.
+++  delete-orphan-blocks
+  ~/  %delete-orphan-blocks
+  |=  orphans=(list block-id:t)
+  ^-  consensus-state:dk
+  %+  roll  orphans
+  |=  [=block-id:t con=_c]
+  =.  c  con
+  =.  blocks.c          (~(del h-by blocks.c) block-id)
+  =.  balance.c         (~(del h-by balance.c) block-id)
+  =.  txs.c             (~(del h-by txs.c) block-id)
+  =.  min-timestamps.c  (~(del h-by min-timestamps.c) block-id)
+  =.  asert-anchor-min-timestamps.c
+    (delete-asert-anchor-min-timestamps block-id asert-anchor-min-timestamps.c)
+  =.  epoch-start.c     (~(del h-by epoch-start.c) block-id)
+  =.  targets.c         (~(del h-by targets.c) block-id)
+  c
+::
+::  +repair-orphaned-claims: BOOT-ONLY. Release the claims of every block that is
+::  not on the heaviest chain, then delete those blocks.
+::
+::    A tx claimed by a block no longer on the heaviest chain is unmineable,
+::    un-re-gossiped and un-droppable, with its inputs pinned in spent-by so no
+::    replacement can spend those notes. +release-orphaned-branch reaches only
+::    the branch a live reorg abandons; this reaches the rest.
+::
+::    Released txs land in excluded-txs, where the next +garbage-collect applies
+::    the spent-input check and drops any the canonical chain has since spent.
+::
+::    Two passes over the size of the chain: the ancestry walk, then the .blocks
+::    scan. Boot-only for that reason -- an event must never pay for the size of
+::    the chain.
+++  repair-orphaned-claims
+  ^-  consensus-state:dk
+  ::  no chain yet, so nothing can be orphaned. Tested with `=(~ ...)` rather
+  ::  than `?~`: `?~` would narrow .c's type to one whose heaviest-block is known
+  ::  non-null, and the roll below seeds its accumulator from `_c` -- so the full
+  ::  consensus-state that +release-orphan-claims returns would no longer nest.
+  ?:  =(~ heaviest-block.c)
+    ~>  %slog.[0 'repair-orphaned-claims: no heaviest block yet, nothing to repair']
+    c
+  ::  the release and the delete must classify against one set: a block deleted
+  ::  without its claims released strands those txs (+apt:
+  ::  %txs-fell-through-cracks).
+  ~>  %slog.[0 'repair-orphaned-claims: walking the heaviest chain']
+  =/  canonical=(unit (h-set block-id:t))
+    ~>  %bout  canonical-block-ids
+  ?~  canonical
+    ~>  %slog.[1 'repair-orphaned-claims: heaviest chain does not reach genesis, skipping repair']
+    c
+  ~>  %slog.[0 'repair-orphaned-claims: scanning .blocks for orphans']
+  =/  mempool-before=@  ~(wyt h-in excluded-txs.c)
+  =/  orphans=(list block-id:t)
+    ~>  %bout
+    %-  ~(rep h-by blocks.c)
+    |=  [[=block-id:t lp=local-page:t] orphans=(list block-id:t)]
+    ^-  (list block-id:t)
+    ?:  (~(has h-in u.canonical) block-id)  orphans
+    [block-id orphans]
+  =/  log-message
+    %^  cat  3
+      'repair-orphaned-claims: releasing txs of orphaned blocks: '
+    (rsh [3 2] (scot %ui (lent orphans)))
+  ~>  %slog.[0 log-message]
+  =/  repaired=consensus-state:dk
+    ~>  %bout
+    %+  roll  orphans
+    |=  [=block-id:t con=_c]
+    =.  c  con
+    (release-orphan-claims block-id)
+  =/  release-message
+    %^  cat  3
+      %^  cat  3
+        'repair-orphaned-claims: mempool txs before/after: '
+      %^  cat  3
+        (rsh [3 2] (scot %ui mempool-before))
+      '/'
+    (rsh [3 2] (scot %ui ~(wyt h-in excluded-txs.repaired)))
+  ~>  %slog.[0 release-message]
+  ::  must follow the release, which reads .blocks to find each block's txs
+  =.  c  repaired
+  ~>  %slog.[0 'repair-orphaned-claims: deleting orphaned blocks']
+  ~>  %bout  (delete-orphan-blocks orphans)
+::
 ::  Are the inputs already spent by another transaction we know of?
 ++  inputs-spent
   ~/  %inputs-spent
@@ -939,20 +1265,28 @@
   =.  c  con
   (drop-tx tx-id)
 ::
+::
+:::  Tx age window used when pending-block retention is unbounded. Excluded txs
+:::  have no count, size, or fee eviction, so a finite lease keeps GC, mining,
+:::  and re-gossip bounded.
+++  unbounded-tx-retain  80
 ::  garbage-collect state
 ++  garbage-collect
   ~/  %garbage-collect
   |=  retain=(unit @)
   ^-  consensus-state:dk
-  ::  Excluded txs are GC'd on a much shorter window than pending blocks
-  ::  (decoupled): keep at most min(retain, 4) blocks of excluded-tx
-  ::  history -- 4 blocks if admin configured never-drop (~) -- so
-  ::  |excluded-txs| stays bounded and the dropable-txs spent-fold does
-  ::  not blow up. Pending blocks keep the full `retain`.
+  ::  Finite retain is honored for both pending blocks and excluded txs. When
+  ::  retain is ~, pending blocks stay unbounded but excluded txs get a finite
+  ::  lease because they have no count, size, or fee eviction.
   =/  tx-retain=(unit @)
-    ?~  retain  `4
-    `(min u.retain 4)
+    ?~  retain  `unbounded-tx-retain
+    retain
   ~>  %slog.[0 (cat 3 'garbage-collect: excluded-txs count ' (rsh [3 2] (scot %ui ~(wyt h-in excluded-txs.c))))]
   =.  c  (drop-dropable-blocks retain)
+  ::  Txs of a freshly orphaned branch are handed back to the mempool at reorg
+  ::  time by +release-orphaned-branch, which runs before this. They land in
+  ::  excluded-txs, so the sweep below applies to them like any other mempool
+  ::  tx: if the winning chain spent their inputs via some other tx they are
+  ::  dropped here rather than parked in the mempool unspendable.
   (drop-dropable-txs tx-retain)
 --

@@ -3,7 +3,8 @@ pub mod artifact;
 pub mod driver;
 pub mod error;
 pub mod export;
-pub(crate) mod metrics;
+pub mod metrics;
+pub mod outbound;
 pub mod save;
 pub mod test;
 pub mod wire;
@@ -160,6 +161,11 @@ impl<J: Jammer + Send + 'static> NockApp<J> {
         &self,
     ) -> Option<Vec<crate::kernel::form::PmaTimingSample>> {
         self.kernel.take_pma_timing_samples_detailed()
+    }
+
+    /// Produces a checkpoint of the current kernel state.
+    pub fn checkpoint(&self) -> impl Future<Output = crate::Result<SaveableCheckpoint>> {
+        self.kernel.checkpoint()
     }
 
     /// This constructs a Tokio interval, even though it doesn't look like it, a Tokio runtime is _required_.

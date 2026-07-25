@@ -37,16 +37,33 @@
     |=  arg=load-kernel-state:dk
     ::  cut
     |^
-    =.  k  ~>  %bout  (update-constants (check-checkpoints (state-n-to-9 arg)))
-    =.  c.k  ~>  %bout  check-and-repair:con
+    ::  each stage is named before it runs so that the %bout durations, which
+    ::  print unlabelled, are attributable
+    ~>  %slog.[0 'load: begin']
+    =/  ks=kernel-state:dk
+      ~>  %slog.[0 'load: [1/5] state-n-to-10: migrating state to version 10']
+      ~>  %bout  (state-n-to-10 arg)
+    =.  ks
+      ~>  %slog.[0 'load: [2/5] check-checkpoints: verifying checkpointed digests']
+      ~>  %bout  (check-checkpoints ks)
+    =.  k
+      ~>  %slog.[0 'load: [3/5] update-constants']
+      ~>  %bout  (update-constants ks)
+    =.  c.k
+      ~>  %slog.[0 'load: [4/5] check-and-repair: validating consensus state']
+      ~>  %bout  check-and-repair:con
+    =.  c.k
+      ~>  %slog.[0 'load: [5/5] repair-orphaned-claims: releasing txs stranded by past reorgs']
+      ~>  %bout  repair-orphaned-claims:con
     ~|  %v1-phase-must-be-lte-asert-phase
     ?>  (lte v1-phase.constants.k asert-phase.constants.k)
+    ~>  %slog.[0 'load: complete']
     k
     ::  this arm should be renamed each state upgrade to state-n-to-[latest] and extended to loop through all upgrades
-    ++  state-n-to-9
+    ++  state-n-to-10
       |=  arg=load-kernel-state:dk
       ^-  kernel-state:dk
-      ?.  ?=(%9 -.arg)
+      ?.  ?=(%10 -.arg)
         ~>  %slog.[0 'load: State upgrade required']
         ?-  -.arg
             ::
@@ -59,9 +76,39 @@
           %6  $(arg (state-6-to-7 arg))
           %7  $(arg (state-7-to-8 arg))
           %8  $(arg (state-8-to-9 arg))
+          %9  $(arg (state-9-to-10 arg))
         ==
       arg
     ::
+    ::  upgrade kernel state 9 to kernel state 10 with typed dynamic anchor timestamps
+    ++  state-9-to-10
+      |=  arg=kernel-state-9:dk
+      ^-  kernel-state-10:dk
+      =/  new-c=consensus-state-10:dk
+        %*  .  *consensus-state-10:dk
+          blocks-needed-by                blocks-needed-by.c.arg
+          excluded-txs                    excluded-txs.c.arg
+          spent-by                        spent-by.c.arg
+          pending-blocks                  pending-blocks.c.arg
+          balance                         balance.c.arg
+          txs                             txs.c.arg
+          raw-txs                         raw-txs.c.arg
+          blocks                          blocks.c.arg
+          heaviest-block                  heaviest-block.c.arg
+          min-timestamps                  min-timestamps.c.arg
+          asert-anchor-min-timestamps    *(map @tas (h-map block-id:t @))
+          epoch-start                     epoch-start.c.arg
+          targets                         targets.c.arg
+          btc-data                        btc-data.c.arg
+          genesis-seal                    genesis-seal.c.arg
+        ==
+      :*  %10
+          c=new-c
+          a=a.arg
+          m=m.arg
+          d=d.arg
+          constants=constants.arg
+      ==
     ::  upgrade kernel state 8 to kernel state 9
     ::    h-zoon replaces the remaining consensus z containers with
     ::    digest-keyed h containers. kernel-state-8 already carries the
@@ -516,16 +563,18 @@
       `(bind (~(get h-by blocks.c.k) u.id) to-page:local-page:t)
     ::
         [%heaviest-chain ~]
+      ::  the tip, not highest-block-height: that is a monotone max over every
+      ::  accepted block, side chains included, so it names a height the
+      ::  heaviest chain need not have reached.
       ^-  (unit (unit [page-number:t block-id:t]))
-      ?~  highest=highest-block-height.d.k
+      ?~  heaviest-block.c.k
         [~ ~]
-      =/  block-id=(unit block-id:t)
-        (~(get z-by heaviest-chain.d.k) u.highest)
-      ?~  block-id
+      =/  lp=(unit local-page:t)  (~(get h-by blocks.c.k) u.heaviest-block.c.k)
+      ?~  lp
         [~ ~]
       %-  some
       %-  some
-      [u.highest u.block-id]
+      [~(height get:local-page:t u.lp) u.heaviest-block.c.k]
     ::
         [%heaviest-chain-map ~]
       ^-  (unit (unit (z-map page-number:t block-id:t)))
@@ -595,15 +644,13 @@
       =/  first-name=hash:t  (from-b58:hash:t first-name.pole)
       ?~  heaviest-block.c.k
         [~ ~]
-      ?.  (~(has h-by blocks.c.k) u.heaviest-block.c.k)
+      ?~  lp=(~(get h-by blocks.c.k) u.heaviest-block.c.k)
         [~ ~]
       ?~  bal=(~(get h-by balance.c.k) u.heaviest-block.c.k)
         [~ ~]
-      ?~  highest=highest-block-height.d.k
-        [~ ~]
       %-  some
       %-  some
-      :+  u.highest
+      :+  ~(height get:local-page:t u.lp)
         u.heaviest-block.c.k
       %-  ~(rep h-by u.bal)
       |=  [[k=nname:t v=nnote:t] bal=(z-map nname:t nnote:t)]
@@ -616,15 +663,13 @@
       =/  pubkey=schnorr-pubkey:t  (from-b58:schnorr-pubkey:t key-b58.pole)
       ?~  heaviest-block.c.k
         [~ ~]
-      ?.  (~(has h-by blocks.c.k) u.heaviest-block.c.k)
+      ?~  lp=(~(get h-by blocks.c.k) u.heaviest-block.c.k)
         [~ ~]
       ?~  bal=(~(get h-by balance.c.k) u.heaviest-block.c.k)
         [~ ~]
-      ?~  highest=highest-block-height.d.k
-        [~ ~]
       %-  some
       %-  some
-      :+  u.highest
+      :+  ~(height get:local-page:t u.lp)
         u.heaviest-block.c.k
       %-  ~(rep h-by u.bal)
       |=  [[k=nname:t v=nnote:t] pub-bal=(z-map nname:t nnote:t)]
@@ -742,7 +787,7 @@
       ::~&  "inner dumbnet cause: {<[-.cause -.+.cause]>}"
       =^  effs  k
         ?+    wir  ~|("Unsupported wire: {<wir>}" !!)
-            [%poke src=?(%nc %timer %sys %miner %grpc) ver=@ *]
+            [%poke src=?(%nc %timer %sys %zk-pow-miner %grpc) ver=@ *]
           ?-  -.cause
             %command  (handle-command now eny p.cause)
             %fact     (handle-fact wir eny our now p.cause)
@@ -762,9 +807,9 @@
       =/  target  ~(target get:page:t candidate-block.m.k)
       =/  commit  (block-commitment:page:t candidate-block.m.k)
       ?-  version
-        %0  [%mine %0 commit target pow-len:t]
-        %1  [%mine %1 commit target pow-len:t]
-        %2  [%mine %2 commit target pow-len:t]
+        %0  [%mine-zk %0 commit target pow-len:t]
+        %1  [%mine-zk %1 commit target pow-len:t]
+        %2  [%mine-zk %2 commit target pow-len:t]
       ==
     ::
     ::  +heard-genesis-block: check if block is a genesis block and decide whether to keep it
@@ -930,6 +975,14 @@
         ::  either oldest is genesis OR we must have received exactly 24 ids
         :_  k
         [[%liar-peer u.peer-id %less-than-24-parent-hashes]~]
+      ::  +get-elders seeds its accumulator with the block at the top of the
+      ::  window, so an elders response naming no ancestor at all is not one
+      ::  this kernel can produce. Rejecting it also keeps the walk below,
+      ::  which starts at .oldest + .ids-lent - 1, from decrementing zero.
+      ?:  =(0 ids-lent)
+        ~>  %slog.[1 'heard-elders: No parent hashes received']
+        :_  k
+        [[%liar-peer u.peer-id %no-parent-hashes]~]
       ::
       =/  log-message
         %^  cat  3
@@ -941,9 +994,12 @@
         =/  height  (dec (add oldest ids-lent))
         |-
         ?~  ids  ~
-        ?:  =(height 0)  ~
         ?:  (~(has h-by blocks.c.k) i.ids)
           `[i.ids height]
+        ::  a window reaching genesis intersects there or not at all: genesis is
+        ::  the last id such a window carries, and its height cannot be
+        ::  decremented. the membership test must therefore precede this.
+        ?:  =(height *page-number:t)  ~
         $(ids t.ids, height (dec height))
       ?~  latest-known
         ?:  =(oldest *page-number:t)
@@ -1067,6 +1123,7 @@
       ::
       ::  validate that powork puzzle in the proof is correct.
       ?&  (check-pow-puzzle u.pow pag)
+          (canonical-pow-proof:dk [~(height get:page:t pag) u.pow])
           ::
           ::  validate the powork. this is done separately since the
           ::  other checks are much cheaper.
@@ -1096,20 +1153,45 @@
       ::
       ::  check if we already have raw-tx
       ?:  (has-raw-tx:con ~(id get:raw-tx:t raw))
-        :: do almost nothing (idempotency), we already have it
-        :: but do tell the runtime we've already seen it
+        ::  Duplicate txs are never re-added to the mempool. Peer-origin
+        ::  duplicates emit only %seen; echoing them would create gossip loops.
+        ::  Local grpc duplicates are operator re-submissions and are gossiped
+        ::  immediately. New-heaviest events also announce retained txs, but
+        ::  wallet resends should not wait for block progress.
+        =/  re-gossip=?  (local-tx-submission wir)
         =/  log-message
           %^  cat  3
-           'heard-tx: Transaction id already seen: '
+            ?:  re-gossip
+              'heard-tx: Transaction id already seen, re-broadcasting: '
+            'heard-tx: Transaction id already seen: '
           id-b58
         ~>  %slog.[1 log-message]
+        =/  seen=(list effect:dk)
+          [%seen %tx ~(id get:raw-tx:t raw)]~
         :_  k
-        [%seen %tx ~(id get:raw-tx:t raw)]~
+        ?.  re-gossip  seen
+        [[%gossip %0 %heard-tx raw] seen]
       ::
       ::  check if the raw-tx contents are in base field
       ?.  (based:raw-tx:t raw)
         :_  k
         [(liar-effect wir %raw-tx-not-based)]~
+      ::
+      ::  reject transactions too large to ever fit in a block. this closes
+      ::  the pre-packing / block-creation asymmetry: mempool acceptance did
+      ::  not bound tx size, so an oversize tx passed here, was gossiped, and
+      ::  then could never be mined -- consensus +check-size rejected any
+      ::  block that included it. we mirror that accounting here (a block is
+      ::  +compute-size-without-txs plus the size of every included tx) using
+      ::  an empty page as the block-overhead floor, so a tx that would not
+      ::  fit even in an otherwise-empty block is discarded on receipt rather
+      ::  than propagated.
+      =/  tx-size=@  ~(size get:raw-tx:t raw)
+      ?:  %+  gth
+            (add tx-size (compute-size-without-txs:page:t *page:t))
+          max-block-size:t
+        ~>  %slog.[1 'heard-tx: Transaction too large to fit in a block, discarding']
+        `k
       ::
       ::  check tx-id. this is faster than calling validate:raw-tx (which also checks the id)
       ::  so we do it first
@@ -1185,6 +1267,23 @@
         ==
       ?.  ?=(%.y -.ctx-valid)
         ~>  %slog.[1 (cat 3 'heard-tx: Transaction context invalid: ' +.ctx-valid)]
+        `k
+      ::
+      ::  a tx must pay what a block carrying it will require. +v1-to-v1
+      ::  applies this bound during block validation and candidate packing, so
+      ::  a tx paying less can never be mined; admitting one anyway leaves it
+      ::  gossiped, retained, re-gossiped on every new heaviest block and
+      ::  re-processed by the miner on every candidate refresh, with its
+      ::  inputs pinned in .spent-by so the sender cannot replace it. the bound
+      ::  is measured at the earliest height that could carry the tx, which is
+      ::  the height +v1-to-v1 will measure it at.
+      =/  fee-sufficient=?
+        ?^  -.raw  %.y
+        =/  next-height=page-number:t  +(get-cur-height:con)
+        %+  gte  (roll-fees:spends:t spends.raw)
+        (calculate-min-fee:spends:t [spends.raw next-height])
+      ?.  fee-sufficient
+        ~>  %slog.[1 'heard-tx: Fee below what a block would require, discarding']
         `k
       ::
       =^  work  c.k
@@ -1344,29 +1443,52 @@
           ==
         [orphaned-block-span reorg-span effs]
       ::
+      ::  Update derived state BEFORE garbage collection, which needs the
+      ::  canonical page-number -> block-id index (heaviest-chain.d.k) to tell
+      ::  an orphaned block from one on the heaviest chain. On a reorg this
+      ::  index only names the winning chain once +update has run, so
+      ::  collecting first would classify blocks against the chain we just
+      ::  left. +update walks the heaviest chain's parents, which garbage
+      ::  collection never drops, and nothing between here and the old call
+      ::  site reads d.k -- so it is safe to hoist.
+      =.  d.k  (update:der c.k pag)
+      ::
+      ::  The reorg above abandoned the branch ending at .old-heavy. Hand that
+      ::  branch's transactions back to the mempool. +accept-block claimed every
+      ::  tx for the block that carried it, and until now nothing ever released
+      ::  an ACCEPTED block's claim (only +reject-pending-block, for pending
+      ::  ones) -- so every tx on an orphaned branch was stranded for good:
+      ::  invisible to the miner, never re-gossiped, never garbage collected,
+      ::  and with its inputs pinned in spent-by so no replacement tx could
+      ::  spend those notes either. Releasing here (rather than waiting for
+      ::  +sweep-orphan-blocks) is what makes an orphaned tx promptly mineable
+      ::  again. The blocks themselves stay in .blocks until the sweep retires
+      ::  them, so a chain that reorgs back is unaffected.
+      =?  c.k  is-reorg
+        ?~  old-heavy  c.k
+        (release-orphaned-branch:con u.old-heavy heaviest-chain.d.k)
+      ::
       ::  Garbage collect pending blocks and excluded transactions.
       ::  Garbage collection only runs when we receive a new heaviest
       ::  block, since that's when the block height advances and we can
       ::  determine what's expired. Pending blocks are removed based on
       ::  elapsed heaviest blocks since they were heard. Excluded txs are
       ::  removed based on the same criteria with the added check that they
-      ::  they aren't spent in the current heaviest chain.
+      ::  they aren't spent in the current heaviest chain -- which is also what
+      ::  drops a tx just handed back by +release-orphaned-branch above, if the
+      ::  winning chain spent its inputs via some other tx.
       =?  c.k  is-new-heaviest
         (garbage-collect:con retain.a.k)
       ::
       ::  if new block is heaviest, regossip txs that haven't been garbage collected
       =?  effs  is-new-heaviest
-        %-  ~(rep h-in excluded-txs.c.k)
-        |=  [=tx-id:t effs=_effs]
-        [[%gossip %0 %heard-tx (got-raw-tx:con tx-id)] effs]
+        (weld regossip-excluded-txs-effects effs)
       ::  regossip block transactions if mining
       =.  effs  (weld (regossip-block-txs-effects pag) effs)
       ::
       ::  tell the miner about the new block
       =.  m.k  (heard-new-block:min c.k now)
       ::
-      ::  update derived state
-      =.  d.k  (update:der c.k pag)
       ?.  =(old-heavy heaviest-block.c.k)
         =^  mining-effs  k  do-mine
         =.  effs  (weld mining-effs effs)
@@ -1392,12 +1514,9 @@
         ~|  'liar-effect: ATTN: received a bad block or tx via grpc driver'
         !!
       ::
-          [%poke %miner *]
-        ::  this indicates that the mining module built a bad block and then
-        ::  told the kernel about it. alternatively, +do-genesis produced
-        ::  a bad genesis block. this should never happen, it indicates
-        ::  a serious bug otherwise.
-        ~|  'liar-effect: ATTN: miner or +do-genesis produced a bad block!'
+          [%poke %zk-pow-miner *]
+        ::  A failed ZK-miner block is a local construction failure.
+        ~|  'liar-effect: ATTN: zk-pow-miner or +do-genesis produced a bad block!'
         !!
       ::
           [%poke %sys *]
@@ -1416,6 +1535,21 @@
       ?.  ?=([%poke %libp2p ver=@ typ=?(%gossip %response) %peer-id id=@ *] pole)
         ~
       (some id.pole)
+    ::
+    ::  +local-tx-submission: did this poke come from the local grpc driver?
+    ::
+    ::    true only for the %grpc wire, which the grpc driver stamps on pokes
+    ::    it makes on behalf of a local client (e.g. `nockchain-wallet
+    ::    send-tx`). a tx gossiped to us by a peer arrives on a %libp2p wire
+    ::    and is never a local submission. used by +heard-tx to decide whether
+    ::    re-hearing a tx we already hold should re-announce it; answering
+    ::    %.y for a peer-sourced wire would create an infinite gossip loop.
+    ++  local-tx-submission
+      ~/  %local-tx-submission
+      |=  wir=wire
+      ^-  ?
+      =/  =(pole)  wir
+      ?=([%poke %grpc ver=@ *] pole)
     ::
     ++  handle-command
       ~/  %handle-command
@@ -1507,19 +1641,22 @@
       ++  do-pow
         ^-  [(list effect:dk) kernel-state:dk]
         ?>  ?=([%pow *] command)
-        =/  commit=block-commitment:t
-          (block-commitment:page:t candidate-block.m.k)
-        ?.  =(bc.command commit)
-          ~>  %slog.[1 'do-pow: Mined for wrong (old) block commitment']
+        ?-  -.pv.command
+            %dumb-zkpow
+          =/  commit=block-commitment:t
+            (block-commitment:page:t candidate-block.m.k)
+          ?.  =(bc.pv.command commit)
+            ~>  %slog.[1 'do-pow: Mined for wrong (old) block commitment']
+            [~ k]
+          ?:  %+  check-target:mine  dig.pv.command
+              ~(target get:page:t candidate-block.m.k)
+            =.  m.k  (set-pow:min prf.pv.command)
+            =.  m.k  set-digest:min
+            =^  heard-block-effs  k  (heard-block /poke/zk-pow-miner now candidate-block.m.k eny)
+            :_  k
+            heard-block-effs
           [~ k]
-        ?:  %+  check-target:mine  dig.command
-            ~(target get:page:t candidate-block.m.k)
-          =.  m.k  (set-pow:min prf.command)
-          =.  m.k  set-digest:min
-          =^  heard-block-effs  k  (heard-block /poke/miner now candidate-block.m.k eny)
-          :_  k
-          heard-block-effs
-        [~ k]
+        ==
       ::
       ++  do-set-mining-key
         ^-  [(list effect:dk) kernel-state:dk]
@@ -1548,12 +1685,10 @@
         ?:  (gth (lent v1.command) 2)
         ~>  %slog.[1 'do-set-mining-key-advanced: Coinbase split for more than two public-key hashes not yet supported, exiting']
           [[%exit 1]~ k]
-        ?~  v0.command
-        ~>  %slog.[1 'do-set-mining-key-advanced: Empty list of sigs, exiting.']
-          [[%exit 1]~ k]
-        ::
-        ?~  v1.command
-        ~>  %slog.[1 'do-set-mining-key-advanced: Empty list of public key hashes, exiting.']
+        ::  A standalone v1 miner supplies no legacy v0 signatures; only an
+        ::  entirely empty reward configuration is invalid.
+        ?:  ?&(?=(~ v0.command) ?=(~ v1.command))
+          ~>  %slog.[1 'do-set-mining-key-advanced: No keys provided, exiting.']
           [[%exit 1]~ k]
         ::
         =/  [v0-shares=(list [sig:t @]) crash=?]
@@ -1582,8 +1717,8 @@
         ?:  crash
           ~>  %slog.[1 'do-set-mining-key-advanced: Invalid public keys provided, exiting']
           [[%exit 1]~ k]
-        =.  m.k  (set-v0-shares:min v0-shares)
-        =.  m.k  (set-shares:min shares)
+        =?  m.k  ?=(^ v0-shares)  (set-v0-shares:min v0-shares)
+        =?  m.k  ?=(^ shares)     (set-shares:min shares)
         `k
       ::
       ++  do-enable-mining
@@ -1611,7 +1746,9 @@
         ::~&  >  'generation of candidate blocks enabled.'
         =.  m.k  (set-mining:min p.command)
         =.  m.k  (heard-new-block:min c.k now)
-        `k
+        ::  Enabling an external miner emits its first candidate without waiting
+        ::  for the periodic candidate refresh.
+        do-mine
       ::
       ++  do-timer
         ::TODO post-dumbnet: only rerequest transactions a max of once/twice (maybe an admin param)
@@ -1695,7 +1832,7 @@
             %2  [%2 commit target pow-len:t]
           ==
         :_  k
-        [%mine mine-start]~
+        [%mine-zk mine-start]~
       ::
       ::  only send a %elders request for reasonable heights
       ++  missing-parent-effects
@@ -1740,8 +1877,16 @@
         ~>  %slog.[0 log-message]
         [%request %block %elders block-id peer-id]~ :: ask for elders
     ::
+    ::  re-gossip retained mempool txs.
+    ++  regossip-excluded-txs-effects
+      ^-  (list effect:dk)
+      %-  ~(rep h-in excluded-txs.c.k)
+      |=  [=tx-id:t effects=(list effect:dk)]
+      ^-  (list effect:dk)
+      [[%gossip %0 %heard-tx (got-raw-tx:con tx-id)] effects]
+    ::
     ::  only if mining: re-gossip transactions included in block when block is fully validated
-    ::  precondition: all transactions for block are in raw-txs
+    ::  transactions can be absent after candidate filtering or block acceptance
     ++  regossip-block-txs-effects
       ~/  %regossip-block-txs-effects
       |=  =page:t
@@ -1750,8 +1895,9 @@
       %-  ~(rep z-in ~(tx-ids get:page:t page))
       |=  [=tx-id:t effects=(list effect:dk)]
       ^-  (list effect:dk)
-      =/  tx=raw-tx:t  raw-tx:(~(got h-by raw-txs.c.k) tx-id)
-      =/  fec=effect:dk  [%gossip %0 %heard-tx tx]
+      =/  tx  (~(get h-by raw-txs.c.k) tx-id)
+      ?~  tx  effects
+      =/  fec=effect:dk  [%gossip %0 %heard-tx raw-tx.u.tx]
       [fec effects]
     ::
     ::  only if mining: regossip transactions included in candidate block

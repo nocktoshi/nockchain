@@ -36,7 +36,7 @@ use tracing::{error, info};
 use wallet_tx_builder::adapter::NormalizedSnapshot;
 
 use crate::command::{CommandNoun, Commands, WatchSubcommand};
-use crate::recipient::{multisig_lock_from_participants, recipient_tokens_to_specs};
+use crate::recipient::{multisig_lock_from_participants, resolve_ergonomic_outputs_and_fee};
 use crate::wallet_outcome::{
     migrate_summary_event, WalletAddressRowV1, WalletCommandData, WalletCommandOutcome,
     WalletEvent, WalletKeyTreeNodeV1, WalletKeygenV1, WalletNoteRowV1,
@@ -407,14 +407,15 @@ pub(crate) fn command_requires_sync(command: &Commands) -> bool {
         | Commands::ShowTx { .. }
         | Commands::SignMultisigTx { .. }
         | Commands::Watch { .. }
-        | Commands::TxAccepted { .. } => false,
+        | Commands::TxAccepted { .. }
+        | Commands::TxStatus { .. } => false,
         _ => true,
     }
 }
 
 fn build_initial_poke(command: &Commands) -> CommandNoun<NounSlab> {
     match command {
-        Commands::TxAccepted { .. } => Err(NockAppError::from(
+        Commands::TxAccepted { .. } | Commands::TxStatus { .. } => Err(NockAppError::from(
             CrownError::Unknown("internal: invalid command for poke builder".into()),
         )),
         Commands::Keygen => {
@@ -846,7 +847,13 @@ pub async fn execute_wallet_command(
     } else if let Commands::CreateTx {
         names,
         recipients,
+        to,
+        amounts,
+        amounts_nicks,
+        bridge_deposit,
+        to_evm_address,
         fee,
+        fee_nicks,
         allow_low_fee,
         refund_pkh,
         index,
@@ -855,9 +862,19 @@ pub async fn execute_wallet_command(
         sign_keys,
         save_raw_tx,
         note_selection_strategy,
+        notes_csv: _,
     } = command
     {
-        let recipient_specs = recipient_tokens_to_specs(recipients.clone())?;
+        let (recipient_specs, effective_fee) = resolve_ergonomic_outputs_and_fee(
+            recipients,
+            to,
+            amounts,
+            amounts_nicks,
+            *bridge_deposit,
+            to_evm_address.as_deref(),
+            *fee,
+            *fee_nicks,
+        )?;
         let signing_keys = Wallet::collect_signing_keys(*index, *hardened, sign_keys)?;
         let pb = if use_spinner {
             let pb = ProgressBar::new_spinner();
@@ -872,7 +889,7 @@ pub async fn execute_wallet_command(
             .create_tx_with_planner(
                 snap_for_planner,
                 names.clone(),
-                *fee,
+                effective_fee,
                 recipient_specs,
                 *allow_low_fee,
                 refund_pkh.clone(),
@@ -921,7 +938,13 @@ pub async fn execute_wallet_command(
         participants,
         names,
         recipients,
+        to,
+        amounts,
+        amounts_nicks,
+        bridge_deposit,
+        to_evm_address,
         fee,
+        fee_nicks,
         allow_low_fee,
         refund_pkh,
         index,
@@ -930,6 +953,7 @@ pub async fn execute_wallet_command(
         sign_keys,
         save_raw_tx,
         note_selection_strategy,
+        notes_csv: _,
     } = command
     {
         let multisig_lock = multisig_lock_from_participants(*threshold, participants)?;
@@ -939,7 +963,16 @@ pub async fn execute_wallet_command(
             multisig_lock.threshold,
             multisig_lock.participants.len()
         );
-        let recipient_specs = recipient_tokens_to_specs(recipients.clone())?;
+        let (recipient_specs, effective_fee) = resolve_ergonomic_outputs_and_fee(
+            recipients,
+            to,
+            amounts,
+            amounts_nicks,
+            *bridge_deposit,
+            to_evm_address.as_deref(),
+            *fee,
+            *fee_nicks,
+        )?;
         let signing_keys = Wallet::collect_signing_keys(*index, *hardened, sign_keys)?;
         let pb = if use_spinner {
             let pb = ProgressBar::new_spinner();
@@ -954,7 +987,7 @@ pub async fn execute_wallet_command(
             .create_tx_with_planner(
                 snap_for_planner,
                 names.clone(),
-                *fee,
+                effective_fee,
                 recipient_specs,
                 *allow_low_fee,
                 refund_pkh.clone(),

@@ -2488,16 +2488,31 @@ async fn seen_effect_does_not_flush_prefetch_without_kernel_height_request() {
         Some(SwarmAction::FlushDeferredHeardBlocks) => {}
         other => panic!("expected deferred flush action, got {other:?}"),
     }
+    let queued = match buffered_swarm_actions.pop_front() {
+        Some(SwarmAction::QueueKernelRequest {
+            request_message, ..
+        }) => request_message,
+        other => panic!("expected outbound request after deferred flush, got {other:?}"),
+    };
+    let parsed = crate::messages::decode_request_item_message(&queued)
+        .expect("queued request should decode");
+    assert!(
+        matches!(
+            parsed,
+            crate::messages::NockchainDataRequest::BlockByHeight(11)
+        ),
+        "expected block-by-height request, got {parsed:?}"
+    );
     assert!(
         buffered_swarm_actions.is_empty(),
-        "authorized cache hit should not queue an outbound request"
+        "authorized cache hit should queue only flush plus the kernel singleton"
     );
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn block_by_height_request_with_buffered_block_and_prefetch_disabled_dispatches_outbound() {
-    // Default-off baseline: a deferred-buffer hit must not alter the
-    // classic by-height request path when catch-up prefetch is disabled.
+    // A ready deferred-buffer hit queues local flush work without replacing
+    // the kernel's normal by-height request path.
     let metrics = isolated_test_metrics();
     let state_arc = Arc::new(Mutex::new(P2PState::new(
         metrics.clone(),
@@ -2537,6 +2552,10 @@ async fn block_by_height_request_with_buffered_block_and_prefetch_disabled_dispa
     .await
     .expect("block-by-height effect should keep the disabled path unchanged");
 
+    match buffered_swarm_actions.pop_front() {
+        Some(SwarmAction::FlushDeferredHeardBlocks) => {}
+        other => panic!("expected deferred flush action, got {other:?}"),
+    }
     let queued = match buffered_swarm_actions.pop_front() {
         Some(SwarmAction::QueueKernelRequest {
             request_message, ..
@@ -2554,7 +2573,7 @@ async fn block_by_height_request_with_buffered_block_and_prefetch_disabled_dispa
     );
     assert!(
         buffered_swarm_actions.is_empty(),
-        "disabled cache hit should queue only the classic outbound request"
+        "ready cache hit should queue only flush plus the kernel singleton"
     );
 
     let state_guard = state_arc.lock().await;
@@ -2565,7 +2584,7 @@ async fn block_by_height_request_with_buffered_block_and_prefetch_disabled_dispa
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn prefetch_enabled_buffered_block_at_frontier_queues_deferred_flush() {
+async fn deferred_candidate_does_not_suppress_kernel_singleton() {
     let metrics = isolated_test_metrics();
     let state_arc = Arc::new(Mutex::new(P2PState::new(
         metrics.clone(),
@@ -2610,15 +2629,30 @@ async fn prefetch_enabled_buffered_block_at_frontier_queues_deferred_flush() {
         PeerExclusions::default(),
     )
     .await
-    .expect("frontier cache hit should queue deferred flush");
+    .expect("frontier cache hit should queue deferred flush and keep singleton live");
 
     match buffered_swarm_actions.pop_front() {
         Some(SwarmAction::FlushDeferredHeardBlocks) => {}
         other => panic!("expected deferred flush action, got {other:?}"),
     }
+    let queued = match buffered_swarm_actions.pop_front() {
+        Some(SwarmAction::QueueKernelRequest {
+            request_message, ..
+        }) => request_message,
+        other => panic!("expected outbound request after deferred flush, got {other:?}"),
+    };
+    let parsed = crate::messages::decode_request_item_message(&queued)
+        .expect("queued request should decode");
+    assert!(
+        matches!(
+            parsed,
+            crate::messages::NockchainDataRequest::BlockByHeight(42)
+        ),
+        "expected block-by-height request, got {parsed:?}"
+    );
     assert!(
         buffered_swarm_actions.is_empty(),
-        "frontier cache hit should not queue an outbound request"
+        "deferred candidate should queue only flush plus the kernel singleton"
     );
 }
 
@@ -2731,9 +2765,8 @@ async fn block_by_height_request_without_buffered_block_dispatches_outbound() {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn prefetch_disabled_falls_through_to_singleton_outbound() {
-    // Phase 4 baseline: with prefetch disabled, the cache-miss
-    // path must dispatch the existing singleton block-by-height request
-    // even when the catch-up signal is CatchingUp.
+    // With prefetch disabled, the cache-miss path must dispatch the existing
+    // singleton block-by-height request.
     let metrics = isolated_test_metrics();
     let state_arc = Arc::new(Mutex::new(P2PState::new(
         metrics.clone(),
@@ -2741,26 +2774,10 @@ async fn prefetch_disabled_falls_through_to_singleton_outbound() {
     )));
     let peer = PeerId::random();
     {
-        // Drive the signal into CatchingUp via deferred backlog so the
-        // mode check would otherwise enable prefetch.
         let mut state_guard = state_arc.lock().await;
-        for h in 1_000..1_010u64 {
-            state_guard.defer_heard_block(
-                peer,
-                h,
-                format!("future-block-{h}"),
-                heard_block_fact_with_tx_ids(h, &[]).0,
-            );
-        }
-        state_guard.first_negative = 0;
         state_guard.observe_peer_generation(peer, ReqResGeneration::Gen2);
         state_guard.mark_peer_range_supported(peer);
     }
-    assert_eq!(
-        state_arc.lock().await.catch_up_signal().mode(),
-        crate::catch_up::SyncMode::CatchingUp
-    );
-
     let request_slab = request_slab_from_message(block_by_height_message(50).as_ref())
         .expect("block-by-height request slab should decode");
     let mut buffered_swarm_actions = VecDeque::new();
@@ -2855,9 +2872,8 @@ async fn prefetch_keeps_genesis_request_singleton() {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn prefetch_replaces_singleton_with_range_request_when_eligible() {
-    // Phase 4: with prefetch enabled and the catch-up signal in
-    // CatchingUp, the kernel singleton must be replaced by a windowed
-    // BlockRangeWithTxs request to a single peer.
+    // Range prefetch is driven by validated kernel demand and runs
+    // concurrently with the kernel's singleton block-by-height request.
     let metrics = isolated_test_metrics();
     let state_arc = Arc::new(Mutex::new(P2PState::new(
         metrics.clone(),
@@ -2874,7 +2890,7 @@ async fn prefetch_replaces_singleton_with_range_request_when_eligible() {
                 heard_block_fact_with_tx_ids(h, &[]).0,
             );
         }
-        state_guard.first_negative = 0;
+        state_guard.first_negative = 43;
         state_guard.observe_peer_generation(peer, ReqResGeneration::Gen2);
         state_guard.mark_peer_range_supported(peer);
     }
@@ -2906,8 +2922,8 @@ async fn prefetch_replaces_singleton_with_range_request_when_eligible() {
 
     assert_eq!(
         buffered_swarm_actions.len(),
-        1,
-        "exactly one outbound action expected"
+        2,
+        "range prefetch and singleton should both be queued"
     );
     let dispatched = match &buffered_swarm_actions[0] {
         SwarmAction::QueueKernelRequest {
@@ -2928,6 +2944,25 @@ async fn prefetch_replaces_singleton_with_range_request_when_eligible() {
         }
         other => panic!("expected BlockRangeWithTxs, got {other:?}"),
     }
+    let singleton = match &buffered_swarm_actions[1] {
+        SwarmAction::QueueKernelRequest {
+            peer_id,
+            request_message,
+        } => {
+            assert_eq!(*peer_id, peer);
+            request_message.clone()
+        }
+        other => panic!("expected singleton QueueKernelRequest, got {other:?}"),
+    };
+    let parsed = crate::messages::decode_request_item_message(&singleton)
+        .expect("singleton message should decode");
+    assert!(
+        matches!(
+            parsed,
+            crate::messages::NockchainDataRequest::BlockByHeight(50)
+        ),
+        "expected concurrent BlockByHeight singleton, got {parsed:?}"
+    );
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -2941,7 +2976,6 @@ async fn prefetch_replaces_frontier_singleton_when_kernel_demand_threshold_is_on
     {
         let mut state_guard = state_arc.lock().await;
         state_guard.first_negative = 50;
-        state_guard.note_frontier_advanced();
         state_guard.observe_peer_generation(peer, ReqResGeneration::Gen2);
         state_guard.mark_peer_range_supported(peer);
     }
@@ -2973,8 +3007,8 @@ async fn prefetch_replaces_frontier_singleton_when_kernel_demand_threshold_is_on
 
     assert_eq!(
         buffered_swarm_actions.len(),
-        1,
-        "exactly one outbound action expected"
+        2,
+        "range prefetch and singleton should both be queued"
     );
     let dispatched = match &buffered_swarm_actions[0] {
         SwarmAction::QueueKernelRequest {
@@ -2995,6 +3029,25 @@ async fn prefetch_replaces_frontier_singleton_when_kernel_demand_threshold_is_on
         }
         other => panic!("expected BlockRangeWithTxs, got {other:?}"),
     }
+    let singleton = match &buffered_swarm_actions[1] {
+        SwarmAction::QueueKernelRequest {
+            peer_id,
+            request_message,
+        } => {
+            assert_eq!(*peer_id, peer);
+            request_message.clone()
+        }
+        other => panic!("expected singleton QueueKernelRequest, got {other:?}"),
+    };
+    let parsed = crate::messages::decode_request_item_message(&singleton)
+        .expect("singleton message should decode");
+    assert!(
+        matches!(
+            parsed,
+            crate::messages::NockchainDataRequest::BlockByHeight(50)
+        ),
+        "expected concurrent BlockByHeight singleton, got {parsed:?}"
+    );
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -3015,7 +3068,7 @@ async fn prefetch_window_targets_response_budget_when_cold() {
                 heard_block_fact_with_tx_ids(h, &[]).0,
             );
         }
-        state_guard.first_negative = 0;
+        state_guard.first_negative = 43;
         state_guard.observe_peer_generation(peer, ReqResGeneration::Gen2);
         state_guard.mark_peer_range_supported(peer);
     }
@@ -3087,7 +3140,7 @@ async fn prefetch_window_uses_observed_range_bytes_for_next_tail() {
                 heard_block_fact_with_tx_ids(h, &[]).0,
             );
         }
-        state_guard.first_negative = 0;
+        state_guard.first_negative = 60;
         state_guard.record_response_message_hint(
             &crate::messages::NockchainDataRequest::BlockRangeWithTxs {
                 start_height: 50,
@@ -3236,7 +3289,7 @@ async fn prefetch_selects_supported_gen2_peer_when_gen1_is_listed_first() {
                 heard_block_fact_with_tx_ids(h, &[]).0,
             );
         }
-        state_guard.first_negative = 0;
+        state_guard.first_negative = 43;
         state_guard.observe_peer_generation(gen1_peer, ReqResGeneration::Gen1);
         state_guard.observe_peer_generation(gen2_peer, ReqResGeneration::Gen2);
         state_guard.mark_peer_range_supported(gen2_peer);
@@ -3305,7 +3358,7 @@ async fn prefetch_probes_unknown_gen2_peer_with_bounded_range() {
                 heard_block_fact_with_tx_ids(h, &[]).0,
             );
         }
-        state_guard.first_negative = 0;
+        state_guard.first_negative = 43;
         state_guard.observe_peer_generation(peer, ReqResGeneration::Gen2);
     }
 
@@ -3424,9 +3477,7 @@ async fn prefetch_falls_back_to_singleton_when_no_gen2_peer_is_available() {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn prefetch_singleton_suppression_when_inflight_covers_height() {
-    // Phase 4: a kernel singleton for a height already covered
-    // by an inflight prefetch must be fully suppressed (no new outbound).
+async fn inflight_prefetch_does_not_suppress_kernel_singleton() {
     let metrics = isolated_test_metrics();
     let state_arc = Arc::new(Mutex::new(P2PState::new(
         metrics.clone(),
@@ -3436,7 +3487,6 @@ async fn prefetch_singleton_suppression_when_inflight_covers_height() {
     let request_id = fresh_outbound_request_id();
     {
         let mut state_guard = state_arc.lock().await;
-        // Simulate a prefetch in flight covering heights 50..54.
         state_guard.register_prefetch(request_id, peer, 50, 4);
     }
 
@@ -3465,10 +3515,24 @@ async fn prefetch_singleton_suppression_when_inflight_covers_height() {
     .await
     .expect("singleton-over-prefetch should succeed");
 
+    let queued = match buffered_swarm_actions.pop_front() {
+        Some(SwarmAction::QueueKernelRequest {
+            request_message, ..
+        }) => request_message,
+        other => panic!("expected kernel singleton request, got {other:?}"),
+    };
+    let parsed = crate::messages::decode_request_item_message(&queued)
+        .expect("queued request should decode");
+    assert!(
+        matches!(
+            parsed,
+            crate::messages::NockchainDataRequest::BlockByHeight(52)
+        ),
+        "expected BlockByHeight singleton, got {parsed:?}"
+    );
     assert!(
         buffered_swarm_actions.is_empty(),
-        "kernel singleton must be suppressed when prefetch covers height; got {:?}",
-        buffered_swarm_actions
+        "inflight prefetch should avoid only a duplicate range request"
     );
 }
 
@@ -3595,99 +3659,6 @@ async fn payload_only_seen_block_effect_tracks_id_without_advancing_frontier() {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn route_response_fact_defers_peer_observed_height_until_track_add() {
-    use tokio::sync::mpsc;
-
-    let transcript = DriverTranscript::default();
-    let scripted_traffic =
-        build_scripted_traffic_cop(transcript, Vec::new(), vec![PokeResult::Ack]).await;
-    let metrics = isolated_test_metrics();
-    let state_arc = Arc::new(Mutex::new(P2PState::new(
-        metrics.clone(),
-        LIBP2P_CONFIG.seen_tx_clear_interval,
-    )));
-    {
-        let mut state_guard = state_arc.lock().await;
-        state_guard.first_negative = 20;
-    }
-    let (swarm_tx, _swarm_rx) = mpsc::channel(8);
-    let peer = PeerId::random();
-    let height = 11u64;
-    let (block_11, _) = heard_block_fact_with_tx_ids(height, &[]);
-
-    route_response_fact(
-        peer, block_11, &scripted_traffic.traffic, &metrics, &state_arc, &swarm_tx,
-    )
-    .await
-    .expect("heard-block response should route cleanly");
-
-    assert_eq!(
-        state_arc
-            .lock()
-            .await
-            .catch_up_signal()
-            .peer_observed_max_height(),
-        0,
-        "routing alone must not advance trusted peer-observed height"
-    );
-
-    handle_effect(
-        track_add_effect_slab(10_000 + height, peer),
-        swarm_tx,
-        vec![],
-        false,
-        state_arc.clone(),
-        metrics,
-    )
-    .await
-    .expect("track add should succeed");
-
-    assert_eq!(
-        state_arc
-            .lock()
-            .await
-            .catch_up_signal()
-            .peer_observed_max_height(),
-        height,
-        "track add should advance trusted peer-observed height"
-    );
-}
-
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn track_add_without_observed_height_candidate_does_not_advance_peer_observed_height() {
-    use tokio::sync::mpsc;
-
-    let metrics = isolated_test_metrics();
-    let state_arc = Arc::new(Mutex::new(P2PState::new(
-        metrics.clone(),
-        LIBP2P_CONFIG.seen_tx_clear_interval,
-    )));
-    let (swarm_tx, _swarm_rx) = mpsc::channel(8);
-    let peer = PeerId::random();
-
-    handle_effect(
-        track_add_effect_slab(44_000, peer),
-        swarm_tx,
-        vec![],
-        false,
-        state_arc.clone(),
-        metrics,
-    )
-    .await
-    .expect("track add without candidate should still track the peer");
-
-    assert_eq!(
-        state_arc
-            .lock()
-            .await
-            .catch_up_signal()
-            .peer_observed_max_height(),
-        0,
-        "unknown block id should not alter trusted peer-observed height"
-    );
-}
-
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn route_response_fact_defers_future_heard_blocks_until_seen_frontier_advances() {
     use tokio::sync::mpsc;
 
@@ -3749,11 +3720,6 @@ async fn route_response_fact_defers_future_heard_blocks_until_seen_frontier_adva
             state_guard.deferred_heard_block_count(),
             2,
             "duplicate future heard-blocks should be coalesced while buffered"
-        );
-        assert_eq!(
-            state_guard.catch_up_signal().peer_observed_max_height(),
-            0,
-            "future deferral should not advance trusted peer-observed height"
         );
     }
     assert_eq!(
@@ -3880,7 +3846,7 @@ async fn route_block_range_marks_future_deferred_blocks_as_prefetch() {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn route_response_fact_deferred_future_heard_block_queues_speculative_raw_tx_prefetches() {
+async fn route_response_fact_deferred_future_heard_block_records_tx_hints_without_prefetch() {
     use tokio::sync::mpsc;
 
     let transcript = DriverTranscript::default();
@@ -3909,50 +3875,18 @@ async fn route_response_fact_deferred_future_heard_block_queues_speculative_raw_
     .await
     .expect("future heard-block should defer cleanly");
 
-    let mut queued_tx_ids = Vec::new();
-    for _ in 0..tx_ids.len() {
-        let action = swarm_rx
-            .recv()
+    assert!(
+        tokio::time::timeout(Duration::from_millis(25), swarm_rx.recv())
             .await
-            .expect("speculative raw-tx prefetch should queue an action");
-        match action {
-            SwarmAction::QueueKernelRequest {
-                peer_id,
-                request_message,
-            } => {
-                assert_eq!(
-                    peer_id, peer,
-                    "speculative raw-tx prefetch should stay on the block source peer"
-                );
-                let NockchainDataRequest::RawTransactionById(tx_id, _) =
-                    decode_request_item_message(&request_message)
-                        .expect("speculative raw-tx request should decode")
-                else {
-                    panic!("expected speculative raw-tx request");
-                };
-                queued_tx_ids.push(tx_id);
-            }
-            other => panic!("expected speculative QueueKernelRequest, got {other:?}"),
-        }
-    }
-    queued_tx_ids.sort();
-    let mut expected_tx_ids = tx_ids.clone();
-    expected_tx_ids.sort();
-    assert_eq!(
-        queued_tx_ids, expected_tx_ids,
-        "future heard-block deferral should immediately prefetch every unseen tx id once"
+            .is_err(),
+        "deferred future heard-block must not issue raw-tx prefetches",
     );
     {
         let state_guard = state_arc.lock().await;
         assert_eq!(
             state_guard.deferred_heard_block_heights(),
             vec![11],
-            "future heard-block should still remain buffered until frontier advances"
-        );
-        assert_eq!(
-            state_guard.speculative_tx_prefetch_count(),
-            tx_ids.len(),
-            "speculative tx prefetch ledger should remember the queued tx ids"
+            "future heard-block should remain buffered until frontier advances"
         );
         for tx_id in &tx_ids {
             assert_eq!(
@@ -3969,12 +3903,7 @@ async fn route_response_fact_deferred_future_heard_block_queues_speculative_raw_
     );
 
     route_response_fact(
-        peer,
-        block_11.clone(),
-        &scripted_traffic.traffic,
-        &metrics,
-        &state_arc,
-        &swarm_tx,
+        peer, block_11, &scripted_traffic.traffic, &metrics, &state_arc, &swarm_tx,
     )
     .await
     .expect("duplicate future heard-block should still defer cleanly");
@@ -3982,23 +3911,7 @@ async fn route_response_fact_deferred_future_heard_block_queues_speculative_raw_
         tokio::time::timeout(Duration::from_millis(25), swarm_rx.recv())
             .await
             .is_err(),
-        "duplicate future heard-block should not queue duplicate speculative raw-tx prefetches",
-    );
-
-    handle_effect(
-        seen_tx_effect_slab(700),
-        swarm_tx.clone(),
-        vec![],
-        false,
-        state_arc.clone(),
-        metrics.clone(),
-    )
-    .await
-    .expect("seen tx effect should clear one speculative claim");
-    assert_eq!(
-        state_arc.lock().await.speculative_tx_prefetch_count(),
-        tx_ids.len() - 1,
-        "seen tx effect should retire the corresponding speculative prefetch claim"
+        "duplicate future heard-block must not issue raw-tx prefetches",
     );
 }
 
@@ -4038,6 +3951,168 @@ async fn heard_elders_re_emits_same_recovery_window_until_progress() {
         request_effect_block_heights_from_effects(&second_effects),
         vec![0],
         "without progress, the same heard-elders payload should still reissue by-height 0"
+    );
+}
+
+/// Reason term of every `%liar-peer` effect in `effects`.
+fn liar_peer_reasons_from_effects(effects: &[NounSlab]) -> Vec<String> {
+    effects
+        .iter()
+        .filter_map(|effect_slab| {
+            let space = effect_slab.noun_space();
+            let effect_cell = unsafe { *effect_slab.root() }
+                .in_space(&space)
+                .as_cell()
+                .ok()?;
+            if !effect_cell.head().eq_bytes(b"liar-peer") {
+                return None;
+            }
+            let body = effect_cell.tail().as_cell().ok()?;
+            let reason = body.tail().as_atom().ok()?.to_bytes_until_nul().ok()?;
+            Some(String::from_utf8_lossy(&reason).into_owned())
+        })
+        .collect()
+}
+
+/// An elders response naming no ancestor is rejected, at any `oldest`.
+///
+/// `+get-elders` always names at least the block at the top of its window, so
+/// an empty list is a lie. It is also the one input that would drive the
+/// ancestor walk's starting height, `oldest + len - 1`, to decrement zero: the
+/// arm computes that height before inspecting the list, and a bailed event
+/// emits no effects at all, since every reachable branch emits at least one.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn heard_elders_empty_ancestor_list_at_genesis_does_not_bail_the_event() {
+    let mut checkpoint_app = start_nockchain_app().await;
+    seed_fakenet_pre_genesis_direct(&mut checkpoint_app.app).await;
+    let _ = send_born_direct(&mut checkpoint_app.app).await;
+    let peer = PeerId::random();
+
+    // Control: an empty list above genesis is rejected as a lie, with an effect.
+    let control = poke_fact_direct(
+        &mut checkpoint_app.app,
+        peer,
+        &heard_elders_fact(1, &[]),
+        "heard-elders oldest=1 ids=~",
+    )
+    .await;
+    assert_eq!(
+        liar_peer_reasons_from_effects(&control),
+        vec![String::from("less-than-24-parent-hashes")],
+        "oldest=1 with an empty list should be answered with %liar-peer"
+    );
+
+    let effects = poke_fact_direct(
+        &mut checkpoint_app.app,
+        peer,
+        &heard_elders_fact(0, &[]),
+        "heard-elders oldest=0 ids=~",
+    )
+    .await;
+    assert_eq!(
+        liar_peer_reasons_from_effects(&effects),
+        vec![String::from("no-parent-hashes")],
+        "oldest=0 with an empty ancestor list should be answered with %liar-peer, \
+         not bail the event (decrement-underflow); effects: {:?}",
+        effects.iter().map(describe_effect).collect::<Vec<_>>()
+    );
+}
+
+/// An elders window bottoming out at a genesis block we hold intersects there.
+///
+/// The ancestor walk must test membership at height 0 before it gives up, or a
+/// window ending at the shared genesis reports no intersection and earns the
+/// peer a `%differing-genesis` ban for agreeing with us. Windows reach height 0
+/// on any fork inside the first 24 blocks of a chain.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn heard_elders_window_ending_at_our_own_genesis_is_not_a_differing_genesis() {
+    let mut checkpoint_app = start_nockchain_app().await;
+    seed_fakenet_pre_genesis_direct(&mut checkpoint_app.app).await;
+    let _ = send_born_direct(&mut checkpoint_app.app).await;
+    let peer = PeerId::random();
+
+    let genesis_fact = fake_genesis_block_message_fact();
+    let genesis_id = match &genesis_fact {
+        NockchainFact::HeardBlock(block_id, _) => block_id.clone(),
+        other => panic!("expected fake genesis heard-block fact, got {other:?}"),
+    };
+    let _ = poke_fact_direct(
+        &mut checkpoint_app.app, peer, &genesis_fact, "accept fakenet genesis",
+    )
+    .await;
+    assert!(
+        checkpoint_has_block(&mut checkpoint_app.app, 0)
+            .await
+            .expect("genesis peek should succeed"),
+        "the test needs the genesis block accepted before asking about elders"
+    );
+
+    let effects = poke_fact_direct(
+        &mut checkpoint_app.app,
+        peer,
+        &heard_elders_fact(0, &[genesis_id]),
+        "heard-elders window ending at our own genesis",
+    )
+    .await;
+
+    assert_eq!(
+        liar_peer_reasons_from_effects(&effects),
+        Vec::<String>::new(),
+        "a peer whose elders window ends at the genesis block we hold was banned; \
+         effects: {:?}",
+        effects.iter().map(describe_effect).collect::<Vec<_>>()
+    );
+    assert_eq!(
+        request_effect_block_heights_from_effects(&effects),
+        vec![1],
+        "intersecting at genesis should request the next block by height"
+    );
+}
+
+/// A window whose genesis is not ours is still a `%differing-genesis` peer.
+///
+/// The membership test at height 0 narrows the ban to real disagreement; it
+/// must not retire it.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn heard_elders_window_ending_at_a_foreign_genesis_is_a_differing_genesis() {
+    let mut checkpoint_app = start_nockchain_app().await;
+    seed_fakenet_pre_genesis_direct(&mut checkpoint_app.app).await;
+    let _ = send_born_direct(&mut checkpoint_app.app).await;
+    let peer = PeerId::random();
+
+    let _ = poke_fact_direct(
+        &mut checkpoint_app.app,
+        peer,
+        &fake_genesis_block_message_fact(),
+        "accept fakenet genesis",
+    )
+    .await;
+    assert!(
+        checkpoint_has_block(&mut checkpoint_app.app, 0)
+            .await
+            .expect("genesis peek should succeed"),
+        "the test needs the genesis block accepted before asking about elders"
+    );
+
+    let foreign_genesis = {
+        let mut slab = NounSlab::new();
+        let noun = tip5_tuple(&mut slab, 90_002);
+        let space = slab.noun_space();
+        tip5_hash_to_base58(noun, &space).expect("foreign genesis should convert to base58")
+    };
+    let effects = poke_fact_direct(
+        &mut checkpoint_app.app,
+        peer,
+        &heard_elders_fact(0, &[foreign_genesis]),
+        "heard-elders window ending at a foreign genesis",
+    )
+    .await;
+
+    assert_eq!(
+        liar_peer_reasons_from_effects(&effects),
+        vec![String::from("differing-genesis")],
+        "a peer whose genesis we do not hold should still be reported; effects: {:?}",
+        effects.iter().map(describe_effect).collect::<Vec<_>>()
     );
 }
 
@@ -4161,11 +4236,16 @@ fn tip5_zset(slab: &mut NounSlab, seeds: &[u64]) -> Noun {
     })
 }
 
-fn heard_block_fact_with_tx_ids(height: u64, tx_seeds: &[u64]) -> (NockchainFact, Vec<String>) {
+fn heard_block_fact_with_block_seed(
+    height: u64,
+    block_seed: u64,
+    tx_seeds: &[u64],
+) -> (NockchainFact, Vec<String>) {
     let mut slab = NounSlab::new();
-    let block_id = tip5_tuple(&mut slab, 10_000 + height);
-    let parent_id = tip5_tuple(&mut slab, 20_000 + height);
+    let block_id = tip5_tuple(&mut slab, block_seed);
+    let parent_id = tip5_tuple(&mut slab, block_seed.wrapping_add(10_000));
     let tx_ids = tip5_zset(&mut slab, tx_seeds);
+    let height_atom = Atom::new(&mut slab, height).as_noun();
     let page = T(
         &mut slab,
         &[
@@ -4179,7 +4259,7 @@ fn heard_block_fact_with_tx_ids(height: u64, tx_seeds: &[u64]) -> (NockchainFact
             D(0),
             D(0),
             D(0),
-            D(height),
+            height_atom,
             D(0),
         ],
     );
@@ -4201,6 +4281,10 @@ fn heard_block_fact_with_tx_ids(height: u64, tx_seeds: &[u64]) -> (NockchainFact
         NockchainFact::from_noun_slab(&mut slab).expect("heard-block fact should decode"),
         tx_ids,
     )
+}
+
+fn heard_block_fact_with_tx_ids(height: u64, tx_seeds: &[u64]) -> (NockchainFact, Vec<String>) {
+    heard_block_fact_with_block_seed(height, 10_000u64.wrapping_add(height), tx_seeds)
 }
 
 fn result_message_from_fact(fact: &NockchainFact) -> ByteBuf {
@@ -4268,18 +4352,6 @@ fn seen_block_payload_only_effect_slab(block_seed: u64) -> NounSlab {
         &mut effect_slab,
         &[D(tas!(b"seen")), D(tas!(b"block")), block_id, D(0)],
     );
-    effect_slab.set_root(effect);
-    effect_slab
-}
-
-fn track_add_effect_slab(block_seed: u64, peer_id: PeerId) -> NounSlab {
-    let mut effect_slab = NounSlab::new();
-    let block_id = tip5_tuple(&mut effect_slab, block_seed);
-    let peer_id_atom =
-        Atom::from_value(&mut effect_slab, peer_id.to_base58()).expect("peer id atom should build");
-    let data = T(&mut effect_slab, &[block_id, peer_id_atom.as_noun()]);
-    let add = T(&mut effect_slab, &[D(tas!(b"add")), data]);
-    let effect = T(&mut effect_slab, &[D(tas!(b"track")), add]);
     effect_slab.set_root(effect);
     effect_slab
 }
@@ -7949,6 +8021,180 @@ async fn test_request_effect_queues_block_request_for_single_stable_peer() {
 }
 
 #[tokio::test]
+async fn test_elders_request_targets_source_peer_and_applies_cooldown() {
+    use tokio::sync::mpsc;
+
+    let source_peer = PeerId::random();
+    let peers = vec![PeerId::random(), source_peer, PeerId::random()];
+    let mut effect_slab = NounSlab::new();
+    let block_id = T(&mut effect_slab, &[D(101), D(102), D(103), D(104), D(105)]);
+    let source_peer_atom =
+        Atom::from_value(&mut effect_slab, source_peer.to_base58()).expect("peer ID should encode");
+    let elders = T(&mut effect_slab, &[block_id, source_peer_atom.as_noun()]);
+    let block_request = T(&mut effect_slab, &[D(tas!(b"elders")), elders]);
+    let request = T(&mut effect_slab, &[D(tas!(b"block")), block_request]);
+    let effect = T(&mut effect_slab, &[D(tas!(b"request")), request]);
+    effect_slab.set_root(effect);
+    let expected_message = ByteBuf::from(effect_slab.jam().as_ref());
+
+    let metrics = isolated_test_metrics();
+    let state_arc = Arc::new(Mutex::new(P2PState::new(
+        metrics.clone(),
+        LIBP2P_CONFIG.seen_tx_clear_interval,
+    )));
+    let (swarm_tx, mut swarm_rx) = mpsc::channel(8);
+
+    handle_effect(
+        effect_slab.clone(),
+        swarm_tx.clone(),
+        peers.clone(),
+        false,
+        state_arc.clone(),
+        metrics.clone(),
+    )
+    .await
+    .expect("elders request should be accepted");
+
+    match swarm_rx.recv().await {
+        Some(SwarmAction::QueueKernelRequest {
+            peer_id,
+            request_message,
+        }) => {
+            assert_eq!(
+                peer_id, source_peer,
+                "elders must be requested from the peer that supplied the orphan block"
+            );
+            assert_eq!(request_message, expected_message);
+        }
+        other => panic!("expected QueueKernelRequest action, got {other:?}"),
+    }
+    assert!(
+        swarm_rx.try_recv().is_err(),
+        "elders request should initially target only its source peer"
+    );
+
+    handle_effect(effect_slab, swarm_tx, peers, false, state_arc, metrics)
+        .await
+        .expect("duplicate elders request should be accepted and suppressed");
+    assert!(
+        swarm_rx.try_recv().is_err(),
+        "duplicate elders request inside the cooldown must not be sent"
+    );
+}
+
+/// A peer cannot buy an unbounded stream of elders requests by varying the
+/// block id.
+///
+/// `+heard-block` emits the elders request from a gossiped page before
+/// checking its digest or proof of work, so the block id in the effect is
+/// attacker-chosen and the per-(block id, peer) cooldown never fires. Each
+/// request that gets through costs an equix solve on the swarm loop, against a
+/// gossip message that cost the sender nothing.
+#[tokio::test]
+async fn elders_requests_from_one_peer_are_bounded_by_its_slot() {
+    use tokio::sync::mpsc;
+
+    let source_peer = PeerId::random();
+    let peers = vec![PeerId::random(), source_peer];
+    let metrics = isolated_test_metrics();
+    let state_arc = Arc::new(Mutex::new(P2PState::new(
+        metrics.clone(),
+        LIBP2P_CONFIG.seen_tx_clear_interval,
+    )));
+    let (swarm_tx, mut swarm_rx) = mpsc::channel(16);
+
+    // Each effect names a different block id, as a forged page would.
+    let elders_effect_for = |seed: u64| {
+        let mut slab = NounSlab::new();
+        let block_id = T(&mut slab, &[D(seed), D(102), D(103), D(104), D(105)]);
+        let peer_atom =
+            Atom::from_value(&mut slab, source_peer.to_base58()).expect("peer ID should encode");
+        let elders = T(&mut slab, &[block_id, peer_atom.as_noun()]);
+        let block_request = T(&mut slab, &[D(tas!(b"elders")), elders]);
+        let request = T(&mut slab, &[D(tas!(b"block")), block_request]);
+        let effect = T(&mut slab, &[D(tas!(b"request")), request]);
+        slab.set_root(effect);
+        slab
+    };
+
+    for seed in 0..6u64 {
+        handle_effect(
+            elders_effect_for(seed),
+            swarm_tx.clone(),
+            peers.clone(),
+            false,
+            state_arc.clone(),
+            metrics.clone(),
+        )
+        .await
+        .expect("elders request should be accepted");
+    }
+
+    let mut queued = 0usize;
+    while let Ok(action) = swarm_rx.try_recv() {
+        if matches!(action, SwarmAction::QueueKernelRequest { .. }) {
+            queued += 1;
+        }
+    }
+    assert_eq!(
+        queued, 1,
+        "six forged block ids from one peer must yield one outbound elders request, not six"
+    );
+
+    // The walk's next step goes out as soon as the peer's response lands.
+    state_arc.lock().await.clear_elders_inflight(&source_peer);
+    handle_effect(
+        elders_effect_for(6),
+        swarm_tx,
+        peers,
+        false,
+        state_arc,
+        metrics,
+    )
+    .await
+    .expect("elders request after the response should be accepted");
+    assert!(
+        matches!(
+            swarm_rx.try_recv(),
+            Ok(SwarmAction::QueueKernelRequest { .. })
+        ),
+        "releasing the slot on the response must not delay the sequential recovery walk"
+    );
+}
+
+#[tokio::test]
+async fn test_elders_request_rejects_non_atom_source_peer() {
+    use tokio::sync::mpsc;
+
+    let peers = vec![PeerId::random(), PeerId::random()];
+    let mut effect_slab = NounSlab::new();
+    let block_id = T(&mut effect_slab, &[D(101), D(102), D(103), D(104), D(105)]);
+    let invalid_peer = T(&mut effect_slab, &[D(1), D(2)]);
+    let elders = T(&mut effect_slab, &[block_id, invalid_peer]);
+    let block_request = T(&mut effect_slab, &[D(tas!(b"elders")), elders]);
+    let request = T(&mut effect_slab, &[D(tas!(b"block")), block_request]);
+    let effect = T(&mut effect_slab, &[D(tas!(b"request")), request]);
+    effect_slab.set_root(effect);
+
+    let metrics = isolated_test_metrics();
+    let state_arc = Arc::new(Mutex::new(P2PState::new(
+        metrics.clone(),
+        LIBP2P_CONFIG.seen_tx_clear_interval,
+    )));
+    let (swarm_tx, mut swarm_rx) = mpsc::channel(8);
+
+    let result = handle_effect(effect_slab, swarm_tx, peers, false, state_arc, metrics).await;
+    assert!(
+        result.is_err(),
+        "malformed elders source peer should reject the request effect"
+    );
+    assert!(
+        swarm_rx.try_recv().is_err(),
+        "malformed elders request must not fall back to connected peers"
+    );
+}
+
+#[tokio::test]
 async fn test_request_effect_skips_bundle_upgrade_for_non_bundle_capable_peer() {
     use tokio::sync::mpsc;
 
@@ -8428,41 +8674,51 @@ async fn test_gossip_effect_current_version_forwards_payload_and_clears_caches()
 
 #[tokio::test]
 #[cfg_attr(miri, ignore)] // ibig has a memory leak so miri fails this test
-async fn test_gossip_effect_suppresses_all_outbound_gossip_while_catching_up() {
+async fn unvalidated_future_block_does_not_suppress_outbound_gossip() {
     use tokio::sync::mpsc;
 
     let peer_a = PeerId::random();
     let peer_b = PeerId::random();
     let peers = vec![peer_a, peer_b];
+    let attacker = PeerId::random();
     let metrics = isolated_test_metrics();
     let state_arc = Arc::new(Mutex::new(P2PState::new(
         metrics.clone(),
         LIBP2P_CONFIG.seen_tx_clear_interval,
     )));
-
     {
-        let source_peer = PeerId::random();
         let mut state_guard = state_arc.lock().await;
-        for height in 100..110u64 {
-            let (fact, _) = heard_block_fact_with_tx_ids(height, &[]);
-            let block_id = match &fact {
-                NockchainFact::HeardBlock(block_id, _) => block_id.clone(),
-                other => panic!("expected heard-block fact, got {other:?}"),
-            };
-            assert!(
-                state_guard.defer_heard_block(source_peer, height, block_id, fact),
-                "test setup should build a catch-up backlog",
-            );
-        }
-        assert_eq!(
-            state_guard.catch_up_signal().mode(),
-            crate::catch_up::SyncMode::CatchingUp
-        );
+        state_guard.first_negative = 10;
     }
 
-    let (swarm_tx, mut swarm_rx) = mpsc::channel(4);
+    let transcript = DriverTranscript::default();
+    let scripted_traffic = build_scripted_traffic_cop(transcript, Vec::new(), Vec::new()).await;
+    let (future_block, _) = heard_block_fact_with_block_seed(u64::MAX, 900_000, &[]);
+    let (defer_swarm_tx, _defer_swarm_rx) = mpsc::channel(1);
+    route_response_fact(
+        attacker, future_block, &scripted_traffic.traffic, &metrics, &state_arc, &defer_swarm_tx,
+    )
+    .await
+    .expect("future heard-block should defer without kernel validation");
+    assert_eq!(
+        scripted_traffic.poke_count.load(Ordering::SeqCst),
+        0,
+        "future heard-block must not reach the kernel before validation"
+    );
+    assert!(
+        state_arc
+            .lock()
+            .await
+            .has_deferred_block_at_height(u64::MAX),
+        "attacker-authored future block should be deferred"
+    );
+
+    let (swarm_tx, mut swarm_rx) = mpsc::channel(8);
+    let mut expected_messages = Vec::new();
     for (tag, seed) in [("heard-block", 10), ("heard-tx", 20)] {
-        let (effect_slab, _) = build_gossip_effect_with_tag(FACT_POKE_VERSION, tag, &[seed]);
+        let (effect_slab, expected_message) =
+            build_gossip_effect_with_tag(FACT_POKE_VERSION, tag, &[seed]);
+        expected_messages.push(expected_message.clone());
         handle_effect(
             effect_slab,
             swarm_tx.clone(),
@@ -8472,14 +8728,41 @@ async fn test_gossip_effect_suppresses_all_outbound_gossip_while_catching_up() {
             metrics.clone(),
         )
         .await
-        .expect("catch-up gossip suppression should not error");
+        .expect("untrusted future block must not suppress outbound gossip");
     }
 
+    let expected = [
+        (peer_a, expected_messages[0].clone()),
+        (peer_b, expected_messages[0].clone()),
+        (peer_a, expected_messages[1].clone()),
+        (peer_b, expected_messages[1].clone()),
+    ];
+    for (expected_peer, expected_message) in expected {
+        let action = tokio::time::timeout(Duration::from_millis(100), swarm_rx.recv())
+            .await
+            .expect("kernel gossip should fan out despite unvalidated deferred height");
+        match action {
+            Some(SwarmAction::SendRequest {
+                peer_id,
+                request,
+                request_context,
+            }) => {
+                assert_eq!(peer_id, expected_peer, "gossip should preserve peer order");
+                assert!(request_context.is_none());
+                assert_eq!(
+                    request,
+                    NockchainRequest::Gossip {
+                        message: expected_message,
+                    }
+                );
+            }
+            other => panic!("expected gossip SendRequest action, got {other:?}"),
+        }
+    }
     assert!(
         swarm_rx.try_recv().is_err(),
-        "catching-up nodes must not fan out block, tx, or mining gossip",
+        "should only send one gossip per peer per effect"
     );
-    assert_eq!(metrics.gossip_suppressed_behind_tip_total.fetch_add(0), 2);
 }
 
 #[tokio::test]
@@ -10043,7 +10326,7 @@ fn build_bundle_envelope(
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn route_bundle_envelope_unpacks_block_txs_and_queues_unincluded_remainder() {
+async fn route_bundle_envelope_unpacks_block_txs_and_records_unincluded_hints() {
     use tokio::sync::mpsc;
 
     let transcript = DriverTranscript::default();
@@ -10085,44 +10368,21 @@ async fn route_bundle_envelope_unpacks_block_txs_and_queues_unincluded_remainder
         "bundle should poke once for the block and once per bundled tx"
     );
 
-    // Drain the swarm action queue and verify one QueueKernelRequest per
-    // unincluded tx-id, each pointing to the same source peer.
-    let mut queued_unincluded = Vec::new();
-    for _ in 0..unincluded_tx_ids.len() {
-        match swarm_rx
-            .recv()
-            .await
-            .expect("unincluded remainder must queue a kernel request")
-        {
-            SwarmAction::QueueKernelRequest {
-                peer_id,
-                request_message,
-            } => {
-                assert_eq!(peer_id, peer, "remainder request must stay on source peer");
-                let NockchainDataRequest::RawTransactionById(tx_id, _) =
-                    decode_request_item_message(&request_message)
-                        .expect("remainder request should decode")
-                else {
-                    panic!("expected RawTransactionById remainder request");
-                };
-                queued_unincluded.push(tx_id);
-            }
-            other => panic!("expected QueueKernelRequest remainder, got {other:?}"),
+    {
+        let state_guard = driver_state.lock().await;
+        for tx_id in &unincluded_tx_ids {
+            assert_eq!(
+                state_guard.get_peers_for_tx_id(tx_id),
+                vec![peer],
+                "unincluded bundle remainder should record tx source hints"
+            );
         }
     }
-    queued_unincluded.sort();
-    let mut expected_unincluded = unincluded_tx_ids.clone();
-    expected_unincluded.sort();
-    assert_eq!(
-        queued_unincluded, expected_unincluded,
-        "each unincluded tx-id must be queued exactly once"
-    );
-    // Sanity: no extra actions beyond the remainder requests.
     assert!(
         tokio::time::timeout(Duration::from_millis(25), swarm_rx.recv())
             .await
             .is_err(),
-        "bundle unpack should not queue extra SwarmActions"
+        "bundle unpack must not issue raw-tx prefetches"
     );
 
     // bundled_tx_ids is unused in asserts but retained so the test

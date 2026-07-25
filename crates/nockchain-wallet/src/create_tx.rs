@@ -28,7 +28,7 @@ use wallet_tx_builder::lock_resolver::{
 use wallet_tx_builder::planner::{plan_create_tx, PlanError};
 use wallet_tx_builder::types::{
     CandidateNote, CandidateVersionPolicy, ChainContext, CreateTxPlanningMode, PlanRequest,
-    SelectionMode, SelectionOrder,
+    PlanResult, SelectionMode, SelectionOrder,
 };
 
 use crate::command::{CommandNoun, NoteSelectionStrategyCli, Operation};
@@ -64,6 +64,199 @@ pub(crate) fn ensure_manual_planner_parity(
         ));
     }
     Ok(())
+}
+
+/// Normalized lookup key for a note name, independent of base58 rendering.
+type NoteNameKey = ([u64; 5], [u64; 5]);
+
+fn note_name_key(name: &Name) -> NoteNameKey {
+    (name.first.to_array(), name.last.to_array())
+}
+
+/// Trims ASCII whitespace and NUL bytes from both ends of a CSV field/line.
+///
+/// The wallet's file writer can leave trailing NUL padding (a line of `\0`
+/// bytes), which must be treated like empty space rather than note data.
+fn trim_csv(value: &str) -> &str {
+    value.trim_matches(|c: char| c == '\0' || c.is_whitespace())
+}
+
+/// Records the notes CSV path and the notes a planner run actually selected, so
+/// the spent notes can be removed from the CSV after the transaction is created.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct CsvNoteReservation {
+    /// Notes CSV file the candidates were drawn from.
+    pub(crate) path: PathBuf,
+    /// Note names selected by the planner (the notes that get spent).
+    pub(crate) selected: Vec<Name>,
+}
+
+/// Parses a notes CSV (as written by `list-notes-by-address-csv` /
+/// `list-notes-by-multisig-csv`) into the list of note names it lists.
+///
+/// Only the `name_first` and `name_last` columns are read; every other column is
+/// ignored so the file stays a human-editable ledger. The header row and blank
+/// lines are skipped. Any row whose name columns fail to parse as base58 is a
+/// hard error, since silently dropping a note the caller listed could change
+/// which notes are eligible to spend.
+pub(crate) fn parse_notes_csv_names(path: &Path) -> Result<Vec<Name>, NockAppError> {
+    let contents = std::fs::read_to_string(path).map_err(|err| {
+        NockAppError::from(CrownError::Unknown(format!(
+            "Failed to read notes CSV {}: {}",
+            path.display(),
+            err
+        )))
+    })?;
+
+    let mut names = Vec::new();
+    for (line_idx, raw_line) in contents.lines().enumerate() {
+        let line = trim_csv(raw_line);
+        // Skip blank lines and trailing NUL padding left by the file writer.
+        if line.is_empty() {
+            continue;
+        }
+        let columns: Vec<&str> = line.split(',').collect();
+        if columns.len() < 3 {
+            return Err(NockAppError::from(CrownError::Unknown(format!(
+                "Notes CSV {} line {} has fewer than 3 columns: '{}'",
+                path.display(),
+                line_idx + 1,
+                line.escape_default()
+            ))));
+        }
+        let first = trim_csv(columns[1]);
+        let last = trim_csv(columns[2]);
+        // Skip the `version,name_first,name_last,...` header row. A real note row
+        // has a numeric version, so the literal `version` token marks the header.
+        if trim_csv(columns[0]) == "version" || (first == "name_first" && last == "name_last") {
+            continue;
+        }
+        let first_hash = Hash::from_base58(first).map_err(|err| {
+            NockAppError::from(CrownError::Unknown(format!(
+                "Notes CSV {} line {} has invalid name_first '{}': {}",
+                path.display(),
+                line_idx + 1,
+                first,
+                err
+            )))
+        })?;
+        let last_hash = Hash::from_base58(last).map_err(|err| {
+            NockAppError::from(CrownError::Unknown(format!(
+                "Notes CSV {} line {} has invalid name_last '{}': {}",
+                path.display(),
+                line_idx + 1,
+                last,
+                err
+            )))
+        })?;
+        names.push(Name::new(first_hash, last_hash));
+    }
+
+    Ok(names)
+}
+
+/// Rewrites a notes CSV with the spent notes removed, preserving the header,
+/// untouched rows, and any rows that fail to parse (a malformed row is never
+/// silently dropped). Returns the number of rows actually removed.
+#[allow(dead_code)] // wired when --notes-csv is fully plumbed through dispatch
+pub(crate) fn remove_notes_from_csv(path: &Path, removed: &[Name]) -> Result<usize, NockAppError> {
+    let removed_keys: std::collections::BTreeSet<NoteNameKey> =
+        removed.iter().map(note_name_key).collect();
+
+    let contents = std::fs::read_to_string(path).map_err(|err| {
+        NockAppError::from(CrownError::Unknown(format!(
+            "Failed to read notes CSV {} for removal: {}",
+            path.display(),
+            err
+        )))
+    })?;
+
+    let mut kept_lines: Vec<&str> = Vec::new();
+    let mut removed_count = 0usize;
+    for raw_line in contents.lines() {
+        let line = trim_csv(raw_line);
+        // Drop blank lines and trailing NUL padding rather than rewriting them.
+        if line.is_empty() {
+            continue;
+        }
+        let columns: Vec<&str> = line.split(',').collect();
+        if columns.len() < 3 || trim_csv(columns[0]) == "version" {
+            // Header or malformed row: keep it (trimmed of any NUL padding).
+            kept_lines.push(line);
+            continue;
+        }
+        let first = trim_csv(columns[1]);
+        let last = trim_csv(columns[2]);
+        match (Hash::from_base58(first), Hash::from_base58(last)) {
+            (Ok(first_hash), Ok(last_hash)) => {
+                let key = (first_hash.to_array(), last_hash.to_array());
+                if removed_keys.contains(&key) {
+                    removed_count += 1;
+                } else {
+                    kept_lines.push(line);
+                }
+            }
+            // Unparseable name columns: keep the row rather than risk dropping it.
+            _ => kept_lines.push(line),
+        }
+    }
+
+    let mut output = kept_lines.join("\n");
+    output.push('\n');
+    std::fs::write(path, output).map_err(|err| {
+        NockAppError::from(CrownError::Unknown(format!(
+            "Failed to rewrite notes CSV {} after removing spent notes: {}",
+            path.display(),
+            err
+        )))
+    })?;
+
+    Ok(removed_count)
+}
+
+/// Network default `max-block-size` in bits. The on-chain block-inclusion check
+/// (`candidate-block-below-max-size`, miner.hoon) rejects blocks larger than
+/// this (8,000,000 bits ~= 1 MB on mainnet), so a transaction that cannot fit in
+/// a block can never be mined.
+const MAX_BLOCK_SIZE_BITS: u64 = 8_000_000;
+
+/// Returns a human-readable reason when `plan` would build a transaction too
+/// large to be mined, or `None` when it is within budget.
+///
+/// The estimate is intentionally conservative and word-count based so it scales
+/// with lock complexity: multisig inputs carry a large m-of-n witness, so the
+/// planner's `witness_words` already reflects per-input cost. We add a small
+/// per-input framing allowance (input first/last name + spend wrapper) not
+/// captured by the seed/witness word counts, convert words (64-bit field
+/// leaves) to bits, and compare against the block-size budget after reserving
+/// headroom for the block's PoW proof (~720k bits) and coinbase/header overhead.
+fn oversized_plan_reason(plan: &PlanResult) -> Option<String> {
+    const BITS_PER_WORD: u64 = 64;
+    const PER_INPUT_FRAMING_WORDS: u64 = 16;
+    /// Block budget for the transaction itself, reserving ~1,000,000 bits for the
+    /// PoW proof and coinbase/header overhead that share the block.
+    const TX_SIZE_BUDGET_BITS: u64 = MAX_BLOCK_SIZE_BITS - 1_000_000;
+
+    let input_count = plan.selected.len() as u64;
+    let estimated_words = plan
+        .word_counts
+        .seed_words
+        .saturating_add(plan.word_counts.witness_words)
+        .saturating_add(input_count.saturating_mul(PER_INPUT_FRAMING_WORDS));
+    let estimated_bits = estimated_words.saturating_mul(BITS_PER_WORD);
+    if estimated_bits <= TX_SIZE_BUDGET_BITS {
+        return None;
+    }
+    Some(format!(
+        "planned transaction is too large to mine: {input_count} inputs, ~{est_kb} KB estimated \
+         (budget ~{budget_kb} KB within the {max_kb} KB / {max_bits}-bit max block size). Large \
+         multisig spends over many small notes exceed the block-size limit and take many minutes \
+         to build. Reduce the amount or restrict --notes-csv to fewer notes, then send in batches.",
+        est_kb = estimated_bits / 8 / 1024,
+        budget_kb = TX_SIZE_BUDGET_BITS / 8 / 1024,
+        max_kb = MAX_BLOCK_SIZE_BITS / 8 / 1024,
+        max_bits = MAX_BLOCK_SIZE_BITS,
+    ))
 }
 
 #[derive(Debug, Clone, NounEncode, NounDecode)]
@@ -1001,6 +1194,43 @@ impl Wallet {
         Ok(changed)
     }
 
+    /// Returns the paths of every `.tx` file that is new or changed in `after`
+    /// relative to `before`, sorted for stable output. Unlike
+    /// [`detect_written_tx_paths`], this returns an empty vec (never an error)
+    /// when nothing changed, so callers can print next-step guidance without
+    /// coupling to the migrate-specific failure message.
+    #[allow(dead_code)] // used by notes-csv / write detection paths
+    pub(crate) fn changed_tx_paths(
+        before: &WrittenTxSnapshot,
+        after: &WrittenTxSnapshot,
+    ) -> Vec<String> {
+        let mut changed = after
+            .0
+            .iter()
+            .filter_map(|(path, metadata)| match before.0.get(path) {
+                Some(previous) if previous == metadata => None,
+                _ => Some(path.display().to_string()),
+            })
+            .collect::<Vec<_>>();
+        changed.sort();
+        changed
+    }
+
+    /// Returns true when any `.tx` file in `after` is new or changed relative to
+    /// `before`. Used to confirm a create-tx poke actually produced a
+    /// transaction (the kernel writes `./txs/<name>.tx` via `save-transaction`)
+    /// before committing side effects such as the notes-CSV reservation.
+    #[allow(dead_code)] // used by notes-csv / write detection paths
+    pub(crate) fn tx_files_changed(before: &WrittenTxSnapshot, after: &WrittenTxSnapshot) -> bool {
+        after
+            .0
+            .iter()
+            .any(|(path, metadata)| match before.0.get(path) {
+                Some(previous) => previous != metadata,
+                None => true,
+            })
+    }
+
     fn decode_transaction_spends_from_bytes(tx_bytes: &[u8]) -> Result<v1::Spends, NockAppError> {
         let mut slab: NounSlab = NounSlab::new();
         let transaction_noun = slab.cue_into(Bytes::copy_from_slice(tx_bytes))?;
@@ -1117,7 +1347,7 @@ impl Wallet {
     }
 
     /// Plans create-tx inputs/fee without dispatching the kernel poke.
-    pub async fn plan_create_tx_with_planner(
+    pub(crate) async fn plan_create_tx_with_planner(
         &mut self,
         synced_snapshot: Option<NormalizedSnapshot>,
         names: Option<String>,
@@ -1130,12 +1360,14 @@ impl Wallet {
         save_raw_tx: bool,
         note_selection: NoteSelectionStrategyCli,
         multisig_lock: Option<MultisigLockContext>,
+        notes_csv: Option<PathBuf>,
+        reservation_out: &mut Option<CsvNoteReservation>,
     ) -> Result<PlannedCreateTx, NockAppError> {
         let planner_error = |reason: String| -> Result<PlannedCreateTx, NockAppError> {
             Err(CrownError::Unknown(format!("create-tx planner failed: {}", reason)).into())
         };
 
-        let snapshot = if let Some(snapshot) = synced_snapshot {
+        let mut snapshot = if let Some(snapshot) = synced_snapshot {
             snapshot
         } else {
             let balance = match self.peek_balance_state().await {
@@ -1155,6 +1387,47 @@ impl Wallet {
                 }
             }
         };
+
+        // When a notes CSV is supplied, restrict the planner's candidate set to
+        // the notes the CSV lists. The note *data* still comes from local wallet
+        // state (the snapshot above); the CSV only chooses which of those known
+        // notes are eligible, and acts as a reservation ledger so already-spent
+        // notes are not reselected on a later run.
+        if let Some(csv_path) = notes_csv.as_ref() {
+            let eligible = match parse_notes_csv_names(csv_path) {
+                Ok(names) => names,
+                Err(err) => {
+                    return planner_error(format!(
+                        "unable to read notes from CSV {}: {err}",
+                        csv_path.display()
+                    ));
+                }
+            };
+            let eligible_keys: std::collections::BTreeSet<NoteNameKey> =
+                eligible.iter().map(note_name_key).collect();
+            let before = snapshot.candidates.len();
+            snapshot.candidates.retain(|candidate| {
+                eligible_keys.contains(&note_name_key(&candidate.identity().name))
+            });
+            let listed_not_found = eligible_keys
+                .len()
+                .saturating_sub(snapshot.candidates.len());
+            info!(
+                "create-tx notes-csv {} listed={} matched_candidates={} dropped_from_snapshot={} listed_not_in_wallet={}",
+                csv_path.display(),
+                eligible_keys.len(),
+                snapshot.candidates.len(),
+                before.saturating_sub(snapshot.candidates.len()),
+                listed_not_found
+            );
+            if snapshot.candidates.is_empty() {
+                return planner_error(format!(
+                    "notes CSV {} lists no notes that the wallet currently holds; sync the wallet (without --notes-csv) so it knows these notes, or update the CSV",
+                    csv_path.display()
+                ));
+            }
+        }
+
         let v1_candidate_count = snapshot
             .candidates
             .iter()
@@ -1370,11 +1643,25 @@ impl Wallet {
         let plan_result = if let Some(ctx) = multisig_lock.as_ref() {
             // Multisig spend: resolve inputs by the multisig lock-root's first-name
             // and carry the reconstructed spend-condition for fee/witness planning.
+            // Also accept protocol-fund coinbase notes, whose committed lock wraps
+            // the multisig lock-root in `[%pkh m=1 {lock_root}]` plus the coinbase
+            // relative timelock before the first-name is taken (the on-chain notes
+            // share `+fund-note-firstname`, not `from_lock_root(lock_root)`). This
+            // mirrors the `+check:check-context` routing to `+check-multisig-lock`.
             let matcher = match LockRootLockMatcher::from_lock_root(&ctx.lock_root) {
                 Ok(matcher) => matcher.with_spend_condition(ctx.spend_condition.clone()),
                 Err(err) => {
                     return planner_error(format!(
                         "unable to build multisig lock matcher from lock root {}: {err}",
+                        ctx.lock_root.to_base58()
+                    ));
+                }
+            };
+            let matcher = match matcher.with_coinbase_fund_notes(coinbase_relative_min) {
+                Ok(matcher) => matcher,
+                Err(err) => {
+                    return planner_error(format!(
+                        "unable to derive coinbase fund first-name for multisig lock root {}: {err}",
                         ctx.lock_root.to_base58()
                     ));
                 }
@@ -1408,6 +1695,18 @@ impl Wallet {
             }
         };
 
+        // Fail-fast guard: refuse a plan that cannot fit in a block before the
+        // kernel spends minutes building and signing it. The on-chain
+        // block-inclusion check (`candidate-block-below-max-size` in miner.hoon)
+        // rejects blocks over `max-block-size` (8,000,000 bits ~= 1 MB on
+        // mainnet), so a larger transaction can never be mined. Multisig inputs
+        // are large (each carries the full m-of-n witness), so a high-value spend
+        // over a fund of tiny notes selects thousands of inputs and yields a
+        // multi-MB, unmineable transaction that takes many minutes to build.
+        if let Some(reason) = oversized_plan_reason(&plan) {
+            return planner_error(reason);
+        }
+
         for trace in &plan.debug_trace {
             info!("create-tx planner trace: {}", trace);
         }
@@ -1421,6 +1720,14 @@ impl Wallet {
             if let Err(reason) = ensure_manual_planner_parity(note_names, &planned_names) {
                 return planner_error(reason);
             }
+        }
+        // Record which notes were selected so the caller can drop the spent
+        // notes from the CSV after the transaction is successfully created.
+        if let Some(csv_path) = notes_csv {
+            *reservation_out = Some(CsvNoteReservation {
+                path: csv_path,
+                selected: planned_names.clone(),
+            });
         }
         let planned_names_arg = Self::format_note_names_for_create_tx(&planned_names);
         let planned_fee = plan.final_fee;
@@ -1482,6 +1789,7 @@ impl Wallet {
         note_selection: NoteSelectionStrategyCli,
         multisig_lock: Option<MultisigLockContext>,
     ) -> CommandNoun<NounSlab> {
+        let mut reservation = None;
         match self
             .plan_create_tx_with_planner(
                 synced_snapshot,
@@ -1495,6 +1803,8 @@ impl Wallet {
                 save_raw_tx,
                 note_selection,
                 multisig_lock,
+                None,
+                &mut reservation,
             )
             .await
         {
@@ -2307,6 +2617,78 @@ mod tests {
         })
     }
 
+    fn tx_snapshot(entries: &[(&str, u64, u64)]) -> WrittenTxSnapshot {
+        let mut map = std::collections::BTreeMap::new();
+        for (path, secs, len) in entries {
+            map.insert(
+                std::path::PathBuf::from(path),
+                TxFileSnapshot {
+                    modified: Some(std::time::UNIX_EPOCH + std::time::Duration::from_secs(*secs)),
+                    len: *len,
+                },
+            );
+        }
+        WrittenTxSnapshot(map)
+    }
+
+    fn plan_result_with(input_count: u64, seed_words: u64, witness_words: u64) -> PlanResult {
+        let selected = (0..input_count)
+            .map(|i| CandidateIdentity {
+                name: name(i, i),
+                origin_page: BlockHeight(Belt(1)),
+            })
+            .collect();
+        PlanResult {
+            selected,
+            selected_total: 0,
+            outputs: Vec::new(),
+            final_fee: 0,
+            word_counts: wallet_tx_builder::types::WordCountBreakdown {
+                seed_words,
+                witness_words,
+            },
+            debug_trace: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn oversized_plan_reason_flags_block_busting_multisig_plans() {
+        // The real failing case: ~2,500 three-of-four multisig inputs at ~144
+        // witness words each -> multi-MB, unmineable.
+        let huge = plan_result_with(2_500, 44, 2_500 * 144);
+        let reason = oversized_plan_reason(&huge).expect("oversized plan must be rejected");
+        assert!(reason.contains("2500 inputs"), "reason: {reason}");
+        assert!(reason.contains("too large to mine"), "reason: {reason}");
+
+        // A modest multisig batch (~200 inputs) is within budget.
+        assert!(oversized_plan_reason(&plan_result_with(200, 44, 200 * 144)).is_none());
+
+        // A normal single-sig spend with a handful of inputs is unaffected.
+        assert!(oversized_plan_reason(&plan_result_with(50, 13, 50 * 35)).is_none());
+    }
+
+    #[test]
+    fn tx_files_changed_detects_new_modified_and_no_change() {
+        let before = tx_snapshot(&[("txs/a.tx", 100, 10)]);
+
+        // No change at all -> a create-tx that wrote nothing (kernel rejected the
+        // poke). Reservation must NOT be committed.
+        assert!(!Wallet::tx_files_changed(&before, &before));
+
+        // A brand-new tx file appeared.
+        let with_new = tx_snapshot(&[("txs/a.tx", 100, 10), ("txs/b.tx", 200, 20)]);
+        assert!(Wallet::tx_files_changed(&before, &with_new));
+
+        // Same path rewritten (mtime/len changed) -> a tx was produced.
+        let rewritten = tx_snapshot(&[("txs/a.tx", 101, 12)]);
+        assert!(Wallet::tx_files_changed(&before, &rewritten));
+
+        // Writing from an empty starting dir.
+        let empty = tx_snapshot(&[]);
+        assert!(Wallet::tx_files_changed(&empty, &before));
+        assert!(!Wallet::tx_files_changed(&empty, &empty));
+    }
+
     fn candidate_v1(first: u64, last: u64) -> CandidateNote {
         CandidateNote::V1(CandidateV1Note {
             identity: CandidateIdentity {
@@ -2317,6 +2699,229 @@ mod tests {
             raw_note_data: Vec::new(),
             decoded_note_data: DecodedNoteData(Vec::new()),
         })
+    }
+
+    const CSV_HEADER: &str = "version,name_first,name_last,assets,block_height,source_hash";
+
+    fn csv_row(n: &Name, assets: u64, version: u64) -> String {
+        format!(
+            "{},{},{},{},1,N/A",
+            version,
+            n.first.to_base58(),
+            n.last.to_base58(),
+            assets
+        )
+    }
+
+    fn write_csv(dir: &std::path::Path, lines: &[String]) -> PathBuf {
+        let path = dir.join("notes.csv");
+        std::fs::write(&path, format!("{}\n", lines.join("\n"))).expect("write csv");
+        path
+    }
+
+    fn key_set(names: &[Name]) -> std::collections::BTreeSet<NoteNameKey> {
+        names.iter().map(note_name_key).collect()
+    }
+
+    #[test]
+    fn parse_notes_csv_names_round_trips_listed_names() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let a = name(1, 10);
+        let b = name(2, 20);
+        let path = write_csv(
+            dir.path(),
+            &[CSV_HEADER.to_string(), csv_row(&a, 100, 1), csv_row(&b, 200, 0)],
+        );
+
+        let parsed = parse_notes_csv_names(&path).expect("parse");
+        assert_eq!(key_set(&parsed), key_set(&[a, b]));
+    }
+
+    #[test]
+    fn parse_notes_csv_names_skips_header_blank_and_trims_whitespace() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let a = name(3, 30);
+        // Leading blank line, header, blank line, then a row padded with spaces.
+        let body = format!("\n{}\n\n   {}   \n", CSV_HEADER, csv_row(&a, 5, 1));
+        let path = dir.path().join("notes.csv");
+        std::fs::write(&path, body).expect("write");
+
+        let parsed = parse_notes_csv_names(&path).expect("parse");
+        assert_eq!(key_set(&parsed), key_set(&[a]));
+    }
+
+    #[test]
+    fn parse_notes_csv_names_errors_on_invalid_base58() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = write_csv(
+            dir.path(),
+            &[CSV_HEADER.to_string(), "1,not-base58!!,also-bad,5,1,N/A".to_string()],
+        );
+
+        let err = parse_notes_csv_names(&path).expect_err("invalid base58 must error");
+        assert!(
+            format!("{err}").contains("invalid name_first"),
+            "unexpected error: {err}"
+        );
+    }
+
+    #[test]
+    fn notes_csv_tolerates_trailing_blank_line() {
+        // The wallet often leaves a trailing blank line in the CSV. Both parsing
+        // and removal must treat it as a no-op rather than a malformed row.
+        let dir = tempfile::tempdir().expect("tempdir");
+        let a = name(1, 10);
+        let b = name(2, 20);
+        let path = dir.path().join("notes.csv");
+        // Note the doubled trailing newline -> an empty final line.
+        let body = format!(
+            "{}\n{}\n{}\n\n",
+            CSV_HEADER,
+            csv_row(&a, 100, 1),
+            csv_row(&b, 200, 1)
+        );
+        std::fs::write(&path, body).expect("write");
+
+        let parsed = parse_notes_csv_names(&path).expect("parse with trailing blank");
+        assert_eq!(key_set(&parsed), key_set(&[a.clone(), b.clone()]));
+
+        let removed = remove_notes_from_csv(&path, std::slice::from_ref(&a)).expect("remove");
+        assert_eq!(removed, 1);
+        let remaining = parse_notes_csv_names(&path).expect("reparse");
+        assert_eq!(key_set(&remaining), key_set(std::slice::from_ref(&b)));
+        // Header survives and the file is not left with a dangling blank row.
+        let contents = std::fs::read_to_string(&path).expect("read");
+        assert_eq!(contents.lines().next(), Some(CSV_HEADER));
+        assert!(
+            !contents.ends_with("\n\n"),
+            "should not keep a blank line: {contents:?}"
+        );
+    }
+
+    #[test]
+    fn notes_csv_tolerates_trailing_nul_padding() {
+        // Reproduces a real failure: the wallet's file writer left a line of NUL
+        // bytes as padding, which must be ignored like a blank line rather than
+        // rejected as a malformed row.
+        let dir = tempfile::tempdir().expect("tempdir");
+        let a = name(1, 10);
+        let b = name(2, 20);
+        let path = dir.path().join("notes.csv");
+        // Real rows, then a NUL-only line, then more NUL padding at EOF.
+        let body = format!(
+            "{}\n{}\n{}\n\0\0\0\0\0\0\0\n\0\0\0\0",
+            CSV_HEADER,
+            csv_row(&a, 100, 1),
+            csv_row(&b, 200, 1)
+        );
+        std::fs::write(&path, body).expect("write");
+
+        let parsed = parse_notes_csv_names(&path).expect("parse past NUL padding");
+        assert_eq!(key_set(&parsed), key_set(&[a.clone(), b.clone()]));
+
+        let removed = remove_notes_from_csv(&path, std::slice::from_ref(&a)).expect("remove");
+        assert_eq!(removed, 1);
+        let remaining = parse_notes_csv_names(&path).expect("reparse");
+        assert_eq!(key_set(&remaining), key_set(std::slice::from_ref(&b)));
+        // The rewrite must not carry the NUL padding back into the file.
+        let contents = std::fs::read_to_string(&path).expect("read");
+        assert!(
+            !contents.contains('\0'),
+            "rewritten CSV must not contain NUL bytes: {contents:?}"
+        );
+    }
+
+    #[test]
+    fn parse_notes_csv_names_errors_on_short_row() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = write_csv(
+            dir.path(),
+            &[CSV_HEADER.to_string(), "1,onlytwo".to_string()],
+        );
+
+        let err = parse_notes_csv_names(&path).expect_err("short row must error");
+        assert!(
+            format!("{err}").contains("fewer than 3 columns"),
+            "unexpected error: {err}"
+        );
+    }
+
+    #[test]
+    fn csv_eligible_filtering_keeps_only_listed_candidates() {
+        // Mirrors the retain predicate used in create_tx_with_planner.
+        let listed = name(1, 10);
+        let unlisted = name(2, 20);
+        let eligible = key_set(std::slice::from_ref(&listed));
+
+        let mut candidates = vec![candidate_v1(1, 10), candidate_v1(2, 20)];
+        candidates.retain(|c| eligible.contains(&note_name_key(&c.identity().name)));
+
+        assert_eq!(candidates.len(), 1);
+        assert_eq!(candidates[0].identity().name, listed);
+        assert_ne!(candidates[0].identity().name, unlisted);
+    }
+
+    #[test]
+    fn remove_notes_from_csv_removes_only_selected_and_preserves_rest() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let spent = name(1, 10);
+        let kept = name(2, 20);
+        let path = write_csv(
+            dir.path(),
+            &[CSV_HEADER.to_string(), csv_row(&spent, 100, 1), csv_row(&kept, 200, 1)],
+        );
+
+        let removed = remove_notes_from_csv(&path, std::slice::from_ref(&spent)).expect("remove");
+        assert_eq!(removed, 1);
+
+        let remaining = parse_notes_csv_names(&path).expect("reparse");
+        assert_eq!(key_set(&remaining), key_set(std::slice::from_ref(&kept)));
+
+        // Header is preserved verbatim.
+        let contents = std::fs::read_to_string(&path).expect("read");
+        assert!(contents.lines().next() == Some(CSV_HEADER));
+    }
+
+    #[test]
+    fn remove_notes_from_csv_is_idempotent() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let spent = name(1, 10);
+        let kept = name(2, 20);
+        let path = write_csv(
+            dir.path(),
+            &[CSV_HEADER.to_string(), csv_row(&spent, 100, 1), csv_row(&kept, 200, 1)],
+        );
+
+        assert_eq!(
+            remove_notes_from_csv(&path, std::slice::from_ref(&spent)).expect("first"),
+            1
+        );
+        // Removing the same note again removes nothing and leaves the kept row.
+        assert_eq!(remove_notes_from_csv(&path, &[spent]).expect("second"), 0);
+        let remaining = parse_notes_csv_names(&path).expect("reparse");
+        assert_eq!(key_set(&remaining), key_set(std::slice::from_ref(&kept)));
+    }
+
+    #[test]
+    fn remove_notes_from_csv_keeps_unparseable_rows() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let spent = name(1, 10);
+        let path = write_csv(
+            dir.path(),
+            &[
+                CSV_HEADER.to_string(),
+                csv_row(&spent, 100, 1),
+                "1,garbage,garbage,5,1,N/A".to_string(),
+            ],
+        );
+
+        let removed = remove_notes_from_csv(&path, &[spent]).expect("remove");
+        assert_eq!(removed, 1);
+        let contents = std::fs::read_to_string(&path).expect("read");
+        assert!(
+            contents.contains("1,garbage,garbage,5,1,N/A"),
+            "unparseable row must be preserved: {contents}"
+        );
     }
 
     #[test]
