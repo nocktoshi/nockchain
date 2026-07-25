@@ -8,7 +8,7 @@ use serde::Deserialize;
 use wallet_tx_builder::note_data::{PackedBlob, TypedNoteDataEntry};
 use wallet_tx_builder::types::{PlannedOutput, RawNoteDataEntry};
 
-use crate::{CrownError, NockAppError};
+use nockapp::{CrownError, NockAppError};
 
 const MAX_BLOB_UTF8_BYTES: usize = 256 * 1024;
 
@@ -57,6 +57,121 @@ pub fn validate_memo_utf8(memo: Option<&str>) -> Result<Option<Vec<u8>>, NockApp
 
 pub const BRIDGE_LOCK_ROOT_DEFAULT_B58: &str =
     "AcsPkuhXQoGeEsF91yynpm1kcW17PQ2Z1MEozgx7YnDPkZwrtzLuuqd";
+
+/// 1 nock = 2^16 nicks. Protocol amounts are nicks; the ergonomic `--amount`
+/// and `--fee` flags take whole nocks, so they are converted with exact integer
+/// math before use.
+pub const NICKS_PER_NOCK: u64 = 1 << 16;
+
+/// Converts a whole-nock amount to nicks with exact integer math.
+///
+/// Nocks are integers only — there is deliberately no sub-nock / decimal input
+/// anywhere in the CLI. Rejects zero and any value that overflows the `u64`
+/// nicks range used by the protocol.
+///
+/// This is the sole soundness-sensitive primitive behind the nocks-denominated
+/// `--amount` / `--fee` flags: the resulting nick count must equal what a user
+/// would have hand-entered via the nicks-based `--recipient` JSON / `--fee-nicks`
+/// forms.
+pub fn nocks_to_nicks(nocks: u64) -> Result<u64, String> {
+    if nocks == 0 {
+        return Err("amount must be greater than zero".into());
+    }
+    nocks
+        .checked_mul(NICKS_PER_NOCK)
+        .ok_or_else(|| format!("amount '{nocks}' nocks overflows the u64 nicks range"))
+}
+
+/// Builds `RecipientSpecToken::P2pkh` values from paired `--to` addresses and
+/// their amounts already resolved to nicks. The two slices are zipped by
+/// position and must have equal length; the produced token is identical to the
+/// nicks-based `--recipient` JSON form for the same address and nick amount.
+pub fn to_amount_pairs_to_tokens(
+    tos: &[String],
+    amounts_nicks: &[u64],
+) -> Result<Vec<RecipientSpecToken>, String> {
+    if tos.len() != amounts_nicks.len() {
+        return Err(format!(
+            "each --to must be paired with one --amount/--amount-nicks \
+             ({} --to vs {} amount(s))",
+            tos.len(),
+            amounts_nicks.len()
+        ));
+    }
+    tos.iter()
+        .zip(amounts_nicks.iter())
+        .map(|(address, &amount)| {
+            let address = address.trim();
+            if address.is_empty() {
+                return Err("--to recipient address cannot be empty".to_string());
+            }
+            if amount == 0 {
+                return Err("--amount/--amount-nicks must be greater than zero".to_string());
+            }
+            Ok(RecipientSpecToken::P2pkh {
+                address: address.to_string(),
+                amount,
+                memo: None,
+                blob: None,
+            })
+        })
+        .collect()
+}
+
+/// Merges ergonomic `--to` / `--bridge-deposit` flags into explicit recipients
+/// and resolves the fee override to nicks.
+pub fn resolve_ergonomic_outputs_and_fee(
+    recipients: &[RecipientSpecToken],
+    to: &[String],
+    amounts_nocks: &[u64],
+    amounts_nicks: &[u64],
+    bridge_deposit_nocks: Option<u64>,
+    to_evm_address: Option<&str>,
+    fee_nocks: Option<u64>,
+    fee_nicks: Option<u64>,
+) -> Result<(Vec<RecipientSpec>, Option<u64>), NockAppError> {
+    let amounts_in_nicks: Vec<u64> = if !amounts_nicks.is_empty() {
+        amounts_nicks.to_vec()
+    } else {
+        amounts_nocks
+            .iter()
+            .map(|&n| nocks_to_nicks(n))
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|e| NockAppError::from(CrownError::Unknown(e)))?
+    };
+
+    let mut tokens = recipients.to_vec();
+    let ergonomic = to_amount_pairs_to_tokens(to, &amounts_in_nicks)
+        .map_err(|e| NockAppError::from(CrownError::Unknown(e)))?;
+    tokens.extend(ergonomic);
+
+    match (bridge_deposit_nocks, to_evm_address) {
+        (Some(nocks), Some(evm_address)) => {
+            let amount =
+                nocks_to_nicks(nocks).map_err(|e| NockAppError::from(CrownError::Unknown(e)))?;
+            tokens.push(RecipientSpecToken::BridgeDeposit {
+                root: None,
+                evm_address: evm_address.to_string(),
+                amount,
+            });
+        }
+        (None, None) => {}
+        _ => {
+            return Err(NockAppError::from(CrownError::Unknown(
+                "--bridge-deposit and --to-evm-address must be used together".into(),
+            )));
+        }
+    }
+
+    let recipient_specs = recipient_tokens_to_specs(tokens)?;
+    let effective_fee = match fee_nocks {
+        Some(nocks) => {
+            Some(nocks_to_nicks(nocks).map_err(|e| NockAppError::from(CrownError::Unknown(e)))?)
+        }
+        None => fee_nicks,
+    };
+    Ok((recipient_specs, effective_fee))
+}
 
 #[derive(Debug, Clone, Deserialize)]
 #[serde(deny_unknown_fields, tag = "kind", rename_all = "lowercase")]
@@ -766,6 +881,71 @@ mod tests {
             multisig_lock_from_participants(1, &format!("{SAMPLE_P2PKH},{SAMPLE_P2PKH}")).is_err(),
             "duplicate participants must be rejected"
         );
+    }
+
+    #[test]
+    fn nocks_to_nicks_converts_whole_nocks() {
+        assert_eq!(nocks_to_nicks(1).unwrap(), 65536);
+        assert_eq!(nocks_to_nicks(100).unwrap(), 6_553_600);
+        assert_eq!(nocks_to_nicks(2).unwrap(), 131072);
+    }
+
+    #[test]
+    fn nocks_to_nicks_rejects_zero_and_overflow() {
+        assert!(nocks_to_nicks(0).is_err());
+        // u64::MAX nocks * 65536 overflows the u64 nicks range.
+        assert!(nocks_to_nicks(u64::MAX).is_err());
+        assert!(nocks_to_nicks(u64::MAX / 65536 + 1).is_err());
+        // The largest representable whole-nock amount still converts.
+        assert_eq!(
+            nocks_to_nicks(u64::MAX / 65536).unwrap(),
+            (u64::MAX / 65536) * 65536
+        );
+    }
+
+    #[test]
+    fn to_amount_pairs_match_nicks_based_json() {
+        // The ergonomic --to/--amount form must produce a RecipientSpec that is
+        // byte-identical to the nicks-based --recipient JSON path for the same
+        // address and equivalent nick amount. This is the core equivalence
+        // guarantee that lets us treat the new flag as pure sugar. Amounts here
+        // are already resolved to nicks (100 and 5 whole nocks).
+        let tokens = to_amount_pairs_to_tokens(
+            &[SAMPLE_P2PKH.to_string(), SAMPLE_P2PKH_ALT.to_string()],
+            &[nocks_to_nicks(100).unwrap(), nocks_to_nicks(5).unwrap()],
+        )
+        .expect("pairs -> tokens");
+        let ergonomic = recipient_tokens_to_specs(tokens).expect("ergonomic specs");
+
+        let json_a = format!(
+            "{{\"kind\":\"p2pkh\",\"address\":\"{SAMPLE_P2PKH}\",\"amount\":{}}}",
+            100u64 * 65536
+        );
+        let json_b = format!(
+            "{{\"kind\":\"p2pkh\",\"address\":\"{SAMPLE_P2PKH_ALT}\",\"amount\":{}}}",
+            5u64 * 65536
+        );
+        let json = recipient_tokens_to_specs(vec![
+            RecipientSpecToken::from_cli_arg(&json_a).unwrap(),
+            RecipientSpecToken::from_cli_arg(&json_b).unwrap(),
+        ])
+        .expect("json specs");
+
+        assert_eq!(ergonomic, json);
+    }
+
+    #[test]
+    fn to_amount_pairs_reject_length_mismatch_empty_address_and_zero() {
+        let err = to_amount_pairs_to_tokens(&[SAMPLE_P2PKH.to_string()], &[1, 2])
+            .expect_err("count mismatch");
+        assert!(err.contains("paired"), "unexpected: {err}");
+
+        let err = to_amount_pairs_to_tokens(&["   ".to_string()], &[1]).expect_err("empty address");
+        assert!(err.contains("cannot be empty"), "unexpected: {err}");
+
+        let err =
+            to_amount_pairs_to_tokens(&[SAMPLE_P2PKH.to_string()], &[0]).expect_err("zero amount");
+        assert!(err.contains("greater than zero"), "unexpected: {err}");
     }
 
     #[test]

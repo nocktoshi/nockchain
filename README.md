@@ -9,6 +9,7 @@ Canonical/Legacy: Canonical (quickstart lane; protocol authority routes through 
 
 Nockchain is a ZK-Proof of Work blockchain that combines sound money incentives with modern research into data availability, app-rollups, and intent-based composability.
 
+For a guide to the open Rust crates, see [open/TOC.md](./TOC.md).
 
 *Nockchain is entirely experimental and many parts are unaudited. We make no representations or guarantees as to the behavior of this software.*
 
@@ -65,23 +66,6 @@ sudo sysctl --system
 # or:
 sudo sysctl -p /etc/sysctl.d/99-overcommit.conf
 ```
-
-## Building with Bazel
-
-The repository also ships a Bazel build covering the Rust workspace and the
-Hoon kernel jams. [Bazelisk](https://github.com/bazelbuild/bazelisk) (invoked
-as `bazel`) picks the pinned Bazel version from `.bazelversion`; the Rust
-toolchain is downloaded by `rules_rust`, and crate dependencies resolve from
-the committed `Cargo.lock`, so no preinstalled Rust is required:
-
-```
-make bazel-build   # bazel build //...
-make bazel-test    # bazel test //...
-```
-
-Useful entry points: `//:nockchain`, `//:nockchain-wallet`, `//:hoonc`, and
-`//:kernels` (compiles all Hoon kernel jams with the in-tree `hoonc`).
-Opt-in lint pass: `bazel build --config=clippy //...`.
 
 ## Install Hoon Compiler
 
@@ -241,7 +225,7 @@ Nockchain requires:
    - Use `--bind` to specify your public IP/domain
    - Example: `nockchain --bind /ip4/1.2.3.4/udp/$PEER_PORT/quic-v1`
 
-### Why aren't Zorp peers connecting?
+### Why aren't peers connecting?
 
 Common reasons for peer connection failures:
 
@@ -342,13 +326,30 @@ You can also add this to your `.env` file if you're running with the Makefile:
 RUST_LOG=info
 ```
 
+### How do I change the HTTP port?
+
+When the HTTP driver runs in local mode (i.e. `HTTPS_DOMAIN` is unset or set to a
+local domain such as `localhost`, `127.*`, `192.168.*`, or `*.local`), it binds to
+`127.0.0.1:8080` by default. You can override the port with the `HTTP_PORT`
+environment variable:
+
+```bash
+# Serve the local HTTP interface on port 3000 instead of 8080
+HTTP_PORT=3000 nockchain
+```
+
+`HTTP_PORT` must be a valid port number (0–65535); an invalid value causes the
+driver to fail at startup. In production mode (a non-local `HTTPS_DOMAIN`), the
+driver continues to use the standard ports 80 (for ACME challenges) and 443 (for
+HTTPS), which are not affected by `HTTP_PORT`.
+
 ### How do profile for performance?
 
 Here's a demo video for the Tracy integration in Nockchain: https://x.com/nockchain/status/1948109668171051363
 
 The main change since the video is tracing is now enabled by default. If you want to disable it you can [disable](https://doc.rust-lang.org/cargo/reference/features.html#the-default-feature) the `tracing-tracy` feature here. The tracing is [inhibited](https://www.google.com/search?q=inhibit+definition&sca_esv=677f3ddbc8bf65e8&ei=hnSCaJuSGIGlqtsP96qM0QE&ved=0ahUKEwib7Z60idaOAxWBkmoFHXcVIxoQ4dUDCBA&uact=5&oq=inhibit+definition&gs_lp=Egxnd3Mtd2l6LXNlcnAiEmluaGliaXQgZGVmaW5pdGlvbjITEAAYgAQYkQIYsQMYigUYRhj5ATIGEAAYFhgeMgYQABgWGB4yBhAAGBYYHjIGEAAYFhgeMgYQABgWGB4yBhAAGBYYHjIGEAAYFhgeMgYQABgWGB4yBhAAGBYYHjItEAAYgAQYkQIYsQMYigUYRhj5ARiXBRiMBRjdBBhGGPkBGPQDGPUDGPYD2AEBSIgaUMgFWIgZcAR4AJABAJgBeaAB7AqqAQQxOS4yuAEDyAEA-AEBmAIZoAKpC8ICDhAAGIAEGLADGIYDGIoFwgILEAAYgAQYsAMYogTCAhAQABiABBiRAhiKBRhGGPkBwgIKEAAYgAQYQxiKBcICCxAAGIAEGJECGIoFwgILEAAYgAQYsQMYgwHCAg4QABiABBixAxiDARiKBcICBRAuGIAEwgIREC4YgAQYsQMY0QMYgwEYxwHCAioQABiABBiRAhiKBRhGGPkBGJcFGIwFGN0EGEYY-QEY9AMY9QMY9gPYAQHCAg8QABiABBhDGIoFGEYY-QHCAikQABiABBhDGIoFGEYY-QEYlwUYjAUY3QQYRhj5ARj0Axj1Axj2A9gBAcICCBAuGIAEGLEDwgIIEAAYgAQYsQPCAi0QABiABBiRAhixAxiKBRhGGPkBGJcFGIwFGN0EGEYY-QEY9AMY9QMY9gPYAQHCAg0QABiABBixAxhDGIoFwgIFEAAYgATCAhEQABiABBiRAhixAxiDARiKBcICChAuGIAEGLEDGArCAgcQABiABBgKwgIKEAAYgAQYsQMYCsICBxAuGIAEGArCAg0QABiABBixAxiDARgKwgIOEAAYgAQYkQIYsQMYigXCAggQABgWGAoYHpgDAIgGAZAGBboGBggBEAEYE5IHBDIzLjKgB_ePArIHBDE5LjK4B6ALwgcGMC4yNC4xyAc5&sclient=gws-wiz-serp) by default, it only collects traces when a [Tracy profiler client](https://github.com/wolfpld/tracy) connects to the application. This means minimal (9% or less for the nockvm, shouldn't impact jetted mining) performance impact but the profiling data is available any time you'd like to connect your Nockchain instance.
 
-There are two main kinds of performance data Tracy will gather from your application. Instrumentation and samples. Instrumentation comes from the [tracing crate's](https://docs.rs/tracing/latest/tracing/) spans. The integration with [nockvm](https://github.com/nockchain/nockchain/tree/master/crates/nockvm) is via the same `tracing` spans. Samples are _stack samples_, so it's not a perfectly and minutely traced picture of where your time was spent. However, the default sampling rate for Tracy is _very_ high but very efficient. You should expect a problematic performance impact from connecting Tracy to an instance if every single core and hyperthread is maxed out on your machine. You should be leaving some spare threads unoccupied even on a mining instance for the Serf thread and the kernel anyway. We (Zorp Corp) generally left 4 threads unused on each mining server.
+There are two main kinds of performance data Tracy will gather from your application. Instrumentation and samples. Instrumentation comes from the [tracing crate's](https://docs.rs/tracing/latest/tracing/) spans. The integration with [nockvm](https://github.com/nockchain/nockchain/tree/master/crates/nockvm) is via the same `tracing` spans. Samples are _stack samples_, so it's not a perfectly and minutely traced picture of where your time was spent. However, the default sampling rate for Tracy is _very_ high but very efficient. You should expect a problematic performance impact from connecting Tracy to an instance if every single core and hyperthread is maxed out on your machine. You should be leaving some spare threads unoccupied even on a mining instance for the Serf thread and the kernel anyway. We generally left 4 threads unused on each mining server.
 
 Stack samples are roughly speaking the "native" or Rust part of the application whereas instrumentation is the nockvm spans showing how much time you're spending in your Hoon arms plus any Rust functions that were also instrumented. You can tell them apart because the spans for Hoon will have weird paths like `blart/boop/snoot/goof/slam/woof` and no source location in the Tracy profiler UI. The Rust spans will have much plainer names mapping onto whatever the function was named, so a function like `fn slam()` will show up in the instrumentation as `slam` and have a source location path ending in a `*.rs` file.
 
