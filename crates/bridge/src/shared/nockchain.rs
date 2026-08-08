@@ -184,20 +184,55 @@ pub fn validate_blockchain_constants_match(
     }
 
     Err(BridgeError::Runtime(format!(
-        "connected nockchain node reported blockchain constants that differ from bridge kernel state: expected({}) got({})",
-        format_blockchain_constants(expected),
-        format_blockchain_constants(actual),
+        "connected nockchain node reported blockchain constants that differ from bridge kernel state: {}",
+        format_blockchain_constants_difference(expected, actual),
     )))
 }
 
-fn format_blockchain_constants(constants: &BlockchainConstants) -> String {
-    format!(
-        "v1_phase={}, bythos_phase={}, base_fee={}, coinbase_timelock_min={}",
-        constants.v1_phase,
-        constants.bythos_phase,
-        constants.base_fee,
-        constants.coinbase_timelock_min,
-    )
+fn format_blockchain_constants_difference(
+    expected: &BlockchainConstants,
+    actual: &BlockchainConstants,
+) -> String {
+    let mut differences = Vec::new();
+    macro_rules! differing_field {
+        ($field:ident) => {
+            if expected.$field != actual.$field {
+                differences.push(format!(
+                    "{} expected={:?} actual={:?}",
+                    stringify!($field),
+                    expected.$field,
+                    actual.$field,
+                ));
+            }
+        };
+    }
+
+    differing_field!(max_block_size);
+    differing_field!(blocks_per_epoch);
+    differing_field!(target_epoch_duration);
+    differing_field!(update_candidate_timestamp_interval);
+    differing_field!(max_future_timestamp);
+    differing_field!(min_past_blocks);
+    differing_field!(genesis_target_atom);
+    differing_field!(max_target_atom);
+    differing_field!(check_pow_flag);
+    differing_field!(coinbase_timelock_min);
+    differing_field!(pow_len);
+    differing_field!(max_coinbase_split);
+    differing_field!(first_month_coinbase_min);
+    differing_field!(v1_phase);
+    differing_field!(bythos_phase);
+    differing_field!(note_data);
+    differing_field!(base_fee);
+    differing_field!(input_fee_divisor);
+    differing_field!(asert_phase);
+    differing_field!(asert_anchor_height);
+    differing_field!(asert_anchor_target_atom);
+    differing_field!(asert_ideal_block_time);
+    differing_field!(asert_half_life);
+    differing_field!(asert_anchor_min_timestamp);
+
+    differences.join(", ")
 }
 
 fn decode_blockchain_constants_response(
@@ -1293,13 +1328,13 @@ mod tests {
     fn validate_blockchain_constants_match_rejects_mismatch() {
         let expected = default_fakenet_blockchain_constants();
         let mut actual = expected.clone();
-        actual.base_fee += 1;
+        actual.asert_anchor_min_timestamp += 1;
 
         let err = validate_blockchain_constants_match(&expected, &actual)
             .expect_err("mismatched constants should fail");
         let message = err.to_string();
         assert!(message.contains("bridge kernel state"));
-        assert!(message.contains("expected("));
-        assert!(message.contains("got("));
+        assert!(message.contains("asert_anchor_min_timestamp"));
+        assert!(message.contains("asert_anchor_min_timestamp expected="));
     }
 }
