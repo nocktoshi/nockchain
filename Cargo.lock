@@ -4761,10 +4761,16 @@ dependencies = [
  "honc-cold-138",
  "hoonc",
  "nockapp",
+ "nockasm",
  "nockvm",
  "num-bigint",
+ "serde",
+ "serde_json",
+ "smallvec",
  "stacker",
+ "tempfile",
  "thiserror 2.0.18",
+ "tikv-jemallocator",
  "tokio",
  "tracing",
  "tracing-subscriber",
@@ -4776,7 +4782,10 @@ dependencies = [
 name = "honk-tools"
 version = "0.1.15"
 dependencies = [
+ "bytes",
+ "libc",
  "nockapp",
+ "nockasm",
  "nockvm",
 ]
 
@@ -6607,6 +6616,11 @@ dependencies = [
 ]
 
 [[package]]
+name = "nockasm"
+version = "0.2.0"
+source = "git+https://github.com/bitemyapp/nockasm.git?rev=9473f4ba3f30bbc06865a05fc098c8a45957bec7#9473f4ba3f30bbc06865a05fc098c8a45957bec7"
+
+[[package]]
 name = "nockchain"
 version = "0.1.15"
 dependencies = [
@@ -6665,7 +6679,6 @@ dependencies = [
  "tokio",
  "tonic 0.14.6",
  "tracy-client",
- "zkvm-jetpack",
 ]
 
 [[package]]
@@ -6681,7 +6694,6 @@ dependencies = [
  "tokio",
  "tracing",
  "tracy-client",
- "zkvm-jetpack",
 ]
 
 [[package]]
