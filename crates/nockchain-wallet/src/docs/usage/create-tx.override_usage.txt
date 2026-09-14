@@ -1,29 +1,42 @@
-nockchain-wallet create-tx [--names <NAMES>] --recipient <RECIPIENT>... [--fee <FEE>] [--refund-pkh <REFUND_PKH>] [--include-data <BOOL>]
+nockchain-wallet create-tx [--names <NAMES>] --to <P2PKH_B58> (--amount <NOCKS> | --amount-nicks <NICKS>) [OPTIONS]
+nockchain-wallet create-tx [--names <NAMES>] --bridge-deposit <NOCKS> --to-evm-address <EVM_ADDR> [OPTIONS]
+nockchain-wallet create-tx [--names <NAMES>] --recipient <ADVANCED_RECIPIENT>... [OPTIONS]
 
-# NOTE: --refund-pkh is required when spending from legacy v0 notes. For v1 notes, the refund defaults to the note owner. --include-data defaults to true (pass 'false' to exclude note data).
-# NOTE: if --names is omitted, the planner auto-selects spendable v1 notes. If provided, names are treated as a manual selection set.
-# NOTE: manual selection may spend either an all-v1 set or an all-v0 set; mixed-version manual sets are rejected.
-# NOTE: --fee is optional. If omitted, the planner computes a fee. If provided, it overrides the planner fee (subject to --allow-low-fee).
+Common examples:
+  # Pay one address in whole nocks; spendable v1 notes and the fee are selected automatically.
+  nockchain-wallet create-tx --to <p2pkh-b58> --amount 100
 
-Examples:
-  # Auto-select spendable v1 notes and compute fee
+  # Pay multiple addresses and override the fee in whole nocks.
   nockchain-wallet create-tx \
-    --recipient '{"kind":"p2pkh","address":"<p2pkh-b58>","amount":10000}'
+    --to <p2pkh-a> --amount 100 \
+    --to <p2pkh-b> --amount 5 \
+    --fee 1
 
-  # Manually pin notes and optionally override fee
+  # Manually select notes while using the same simple payment flags.
   nockchain-wallet create-tx \
     --names "[first1 last1],[first2 last2]" \
-    --recipient '{"kind":"p2pkh","address":"<p2pkh-b58>","amount":10000}' \
-    --fee 10
+    --to <p2pkh-b58> --amount 100
 
-  # --recipient: legacy '<p2pkh>:<amount>' string
+  # Deposit the 100,000-nock minimum onto Base.
   nockchain-wallet create-tx \
-    --recipient '<p2pkh-b58>:10000'
+    --bridge-deposit 100000 \
+    --to-evm-address 0xabcdef0123456789abcdef0123456789abcdef01
+
+  # Reuse a downloaded notes CSV instead of re-syncing.
+  nockchain-wallet create-tx \
+    --notes-csv notes-<p2pkh-b58>.csv \
+    --to <p2pkh-b58> --amount 100
 
   # --recipient: optional `memo` (UTF-8, max ~2048 bytes)
   nockchain-wallet create-tx \
     --recipient '{"kind":"p2pkh","address":"<p2pkh-b58>","amount":10000,"memo":"hello"}'
 
-  # --recipient: optional `blob` (UTF-8; wallet jams a binary data under note-data key `blob`)
+  # --recipient: optional `blob` (UTF-8; wallet jams binary data under note-data key `blob`)
   nockchain-wallet create-tx \
     --recipient '{"kind":"p2pkh","address":"<p2pkh-b58>","amount":10000,"blob":"nns/v1/claim/example"}'
+
+Amounts and --fee use whole nocks. Use --amount-nicks or --fee-nicks for raw nicks; each pair is mutually exclusive.
+Repeat --to/--amount pairs to create multiple p2pkh outputs.
+Advanced --recipient forms remain available for multisig outputs, explicit raw-nick specifications, memo/blob note-data, and compatibility.
+When --names is omitted, the planner selects spendable v1 notes. Manual selection can spend an all-v1 or all-v0 set, but not a mixed set; legacy v0 spends require --refund-pkh.
+--include-data defaults to true. --notes-csv requires a prior wallet sync and removes spent notes from the CSV after transaction creation.
